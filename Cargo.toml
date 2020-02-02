@@ -1,0 +1,10 @@
+[package]
+name = "vanadinite"
+version = "0.1.0"
+authors = ["Wesley Norris <repnop@outlook.com>"]
+edition = "2018"
+build = "build.rs"
+
+[dependencies]
+lazy_static = { version = "1", features = ["spin_no_std"] }
+spin = "0.5"
