@@ -8,29 +8,25 @@ mod asm;
 mod locked;
 mod trap;
 
+use log::{debug, info};
+
 #[no_mangle]
 pub extern "C" fn kernel_entry() -> ! {
-    println!("Hello, world!");
-    println!(
+    virt::init_uart_logger();
+
+    info!("log test!");
+    debug!(
         "mhartid: {}, mvendorid: {}",
         asm::mhartid(),
         asm::mvendorid()
     );
-    print!("Extensions available: ");
+
     let misa = asm::misa();
     let extensions = misa.extensions();
 
-    for i in 0..26 {
-        if (extensions >> i) & 1 == 1 {
-            print!("{}", asm::EXTENSIONS[i]);
-        }
-    }
-
-    println!();
+    info!("Extensions available: {}", extensions);
 
     asm::ecall();
-
-    panic!()
 }
 
 #[panic_handler]

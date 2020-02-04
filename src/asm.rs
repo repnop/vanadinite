@@ -27,8 +27,23 @@ impl Misa {
         32 * ((self.0 & (0b11 << USIZE_LEN_MIN_2)) >> USIZE_LEN_MIN_2)
     }
 
-    pub const fn extensions(self) -> usize {
-        self.0 & 0x3FF_FFFF
+    pub const fn extensions(self) -> Extensions {
+        Extensions(self.0 & 0x3FF_FFFF)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Extensions(usize);
+
+impl core::fmt::Display for Extensions {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        for (i, ext) in EXTENSIONS.iter().enumerate() {
+            if (self.0 >> i) & 1 == 1 {
+                write!(f, "{}", ext)?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -45,3 +60,9 @@ pub fn misa() -> Misa {
 pub fn ecall() -> ! {
     unsafe { inner::ecall() }
 }
+
+// #[derive(Debug, Clone, Copy)]
+// #[repr(C)]
+// pub enum MCause {}
+//
+// pub fn mcause() -> MCause {}

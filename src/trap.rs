@@ -37,5 +37,6 @@ pub struct Registers {
 
 #[no_mangle]
 pub extern "C" fn trap_handler(regs: *const Registers) {
-    panic!("trap: {:#x?}", unsafe { *regs });
+    log::debug!("we trappin': {:x?}", unsafe { *regs });
+    // panic!("trap: {:#x?}", unsafe { *regs });
 }
