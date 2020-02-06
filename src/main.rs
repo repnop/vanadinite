@@ -6,6 +6,7 @@ mod virt;
 
 mod asm;
 mod locked;
+mod paging;
 mod trap;
 
 use log::{debug, info};
@@ -26,7 +27,7 @@ pub extern "C" fn kernel_entry() -> ! {
 
     info!("Extensions available: {}", extensions);
 
-    asm::ecall();
+    virt::exit(virt::Finisher::Pass, 0);
 }
 
 #[panic_handler]
