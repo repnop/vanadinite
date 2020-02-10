@@ -6,7 +6,7 @@ mod virt;
 
 mod asm;
 mod locked;
-mod paging;
+mod memory;
 mod trap;
 
 use log::{debug, info};
@@ -27,14 +27,51 @@ pub extern "C" fn kernel_entry() -> ! {
 
     info!("Extensions available: {}", extensions);
 
-    virt::exit(virt::Finisher::Pass, 0);
+    use memory::{
+        paging::{Permissions, Sv39PageTable, Sv39PageTableEntry},
+        PhysicalAddress, VirtualAddress,
+    };
+    let mut pt1 = Sv39PageTable::new();
+    let mut pt2 = Sv39PageTable::new();
+    let mut pt3 = Sv39PageTable::new();
+
+    pt1[0x03].validate_or_else(|| {
+        let mut pg = Sv39PageTableEntry::new();
+        pg.set_next_page_table(&pt2);
+
+        pg
+    });
+
+    pt2[0xF5].validate_or_else(|| {
+        let mut pg = Sv39PageTableEntry::new();
+        pg.set_next_page_table(&pt3);
+
+        pg
+    });
+
+    pt3[0xDB].validate_or_else(|| {
+        let mut pg = Sv39PageTableEntry::new();
+        pg.set_ppn(0xCAFEB000 as *const u8);
+        pg.set_permissions(Permissions::ReadWrite);
+
+        pg
+    });
+
+    debug!(
+        "{:#x?}",
+        VirtualAddress(0xDEADBEEF).to_physical_address(&pt1)
+    );
+
+    virt::exit(virt::ExitStatus::Pass);
 }
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     println!("{}", info);
-    #[allow(clippy::empty_loop)]
-    loop {}
+    virt::exit(virt::ExitStatus::Fail(1));
+
+    // #[allow(clippy::empty_loop)]
+    // loop {}
 }
 
 #[no_mangle]

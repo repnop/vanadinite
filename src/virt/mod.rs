@@ -9,8 +9,34 @@ pub fn init_uart_logger() {
     log::set_max_level(log::LevelFilter::Info);
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ExitStatus {
+    Pass,
+    Reset,
+    Fail(u16),
+}
+
+impl ExitStatus {
+    fn magic(self) -> u64 {
+        match self {
+            ExitStatus::Pass => Finisher::Pass as u64,
+            ExitStatus::Reset => Finisher::Reset as u64,
+            ExitStatus::Fail(_) => Finisher::Fail as u64,
+        }
+    }
+
+    fn to_u64(self) -> u64 {
+        let ret_code = match self {
+            ExitStatus::Pass | ExitStatus::Reset => 0,
+            ExitStatus::Fail(n) => n as u64,
+        };
+
+        self.magic() | (ret_code << 16)
+    }
+}
+
 #[repr(u64)]
-pub enum Finisher {
+enum Finisher {
     Fail = 0x3333,
     Pass = 0x5555,
     Reset = 0x7777,
@@ -43,14 +69,13 @@ pub enum Finisher {
 ///     2. Write this value to VIRT_TEST (0x100000) + 0x000000
 ///     3. Pray we've actually exited, otherwise panic
 ///
-pub fn exit(finisher: Finisher, error_code: u16) -> ! {
+pub fn exit(exit_status: ExitStatus) -> ! {
     const VIRT_TEST: *mut u64 = 0x10_0000 as *mut u64;
 
-    log::info!("Exiting QEMU with error code: {}", error_code);
-    let exit_value = finisher as u64 | ((error_code as u64) << 16);
+    log::info!("Exiting QEMU with exit status: {:?}", exit_status);
 
     unsafe {
-        core::ptr::write_volatile(VIRT_TEST, exit_value);
+        core::ptr::write_volatile(VIRT_TEST, exit_status.to_u64());
     }
 
     unreachable!()
