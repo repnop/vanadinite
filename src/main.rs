@@ -62,6 +62,16 @@ pub extern "C" fn kernel_entry() -> ! {
         VirtualAddress(0xDEADBEEF).to_physical_address(&pt1)
     );
 
+    loop {
+        let mut locked = virt::uart::UART0.lock();
+        let c = locked.read();
+        drop(locked);
+        println!("{}", c as char);
+        if c == 4 {
+            break;
+        }
+    }
+
     virt::exit(virt::ExitStatus::Pass);
 }
 

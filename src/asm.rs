@@ -52,6 +52,11 @@ pub const EXTENSIONS: [char; 26] = [
     'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
 ];
 
+/// Returns the value of the MISA register which contains the following valid values:
+///
+/// 1: 32-bit
+/// 2: 64-bit
+/// 3: 128-bit
 #[inline(always)]
 pub fn misa() -> Misa {
     Misa(unsafe { inner::misa() })

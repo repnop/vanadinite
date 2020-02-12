@@ -11,6 +11,7 @@ SECTIONS
   .text :
   {
     . = ALIGN(4);
+    PROVIDE(__stext = .);
     KEEP (*(.text))
     *(.text)           /* .text sections (code) */
     *(.text*)          /* .text* sections (code) */
@@ -44,9 +45,9 @@ SECTIONS
 
   
   /* Uninitialized data section */
-  . = ALIGN(4);
   .bss :
   {
+    . = ALIGN(4);
     /* This is used by the startup in order to initialize the .bss secion */
     _sbss = .;         /* define a global symbol at bss start */
     PROVIDE(__bss_start__ = _sbss);

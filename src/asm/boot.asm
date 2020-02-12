@@ -4,11 +4,21 @@
         la sp, __stack
         la t0, trap_handler_inner
         csrw mtvec, t0
+        jal clear_bss
         jal kernel_entry
 
     hcf:
         wfi
         j hcf
+
+    clear_bss:
+        la t0, __bss_start__
+        la t1, __bss_end__
+        zero_bss:
+            sw zero, 0(t0)
+            addi t0, t0, 4
+            blt t0, t1, zero_bss # if t0 < t1 then loop
+        ret
 
     .align 8
     trap_handler_inner:
