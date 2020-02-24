@@ -4,9 +4,54 @@
 //! format (v0.3 specification) which allows detection of the various parts of
 //! the system (RAM zones, MMIO, VirtIO, etc).
 //!
+//! More info on the usage of devicetrees: https://elinux.org/Device_Tree_Usage
 
 use crate::util::{CStr, PtrUtils};
 use tinyvec::ArrayVec;
+
+pub struct Node<'a> {
+    fdt: &'a Fdt,
+    index: usize,
+}
+
+impl Node<'_> {
+    pub fn properties(&self) -> &[FdtProperty] {
+        &self.fdt.nodes[self.index].properties
+    }
+
+    pub fn name(&self) -> &str {
+        self.fdt.nodes[self.index]
+            .name
+            .as_str()
+            .unwrap()
+            .split('@')
+            .next()
+            .unwrap()
+    }
+
+    pub fn address(&self) -> Option<usize> {
+        Some(
+            usize::from_str_radix(
+                self.fdt.nodes[self.index]
+                    .name
+                    .as_str()
+                    .unwrap()
+                    .split('@')
+                    .nth(1)?,
+                16,
+            )
+            .ok()?,
+        )
+    }
+}
+
+impl core::ops::Index<&'_ str> for Node<'_> {
+    type Output = FdtProperty;
+
+    fn index(&self, idx: &str) -> &FdtProperty {
+        self.properties().iter().find(|p| p.name() == idx).unwrap()
+    }
+}
 
 #[derive(Debug)]
 pub struct Fdt {
@@ -50,6 +95,23 @@ impl Fdt {
             reserved_memory_blocks,
         }
     }
+
+    pub fn root(&self) -> Node<'_> {
+        Node {
+            fdt: self,
+            index: 0,
+        }
+    }
+
+    pub fn find(&self, name: &str) -> Option<Node<'_>> {
+        for (index, node) in self.nodes.iter().enumerate() {
+            if node.name.as_str().unwrap().split('@').next().unwrap() == name {
+                return Some(Node { fdt: self, index });
+            }
+        }
+
+        None
+    }
 }
 
 // This is implemented as a function for recursion which makes getting all of
@@ -77,14 +139,8 @@ unsafe fn get_nodes(
     *ptr = ptr.cast::<u8>().add(len + 1).align_up_to::<u32>().cast();
 
     while u32::from_be(ptr.read()) != END_NODE {
-        log::debug!(
-            "ptr = {:#p}, ptr.read() = {}",
-            ptr,
-            u32::from_be(ptr.read())
-        );
         match u32::from_be(ptr.read()) {
             BEGIN_NODE => {
-                log::debug!("begin node");
                 nodes.push(FdtNode::default());
                 let index = nodes.len() - 1;
                 get_nodes(string_base, nodes, index, ptr);
@@ -92,7 +148,6 @@ unsafe fn get_nodes(
             }
             PROP => {
                 ptr.read_and_increment();
-                log::debug!("prop");
                 let len = u32::from_be(ptr.read_and_increment()) as usize;
                 let nameoff = u32::from_be(ptr.read_and_increment());
 
@@ -133,6 +188,16 @@ pub struct FdtNode {
 pub struct FdtProperty {
     name: CStr,
     value: &'static [u8],
+}
+
+impl FdtProperty {
+    pub fn name(&self) -> &str {
+        self.name.as_str().unwrap()
+    }
+
+    pub fn value(&self) -> &[u8] {
+        &self.value
+    }
 }
 
 impl Default for FdtProperty {

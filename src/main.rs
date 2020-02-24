@@ -11,6 +11,7 @@ mod memory;
 mod trap;
 mod util;
 
+use core::convert::TryInto;
 use log::{debug, info};
 
 #[no_mangle]
@@ -75,7 +76,15 @@ pub extern "C" fn kernel_entry() -> ! {
     // }
 
     let fdt = unsafe { fdt::Fdt::from_ptr(0x1020 as *const u8) };
-    debug!("{:#?}", fdt);
+    let node = fdt.find("memory").unwrap();
+    let mem_info = &node["reg"];
+    let size = u64::from_be_bytes(mem_info.value()[8..].try_into().unwrap());
+    let at = u64::from_be_bytes(mem_info.value()[..8].try_into().unwrap());
+    debug!(
+        "we have {} MiB RAM starting @ {:#x}",
+        size / 1024 / 1024,
+        at
+    );
 
     //const MROM: *const u8 = 0x1020 as *const u8;
     //
