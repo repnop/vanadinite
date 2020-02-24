@@ -74,41 +74,32 @@ pub extern "C" fn kernel_entry() -> ! {
     //     }
     // }
 
-    let fdt = unsafe { fdt::Fdt::new(0x1020 as *const u8) };
-    debug!("FDT header: {:#x?}", fdt.header());
+    let fdt = unsafe { fdt::Fdt::from_ptr(0x1020 as *const u8) };
+    debug!("{:#?}", fdt);
 
-    for rmb in fdt.reserved_memory_blocks() {
-        debug!("{:#x?}", rmb);
-    }
-
-    unsafe {
-        fdt.print_strings();
-        fdt.print_structure_block();
-    }
-
-    const MROM: *const u8 = 0x1020 as *const u8;
-
-    for i in (0..(0x11000 - 0x100)).step_by(16) {
-        let mut chars = [' '; 16];
-
-        let mrom_iter: &[u8; 16] = unsafe { &*(MROM.add(i).cast()) };
-        for (i, byte) in mrom_iter.iter().copied().enumerate() {
-            print!("{:0>2x} ", byte);
-            if byte >= 0x20 && byte <= 0x7F {
-                chars[i] = byte as char;
-            }
-        }
-
-        print!("  |  ");
-
-        for c in chars.iter().copied() {
-            print!("{}", c);
-        }
-
-        println!();
-        let mut locked = virt::uart::UART0.lock();
-        let _ = locked.read();
-    }
+    //const MROM: *const u8 = 0x1020 as *const u8;
+    //
+    //for i in (0..(0x11000 - 0x100)).step_by(16) {
+    //    let mut chars = [' '; 16];
+    //
+    //    let mrom_iter: &[u8; 16] = unsafe { &*(MROM.add(i).cast()) };
+    //    for (i, byte) in mrom_iter.iter().copied().enumerate() {
+    //        print!("{:0>2x} ", byte);
+    //        if byte >= 0x20 && byte <= 0x7F {
+    //            chars[i] = byte as char;
+    //        }
+    //    }
+    //
+    //    print!("  |  ");
+    //
+    //    for c in chars.iter().copied() {
+    //        print!("{}", c);
+    //    }
+    //
+    //    println!();
+    //    let mut locked = virt::uart::UART0.lock();
+    //    let _ = locked.read();
+    //}
 
     virt::exit(virt::ExitStatus::Pass);
 }

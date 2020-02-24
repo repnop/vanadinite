@@ -1,4 +1,3 @@
-#[derive(Debug)]
 pub struct CStr(*const u8);
 
 impl CStr {
@@ -39,6 +38,42 @@ impl CStr {
     pub fn as_slice(&self) -> &[u8] {
         unsafe { core::slice::from_raw_parts(self.0, self.len()) }
     }
+
+    pub fn as_str(&self) -> Option<&str> {
+        core::str::from_utf8(self.as_slice()).ok()
+    }
+}
+
+impl core::fmt::Debug for CStr {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "CStr({:#p}) (\"", self.0)?;
+
+        for byte in self.bytes() {
+            write!(f, "{}", byte as char)?;
+        }
+
+        write!(f, "\")")
+    }
+}
+
+impl Default for CStr {
+    fn default() -> Self {
+        static EMPTY_STR: u8 = 0;
+
+        unsafe { Self::new(&EMPTY_STR as *const _) }
+    }
+}
+
+impl core::cmp::PartialEq<[u8]> for CStr {
+    fn eq(&self, other: &[u8]) -> bool {
+        self.bytes().zip(other.iter().copied()).all(|(a, b)| a == b)
+    }
+}
+
+impl core::cmp::PartialEq<&'_ [u8]> for CStr {
+    fn eq(&self, other: &&[u8]) -> bool {
+        self.bytes().zip(other.iter().copied()).all(|(a, b)| a == b)
+    }
 }
 
 impl core::fmt::Display for CStr {
@@ -56,15 +91,20 @@ impl core::fmt::Display for CStr {
 }
 
 pub trait PtrUtils {
+    type Output;
+
     fn assert_aligned(self, align: usize);
     fn assert_aligned_to<U>(self);
     fn assert_aligned_to_self(self);
     unsafe fn align_up(self, align: usize) -> Self;
     unsafe fn align_up_to<U>(self) -> Self;
     unsafe fn align_up_to_self(self) -> Self;
+    unsafe fn read_and_increment(&mut self) -> Self::Output;
 }
 
 impl<T> PtrUtils for *const T {
+    type Output = T;
+
     fn assert_aligned(self, align: usize) {
         assert!(align.is_power_of_two());
         assert_eq!(self as usize % align, 0, "assert: unaligned ptr");
@@ -91,10 +131,19 @@ impl<T> PtrUtils for *const T {
 
     unsafe fn align_up_to_self(self) -> Self {
         self.align_up(core::mem::align_of::<T>())
+    }
+
+    unsafe fn read_and_increment(&mut self) -> Self::Output {
+        let t = self.read();
+        *self = self.add(1);
+
+        t
     }
 }
 
 impl<T> PtrUtils for *mut T {
+    type Output = T;
+
     fn assert_aligned(self, align: usize) {
         assert!(align.is_power_of_two());
         assert_eq!(self as usize % align, 0, "assert: unaligned ptr");
@@ -121,6 +170,13 @@ impl<T> PtrUtils for *mut T {
 
     unsafe fn align_up_to_self(self) -> Self {
         self.align_up(core::mem::align_of::<T>())
+    }
+
+    unsafe fn read_and_increment(&mut self) -> Self::Output {
+        let t = self.read();
+        *self = self.add(1);
+
+        t
     }
 }
 
@@ -139,7 +195,7 @@ impl core::fmt::Display for DebugBytesAt {
         let as_array: &[u8; 16] = unsafe { &*(self.0.cast()) };
 
         for (i, byte) in as_array.iter().copied().enumerate() {
-            if byte >= 32 || byte <= 127 {
+            if byte >= 32 && byte <= 127 {
                 chars[i] = byte as char;
             }
 
@@ -149,7 +205,7 @@ impl core::fmt::Display for DebugBytesAt {
         write!(f, "  |  ")?;
 
         for c in chars.iter() {
-            write!(f, "{}", c);
+            write!(f, "{}", c)?;
         }
 
         Ok(())

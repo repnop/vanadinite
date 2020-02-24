@@ -5,253 +5,145 @@
 //! the system (RAM zones, MMIO, VirtIO, etc).
 //!
 
-use crate::util::{self, CStr, PtrUtils};
+use crate::util::{CStr, PtrUtils};
+use tinyvec::ArrayVec;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Fdt {
-    base: *const u8,
-    offset: usize,
+    header: FdtHeader,
+    nodes: ArrayVec<[FdtNode; 32]>,
+    reserved_memory_blocks: ArrayVec<[FdtReserveEntry; 32]>,
 }
 
 impl Fdt {
-    pub unsafe fn new(base: *const u8) -> Self {
-        base.assert_aligned_to::<u32>();
-        Self { base, offset: 0 }
-    }
+    pub unsafe fn from_ptr(base: *const u8) -> Self {
+        let header = FdtHeader::from_ptr(base);
+        let mut nodes = ArrayVec::new();
+        let mut reserved_memory_blocks = ArrayVec::new();
 
-    pub fn header(&self) -> FdtHeader {
-        unsafe { FdtHeader::from_ptr(self.base) }
-    }
-
-    pub fn reserved_memory_blocks(&self) -> impl Iterator<Item = FdtReserveEntry> {
-        let header = self.header();
-        let mut ptr = unsafe { self.base.add(header.off_mem_rsvmap as usize) };
-        let mut done = false;
-        core::iter::from_fn(move || {
-            if !done {
-                ptr.assert_aligned_to::<u64>();
-                let address = unsafe { u64::from_be(ptr.cast::<u64>().read_volatile()) };
-                ptr = unsafe { ptr.add(core::mem::size_of::<u64>()) };
-
-                let size = unsafe { u64::from_be(ptr.cast::<u64>().read_volatile()) };
-                ptr = unsafe { ptr.add(core::mem::size_of::<u64>()) };
-
-                if address == 0 && size == 0 {
-                    done = true;
-                    return None;
-                }
-
-                return Some(FdtReserveEntry { address, size });
-            }
-
-            None
-        })
-    }
-
-    // pub fn structure_nodes(&self) -> impl Iterator<Item = FdtStructureNode> {
-    //     let header = self.header();
-    //     let mut struct_ptr = unsafe { self.base.add(header.off_dt_struct as usize).cast::<u32>() };
-    //     let end_ptr = unsafe {
-    //         struct_ptr
-    //             .cast::<u8>()
-    //             .add(header.size_dt_struct as usize)
-    //             .cast()
-    //     };
-    //     let mut done = false;
-    //
-    //     struct_ptr.assert_aligned_to_self();
-    //
-    //     core::iter::from_fn(move || loop {
-    //         if done {
-    //             return None;
-    //         }
-    //
-    //         let token = unsafe { advance_token(&mut struct_ptr) };
-    //         let token = token.expect("not an FDT token");
-    //         log::debug!("{:?}", token);
-    //         match token {
-    //             FdtToken::BeginNode => {
-    //                 let name = unsafe { CStr::new(struct_ptr.cast()) };
-    //                 log::debug!("{}", name);
-    //                 let first_prop =
-    //                     unsafe { struct_ptr.add((name.len() + 1) / 4).align_up_to_self() };
-    //                 struct_ptr = first_prop;
-    //                 log::debug!("yes");
-    //                 unsafe {
-    //                     advance_to_end_of_node(&mut struct_ptr, end_ptr);
-    //                 }
-    //
-    //                 return Some(FdtStructureNode { name, first_prop });
-    //             }
-    //             FdtToken::End => {
-    //                 done = true;
-    //                 return None;
-    //             }
-    //             FdtToken::Nop => continue,
-    //             _ => unreachable!("Got FDT token: {:?}", token),
-    //         }
-    //     })
-    // }
-
-    pub unsafe fn print_structure_block(&self) {
-        let header = self.header();
-        let mut struct_ptr = self.base.add(header.off_dt_struct as usize).cast::<u32>();
-
-        for i in 0..8 {
-            log::debug!("{}", util::DebugBytesAt::new(struct_ptr.add(16 * i).cast()));
-        }
-
-        log::debug!("------");
+        // Get reserved memory blocks
+        let mut rmb_ptr = base.add(header.off_mem_rsvmap as usize).cast::<u64>();
+        rmb_ptr.assert_aligned_to_self();
 
         loop {
-            log::debug!("{}", util::DebugBytesAt::new(struct_ptr.cast()));
-            let token = advance_token(&mut struct_ptr).expect("token");
+            let address = u64::from_be(rmb_ptr.read_and_increment());
+            let size = u64::from_be(rmb_ptr.read_and_increment());
 
-            match token {
-                FdtToken::BeginNode => {
-                    let name = CStr::new(struct_ptr.cast());
-                    log::debug!("BeginNode: {}", name);
-
-                    let mut after_name = struct_ptr.cast::<u8>().add(name.len() + 1);
-
-                    while after_name as usize % 4 != 0 {
-                        after_name = after_name.add(1);
-                    }
-
-                    struct_ptr = after_name.cast();
-                    struct_ptr.assert_aligned_to_self();
-                }
-                FdtToken::Prop => {
-                    let prop = FdtNodeProp::from_ptr(struct_ptr);
-                    struct_ptr = struct_ptr.add(2);
-
-                    let name = CStr::new(
-                        self.base
-                            .add(header.off_dt_strings as usize)
-                            .add(prop.nameoff as usize),
-                    );
-                    log::debug!("Prop:");
-                    log::debug!("    Name: {}", name);
-                    log::debug!(
-                        "    Value: {:?}",
-                        core::str::from_utf8(core::slice::from_raw_parts(
-                            struct_ptr.cast::<u8>(),
-                            prop.len as usize
-                        ))
-                        .unwrap()
-                    );
-                }
-                FdtToken::EndNode => {
-                    log::debug!("EndNode");
-                }
-                FdtToken::End => {
-                    log::debug!("End");
-                }
-                _ => todo!("{:?}", token),
+            match (address, size) {
+                (0, 0) => break,
+                (address, size) => reserved_memory_blocks.push(FdtReserveEntry { address, size }),
             }
         }
-    }
 
-    pub unsafe fn print_strings(&self) {
-        let header = self.header();
-        let end = self
-            .base
-            .add(header.off_dt_strings as usize)
-            .add(header.size_dt_strings as usize);
-        let mut strings_ptr = self.base.add(header.off_dt_strings as usize);
+        // Get nodes
+        nodes.push(FdtNode::default());
+        get_nodes(
+            base.add(header.off_dt_strings as usize),
+            &mut nodes,
+            0,
+            &mut base.add(header.off_dt_struct as usize).cast(),
+        );
 
-        while (strings_ptr as usize) < end as usize {
-            let s = CStr::new(strings_ptr);
-            log::debug!("String: {}", s);
-            strings_ptr = strings_ptr.add(s.len() + 1);
+        Self {
+            header,
+            nodes,
+            reserved_memory_blocks,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-enum FdtToken {
-    BeginNode = 1,
-    EndNode = 2,
-    Prop = 3,
-    Nop = 4,
-    End = 9,
-}
+// This is implemented as a function for recursion which makes getting all of
+// the nodes added a breeze
+unsafe fn get_nodes(
+    string_base: *const u8,
+    nodes: &mut ArrayVec<[FdtNode; 32]>,
+    current_node: usize,
+    ptr: &mut *const u32,
+) {
+    const BEGIN_NODE: u32 = 1;
+    const END_NODE: u32 = 2;
+    const PROP: u32 = 3;
+    const NOP: u32 = 4;
+    const END: u32 = 9;
 
-unsafe fn advance_token(ptr: &mut *const u32) -> Option<FdtToken> {
-    ptr.assert_aligned_to::<u32>();
-    let n = u32::from_be(ptr.read());
-    *ptr = ptr.add(1);
+    ptr.assert_aligned_to_self();
 
-    match n {
-        1 => Some(FdtToken::BeginNode),
-        2 => Some(FdtToken::EndNode),
-        3 => Some(FdtToken::Prop),
-        4 => Some(FdtToken::Nop),
-        9 => Some(FdtToken::End),
-        _ => {
-            log::debug!("Non-FDT token value: {:#x}", n);
-            None
-        }
-    }
-}
+    // TODO: check for nops and stuff
+    assert_eq!(u32::from_be(ptr.read_and_increment()), BEGIN_NODE);
 
-unsafe fn advance_to_end_of_node(ptr: &mut *const u32, struct_end_ptr: *const u32) {
-    ptr.assert_aligned_to::<u32>();
+    let name = CStr::new(ptr.cast());
+    let len = name.len();
+    nodes[current_node].name = name;
+    *ptr = ptr.cast::<u8>().add(len + 1).align_up_to::<u32>().cast();
 
-    loop {
-        assert!(*ptr < struct_end_ptr);
-        let token = advance_token(ptr).expect("bad token");
-
-        match token {
-            FdtToken::EndNode => break,
-            FdtToken::Prop => {
-                let prop = FdtNodeProp::from_ptr(*ptr);
-                *ptr = ptr
-                    .add(2)
-                    .cast::<u8>()
-                    .add(prop.len as usize)
-                    .cast::<u32>()
-                    .align_up_to_self();
+    while u32::from_be(ptr.read()) != END_NODE {
+        log::debug!(
+            "ptr = {:#p}, ptr.read() = {}",
+            ptr,
+            u32::from_be(ptr.read())
+        );
+        match u32::from_be(ptr.read()) {
+            BEGIN_NODE => {
+                log::debug!("begin node");
+                nodes.push(FdtNode::default());
+                let index = nodes.len() - 1;
+                get_nodes(string_base, nodes, index, ptr);
+                nodes[current_node].child_nodes.push(index);
             }
-            FdtToken::Nop => continue,
-            _ => unreachable!(),
+            PROP => {
+                ptr.read_and_increment();
+                log::debug!("prop");
+                let len = u32::from_be(ptr.read_and_increment()) as usize;
+                let nameoff = u32::from_be(ptr.read_and_increment());
+
+                nodes[current_node].properties.push(FdtProperty {
+                    name: CStr::new(string_base.add(nameoff as usize)),
+                    value: core::slice::from_raw_parts(ptr.cast(), len),
+                });
+
+                *ptr = ptr.cast::<u8>().add(len).align_up_to::<u32>().cast();
+            }
+            NOP => {
+                ptr.read_and_increment();
+                continue;
+            }
+            n => todo!("error handling: {}", n),
         }
     }
+
+    // TODO: check for nops and stuff
+    assert_eq!(u32::from_be(ptr.read_and_increment()), END_NODE);
 }
 
-pub struct FdtStructureNode {
-    name: CStr,
-    first_prop: *const u32,
-}
-
-impl FdtStructureNode {
-    pub fn name(&self) -> &CStr {
-        &self.name
-    }
-    //pub fn properties(&self) -> impl Iterator<Item = FdtStructureNodeProperty> {}
-}
-
-struct FdtNodeProp {
-    len: u32,
-    nameoff: u32,
-}
-
-impl FdtNodeProp {
-    unsafe fn from_ptr(mut ptr: *const u32) -> Self {
-        let len = u32::from_be(ptr.read());
-        ptr = ptr.add(1);
-        let nameoff = u32::from_be(ptr.read());
-
-        Self { len, nameoff }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
 pub struct FdtReserveEntry {
     pub address: u64,
     pub size: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct FdtNode {
+    name: CStr,
+    properties: ArrayVec<[FdtProperty; 32]>,
+    child_nodes: ArrayVec<[usize; 32]>,
+}
+
+#[derive(Debug)]
+pub struct FdtProperty {
+    name: CStr,
+    value: &'static [u8],
+}
+
+impl Default for FdtProperty {
+    fn default() -> Self {
+        static EMPTY_VALUE: &[u8] = &[];
+
+        Self {
+            name: Default::default(),
+            value: EMPTY_VALUE,
+        }
+    }
 }
 
 /// FDT header structure, describes the following devicetree
