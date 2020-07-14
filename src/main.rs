@@ -1,3 +1,4 @@
+#![feature(asm, naked_functions)]
 #![no_std]
 #![no_main]
 
@@ -5,6 +6,7 @@
 mod virt;
 
 mod asm;
+mod boot;
 mod fdt;
 mod locked;
 mod memory;
@@ -12,16 +14,18 @@ mod trap;
 mod util;
 
 use core::convert::TryInto;
-use log::{debug, info};
+use log::info;
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[no_mangle]
-pub extern "C" fn kernel_entry() -> ! {
+pub extern "C" fn kernel_entry(hart_id: usize, fdt: *const u8) -> ! {
     virt::init_uart_logger();
 
     info!("log test!");
-    debug!(
-        "mhartid: {}, mvendorid: {}",
+    info!(
+        "mhartid: {} (we got {} from QEMU), mvendorid: {}",
         asm::mhartid(),
+        hart_id,
         asm::mvendorid()
     );
 
@@ -60,7 +64,7 @@ pub extern "C" fn kernel_entry() -> ! {
         pg
     });
 
-    debug!(
+    info!(
         "{:#x?}",
         VirtualAddress(0xDEADBEEF).to_physical_address(&pt1)
     );
@@ -75,12 +79,12 @@ pub extern "C" fn kernel_entry() -> ! {
     //     }
     // }
 
-    let fdt = unsafe { fdt::Fdt::from_ptr(0x1020 as *const u8) };
+    let fdt = unsafe { fdt::Fdt::from_ptr(fdt) };
     let node = fdt.find("memory").unwrap();
     let mem_info = &node["reg"];
     let size = u64::from_be_bytes(mem_info.value()[8..].try_into().unwrap());
     let at = u64::from_be_bytes(mem_info.value()[..8].try_into().unwrap());
-    debug!(
+    info!(
         "we have {} MiB RAM starting @ {:#x}",
         size / 1024 / 1024,
         at
@@ -115,7 +119,7 @@ pub extern "C" fn kernel_entry() -> ! {
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    println!("{}", info);
+    //println!("{}", info);
     virt::exit(virt::ExitStatus::Fail(1));
 
     // #[allow(clippy::empty_loop)]

@@ -63,6 +63,11 @@ pub struct Fdt {
 impl Fdt {
     pub unsafe fn from_ptr(base: *const u8) -> Self {
         let header = FdtHeader::from_ptr(base);
+        assert_eq!(
+            header.magic, 0xd00d_feed,
+            "invalid FDT magic, probably reading bad memory"
+        );
+
         let mut nodes = ArrayVec::new();
         let mut reserved_memory_blocks = ArrayVec::new();
 
@@ -105,7 +110,7 @@ impl Fdt {
 
     pub fn find(&self, name: &str) -> Option<Node<'_>> {
         for (index, node) in self.nodes.iter().enumerate() {
-            if node.name.as_str().unwrap().split('@').next().unwrap() == name {
+            if node.name.as_str()?.split('@').next()? == name {
                 return Some(Node { fdt: self, index });
             }
         }

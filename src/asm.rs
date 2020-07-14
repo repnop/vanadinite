@@ -1,20 +1,23 @@
-mod inner {
-    extern "C" {
-        pub fn mhartid() -> usize;
-        pub fn mvendorid() -> usize;
-        pub fn misa() -> usize;
-        pub fn ecall() -> !;
-    }
-}
-
 #[inline(always)]
 pub fn mhartid() -> usize {
-    unsafe { inner::mhartid() }
+    let hart_id;
+
+    unsafe {
+        asm!("csrr {}, mhartid", out(reg) hart_id);
+    }
+
+    hart_id
 }
 
 #[inline(always)]
 pub fn mvendorid() -> usize {
-    unsafe { inner::mvendorid() }
+    let vendor_id;
+
+    unsafe {
+        asm!("csrr {}, mhartid", out(reg) vendor_id);
+    }
+
+    vendor_id
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -59,11 +62,23 @@ pub const EXTENSIONS: [char; 26] = [
 /// 3: 128-bit
 #[inline(always)]
 pub fn misa() -> Misa {
-    Misa(unsafe { inner::misa() })
+    let misa;
+
+    unsafe {
+        asm!("csrr {}, misa", out(reg) misa);
+    }
+
+    Misa(misa)
 }
 
 pub fn ecall() -> ! {
-    unsafe { inner::ecall() }
+    unsafe {
+        asm!("li t0, 0xcafebabe");
+        asm!("li t1, 0xdeadbeef");
+        asm!("ecall");
+    }
+
+    loop {}
 }
 
 // #[derive(Debug, Clone, Copy)]
