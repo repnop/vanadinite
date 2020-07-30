@@ -1,4 +1,4 @@
-OUTPUT_ARCH(riscv)
+OUTPUT_ARCH(riscv64gc)
 
 MEMORY {
     RAM (rwx) : ORIGIN = 0x80000000, LENGTH = 128M
@@ -43,8 +43,11 @@ SECTIONS {
     . = ALIGN(4K);
 
     PROVIDE(__stack_top = . + 0x200000);
-    PROVIDE(__heap_start = . + 4K);
+    PROVIDE(__scratch_stack = __stack_top + 4K);
+    PROVIDE(__heap_start = __scratch_stack);
     PROVIDE(__heap_end = ORIGIN(RAM) + LENGTH(RAM));
 
     /DISCARD/ : { *(.eh_frame_hdr .eh_frame) }
 }
+
+ASSERT(__heap_start % 4096 == 0, "heap not on page boundary")

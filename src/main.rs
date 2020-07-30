@@ -1,6 +1,8 @@
-#![feature(asm, naked_functions)]
+#![feature(asm, naked_functions, global_asm, alloc_error_handler)]
 #![no_std]
 #![no_main]
+
+extern crate alloc;
 
 #[macro_use]
 mod virt;
@@ -13,6 +15,7 @@ mod memory;
 mod trap;
 mod util;
 
+use alloc::{boxed::Box, string::String};
 use core::convert::TryInto;
 use log::info;
 
@@ -22,6 +25,7 @@ pub extern "C" fn kernel_entry(hart_id: usize, fdt: *const u8) -> ! {
     virt::init_uart_logger();
 
     info!("log test!");
+    info!("{:#p}", trap::trap_handler as *const u8);
     info!(
         "mhartid: {} (we got {} from QEMU), mvendorid: {}",
         asm::mhartid(),
@@ -33,6 +37,16 @@ pub extern "C" fn kernel_entry(hart_id: usize, fdt: *const u8) -> ! {
     let extensions = misa.extensions();
 
     info!("Extensions available: {}", extensions);
+
+    info!(
+        "Heap start: {:p}, end: {:p}",
+        memory::heap::heap_start(),
+        memory::heap::heap_end(),
+    );
+
+    let heap_size = memory::heap::heap_end() as usize - memory::heap::heap_start() as usize;
+
+    info!("We have {} MiB of heap available", heap_size / 1024 / 1024);
 
     use memory::{
         paging::{Permissions, Sv39PageTable, Sv39PageTableEntry},
@@ -65,19 +79,9 @@ pub extern "C" fn kernel_entry(hart_id: usize, fdt: *const u8) -> ! {
     });
 
     info!(
-        "{:#x?}",
+        "{:x?}",
         VirtualAddress(0xDEADBEEF).to_physical_address(&pt1)
     );
-
-    // loop {
-    //     let mut locked = virt::uart::UART0.lock();
-    //     let c = locked.read();
-    //     drop(locked);
-    //     print!("{}", c as char);
-    //     if c == 4 {
-    //         break;
-    //     }
-    // }
 
     let fdt = unsafe { fdt::Fdt::from_ptr(fdt) };
     let node = fdt.find("memory").unwrap();
@@ -114,12 +118,50 @@ pub extern "C" fn kernel_entry(hart_id: usize, fdt: *const u8) -> ! {
     //    let _ = locked.read();
     //}
 
+    let boxed_value = Box::new(5);
+    info!("{:?}", boxed_value);
+    drop(boxed_value);
+
+    'outer: loop {
+        let mut buffer = String::with_capacity(10);
+        print!("~> ");
+
+        let mut lock = virt::uart::UART0.lock();
+        memory::heap::DO_TRACE.store(false, core::sync::atomic::Ordering::SeqCst);
+        loop {
+            match lock.read() {
+                b'\r' => break,
+                0x04 => {
+                    lock.write_str("exit\n\r");
+                    break 'outer;
+                }
+                c => {
+                    lock.write(c);
+                    buffer.push(c as char);
+                }
+            }
+        }
+        memory::heap::DO_TRACE.store(true, core::sync::atomic::Ordering::SeqCst);
+
+        lock.write_str("\n\r");
+        drop(lock);
+
+        match &*buffer {
+            "exit" => break,
+            "trap" => unsafe {
+                asm!("ecall");
+                asm!("nop");
+            },
+            _ => continue,
+        }
+    }
+
     virt::exit(virt::ExitStatus::Pass);
 }
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    //println!("{}", info);
+    log::error!("{}", info);
     virt::exit(virt::ExitStatus::Fail(1));
 
     // #[allow(clippy::empty_loop)]

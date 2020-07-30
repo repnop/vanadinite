@@ -213,41 +213,21 @@ impl Sv39PageTableEntry<Validated> {
         self.0 |= (ppn as usize) & (0xFFF_FFFF_FFFF << 10);
     }
 
-    pub fn to_table_ptr(self) -> *const Sv39PageTable {
+    pub fn as_table_ptr(self) -> *const Sv39PageTable {
         self.ppn() as *const Sv39PageTable
     }
 
-    pub fn to_table_mut_ptr(self) -> *mut Sv39PageTable {
+    pub fn as_table_mut_ptr(self) -> *mut Sv39PageTable {
         self.ppn() as *mut Sv39PageTable
     }
 
-    pub unsafe fn to_table_ref(&self) -> &Sv39PageTable {
-        self.clone().to_table_ptr().as_ref().unwrap()
+    pub unsafe fn as_table_ref(&self) -> &Sv39PageTable {
+        self.clone().as_table_ptr().as_ref().unwrap()
     }
 
-    pub unsafe fn to_table_mut(&mut self) -> &mut Sv39PageTable {
-        self.clone().to_table_mut_ptr().as_mut().unwrap()
+    pub unsafe fn as_table_mut(&mut self) -> &mut Sv39PageTable {
+        self.clone().as_table_mut_ptr().as_mut().unwrap()
     }
-
-    //pub fn read_only(self) -> bool {
-    //    self.readable() && !self.writable() && !self.executable()
-    //}
-    //
-    //pub fn read_write(self) -> bool {
-    //    self.readable() && self.writable() && !self.executable()
-    //}
-    //
-    //pub fn execute_only(self) -> bool {
-    //    !self.readable() && !self.writable() && self.executable()
-    //}
-    //
-    //pub fn read_execute(self) -> bool {
-    //    self.readable() && !self.writable() && self.executable()
-    //}
-    //
-    //pub fn read_write_execute(self) -> bool {
-    //    self.readable() && self.writable() && self.executable()
-    //}
 
     pub fn permissions(&self) -> Permissions {
         let perm = self.0 & 0b1110;

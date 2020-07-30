@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use crate::locked::Locked;
-use core::ptr::{read_volatile, write_volatile};
 
 const UART_DATA_REG_OFFSET: usize = 0;
 const UART_INT_ENABLE_REG_OFFSET: usize = 1;
@@ -29,24 +28,25 @@ impl Uart16550 {
         Self { base }
     }
 
+    #[rustfmt::skip]
     unsafe fn init(&mut self) {
         // Disable interrupts
-        write_volatile(self.base.add(UART_INT_ENABLE_REG_OFFSET), 0x00);
+        self.base.add(UART_INT_ENABLE_REG_OFFSET).write_volatile(0x00);
         // Enable DLAB
-        write_volatile(self.base.add(UART_LINE_CTRL_REG_OFFSET), 0x80);
+        self.base.add(UART_LINE_CTRL_REG_OFFSET).write_volatile(0x80);
         // Set baud ratew to 38400
-        write_volatile(self.base.add(UART_DATA_REG_OFFSET), 0x03);
-        write_volatile(self.base.add(UART_INT_ENABLE_REG_OFFSET), 0x00);
+        self.base.add(UART_DATA_REG_OFFSET).write_volatile(0x03);
+        self.base.add(UART_INT_ENABLE_REG_OFFSET).write_volatile(0x00);
         // 8 bits, no parity, one stop bit
-        write_volatile(self.base.add(UART_LINE_CTRL_REG_OFFSET), 0x03);
+        self.base.add(UART_LINE_CTRL_REG_OFFSET).write_volatile(0x03);
         // Enable FIFO, clear, with 14-byte threshold
-        write_volatile(self.base.add(UART_INT_ID_FIFO_CTRL_REG_OFFSET), 0xC7);
+        self.base.add(UART_INT_ID_FIFO_CTRL_REG_OFFSET).write_volatile(0xC7);
         // IRQ enable, RTS/DSR set
-        write_volatile(self.base.add(UART_MODEM_CTRL_REG_OFFSET), 0x0B);
+        self.base.add(UART_MODEM_CTRL_REG_OFFSET).write_volatile(0x0B);
     }
 
     pub fn line_status(&self) -> u8 {
-        unsafe { read_volatile(self.base.add(UART_LINE_STATUS_REG_OFFSET)) }
+        unsafe { self.base.add(UART_LINE_STATUS_REG_OFFSET).read_volatile() }
     }
 
     pub fn data_waiting(&self) -> bool {
@@ -59,7 +59,7 @@ impl Uart16550 {
     pub fn read(&mut self) -> u8 {
         while !self.data_waiting() {}
 
-        unsafe { read_volatile(self.base.add(UART_DATA_REG_OFFSET)) }
+        unsafe { self.base.add(UART_DATA_REG_OFFSET).read_volatile() }
     }
 
     pub fn data_empty(&self) -> bool {
@@ -71,10 +71,10 @@ impl Uart16550 {
     pub fn write(&mut self, data: u8) {
         while !self.data_empty() {}
 
-        unsafe { write_volatile(self.base.add(UART_DATA_REG_OFFSET), data) }
+        unsafe { self.base.add(UART_DATA_REG_OFFSET).write_volatile(data) }
     }
 
-    pub fn write_string(&mut self, s: &str) {
+    pub fn write_str(&mut self, s: &str) {
         for byte in s.bytes() {
             self.write(byte);
         }
@@ -83,7 +83,7 @@ impl Uart16550 {
 
 impl core::fmt::Write for Uart16550 {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        self.write_string(s);
+        self.write_str(s);
         Ok(())
     }
 }

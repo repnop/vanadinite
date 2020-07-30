@@ -1,3 +1,4 @@
+pub mod heap;
 pub mod paging;
 
 use paging::Sv39PageTable;
@@ -33,7 +34,7 @@ impl VirtualAddress {
                 // TODO: other physical address stuff (pg 71)
                 return Some(PhysicalAddress(pte.ppn() | self.offset()));
             } else if i != 0 {
-                table = unsafe { &*(pte.to_table_ptr()) };
+                table = unsafe { &*(pte.as_table_ptr()) };
             }
         }
 

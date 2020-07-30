@@ -71,14 +71,16 @@ pub fn misa() -> Misa {
     Misa(misa)
 }
 
-pub fn ecall() -> ! {
+#[inline(always)]
+pub fn ecall() {
     unsafe {
+        asm!("mv t2, zero");
+        //asm!("fcvt.d.l t3, t2");
+        asm!("fcvt.d.w f0, t2");
         asm!("li t0, 0xcafebabe");
         asm!("li t1, 0xdeadbeef");
         asm!("ecall");
     }
-
-    loop {}
 }
 
 // #[derive(Debug, Clone, Copy)]
