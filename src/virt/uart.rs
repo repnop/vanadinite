@@ -62,6 +62,14 @@ impl Uart16550 {
         unsafe { self.base.add(UART_DATA_REG_OFFSET).read_volatile() }
     }
 
+    pub fn try_read(&mut self) -> Option<u8> {
+        if !self.data_waiting() {
+            return None;
+        }
+
+        unsafe { Some(self.base.add(UART_DATA_REG_OFFSET).read_volatile()) }
+    }
+
     pub fn data_empty(&self) -> bool {
         let value = self.line_status() & (1 << 6);
 

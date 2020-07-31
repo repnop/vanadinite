@@ -6,7 +6,7 @@
 //!
 //! More info on the usage of devicetrees: https://elinux.org/Device_Tree_Usage
 
-use crate::util::{CStr, PtrUtils};
+use crate::utils::{cstr::CStr, ptr::PtrUtils};
 use tinyvec::ArrayVec;
 
 pub struct Node<'a> {

@@ -1,4 +1,4 @@
-use crate::{kernel_entry, util::LinkerSymbol};
+use crate::{kernel_entry, utils::ptr::LinkerSymbol};
 
 #[link_section = ".init.rust"]
 #[no_mangle]

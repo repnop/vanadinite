@@ -1,7 +1,7 @@
 use alloc::alloc::GlobalAlloc;
 
 mod heap_private {
-    use crate::util::LinkerSymbol;
+    use crate::utils::ptr::LinkerSymbol;
 
     extern "C" {
         pub static mut __heap_start: LinkerSymbol;

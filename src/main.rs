@@ -11,9 +11,9 @@ mod asm;
 mod boot;
 mod fdt;
 mod locked;
-mod memory;
+mod mem;
 mod trap;
-mod util;
+mod utils;
 
 use alloc::{boxed::Box, string::String};
 use core::convert::TryInto;
@@ -40,15 +40,15 @@ pub extern "C" fn kernel_entry(hart_id: usize, fdt: *const u8) -> ! {
 
     info!(
         "Heap start: {:p}, end: {:p}",
-        memory::heap::heap_start(),
-        memory::heap::heap_end(),
+        mem::heap::heap_start(),
+        mem::heap::heap_end(),
     );
 
-    let heap_size = memory::heap::heap_end() as usize - memory::heap::heap_start() as usize;
+    let heap_size = mem::heap::heap_end() as usize - mem::heap::heap_start() as usize;
 
     info!("We have {} MiB of heap available", heap_size / 1024 / 1024);
 
-    use memory::{
+    use mem::{
         paging::{Permissions, Sv39PageTable, Sv39PageTableEntry},
         PhysicalAddress, VirtualAddress,
     };
@@ -122,39 +122,9 @@ pub extern "C" fn kernel_entry(hart_id: usize, fdt: *const u8) -> ! {
     info!("{:?}", boxed_value);
     drop(boxed_value);
 
-    'outer: loop {
-        let mut buffer = String::with_capacity(10);
-        print!("~> ");
+    let mut repl = utils::repl::Repl::new();
 
-        let mut lock = virt::uart::UART0.lock();
-        memory::heap::DO_TRACE.store(false, core::sync::atomic::Ordering::SeqCst);
-        loop {
-            match lock.read() {
-                b'\r' => break,
-                0x04 => {
-                    lock.write_str("exit\n\r");
-                    break 'outer;
-                }
-                c => {
-                    lock.write(c);
-                    buffer.push(c as char);
-                }
-            }
-        }
-        memory::heap::DO_TRACE.store(true, core::sync::atomic::Ordering::SeqCst);
-
-        lock.write_str("\n\r");
-        drop(lock);
-
-        match &*buffer {
-            "exit" => break,
-            "trap" => unsafe {
-                asm!("ecall");
-                asm!("nop");
-            },
-            _ => continue,
-        }
-    }
+    repl.run();
 
     virt::exit(virt::ExitStatus::Pass);
 }

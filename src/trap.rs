@@ -203,7 +203,10 @@ global_asm!("
         csrw mepc, a0
 
         ld x1, 0(sp)
-        ld x2, 8(sp)
+        
+        # *facepalm*
+        # ld x2, 8(sp)
+        
         ld x3, 16(sp)
         ld x4, 24(sp)
         ld x5, 32(sp)
