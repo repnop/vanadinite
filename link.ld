@@ -8,7 +8,7 @@ ENTRY(_boot);
 
 SECTIONS {
     . = 0x2080000000;
-    .text ALIGN(4K) : AT(ADDR(.text) - 0x2080000000) {
+    .text ALIGN(4K) : AT(ADDR(.text) - 0x2000000000) {
         PROVIDE(__kernel_start = .);
         PROVIDE(__start_text = .);
         *(.init.boot .init.rust .init)
@@ -16,23 +16,23 @@ SECTIONS {
         PROVIDE(__end_text = .);
     }
 
-    .data ALIGN(4K) : AT(ADDR(.data) - 0x2080000000) {
+    .data ALIGN(4K) : AT(ADDR(.data) - 0x2000000000) {
         *(.data .data.* .rodata .rodata.*)
     }
 
     . = ALIGN(8);
 
-    .sdata : AT(ADDR(.sdata) - 0x2080000000) {
+    .sdata : AT(ADDR(.sdata) - 0x2000000000) {
         PROVIDE(__global_pointer = .);
         *(.sdata .sdata.*)        
     }
 
     PROVIDE(__bss_start = .);
-    .sbss : AT(ADDR(.sbss) - 0x2080000000) {
+    .sbss : AT(ADDR(.sbss) - 0x2000000000) {
         *(.sbss .sbss.*);
     }
 
-    .bss : AT(ADDR(.bss) - 0x2080000000) {
+    .bss : AT(ADDR(.bss) - 0x2000000000) {
         *(.bss .bss.*)
     }
 
