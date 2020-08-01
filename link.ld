@@ -7,45 +7,38 @@ MEMORY {
 ENTRY(_boot);
 
 SECTIONS {
-    . = 0x80000000;
-    PROVIDE(__kernel_start = 0x80000000);
-    PROVIDE(__kernel_size = __kernel_end - __kernel_start);
-    
-    . = 0xFFFFF80000000000;
-    .text : AT(ADDR(.text) - 0xFFFFF80000000000 + 0x80000000) {
+    . = 0x2080000000;
+    .text ALIGN(4K) : AT(ADDR(.text) - 0x2080000000) {
+        PROVIDE(__kernel_start = .);
         PROVIDE(__start_text = .);
-        *(.init.rust .init)
+        *(.init.boot .init.rust .init)
         *(.text .text.*)
         PROVIDE(__end_text = .);
-    } >RAM
+    }
 
-    .rodata : AT(ADDR(.rodata) - 0xFFFFF80000000000 + 0x80000000) {
-        *(.rodata .rodata.*)
-    } >RAM
-
-    .data : AT(ADDR(.data) - 0xFFFFF80000000000 + 0x80000000) {
-        *(.data .data.*)
-    } >RAM
+    .data ALIGN(4K) : AT(ADDR(.data) - 0x2080000000) {
+        *(.data .data.* .rodata .rodata.*)
+    }
 
     . = ALIGN(8);
 
-    .sdata : AT(ADDR(.sdata) - 0xFFFFF80000000000 + 0x80000000) {
+    .sdata : AT(ADDR(.sdata) - 0x2080000000) {
         PROVIDE(__global_pointer = .);
         *(.sdata .sdata.*)        
-    } >RAM
+    }
 
     PROVIDE(__bss_start = .);
-    .sbss : AT(ADDR(.sbss) - 0xFFFFF80000000000 + 0x80000000) {
+    .sbss : AT(ADDR(.sbss) - 0x2080000000) {
         *(.sbss .sbss.*);
-    } >RAM
+    }
 
-    .bss : AT(ADDR(.bss) - 0xFFFFF80000000000 + 0x80000000) {
+    .bss : AT(ADDR(.bss) - 0x2080000000) {
         *(.bss .bss.*)
-    } >RAM
+    }
 
     PROVIDE(__bss_end = .);
 
-    PROVIDE(__kernel_end = . - 0xFFFFF80000000000);
+    PROVIDE(__kernel_end = .);
 
     . = ALIGN(4K);
 
