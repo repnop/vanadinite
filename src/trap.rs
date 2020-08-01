@@ -145,6 +145,7 @@ pub extern "C" fn trap_handler(
 
 #[rustfmt::skip]
 global_asm!("
+    .section .text
     .global mtvec_trap_shim
     .align 4
     mtvec_trap_shim:
