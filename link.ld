@@ -13,11 +13,11 @@ SECTIONS {
     . = 0x0080000000;
 
     . += __kernel_base;
-    .text : AT(ADDR(.text) - __kernel_base) {
+    .text ALIGN(2M) : AT(ADDR(.text) - __kernel_base) {
         PROVIDE(__kernel_start = .);
         PROVIDE(__start_text = .);
         *(.init.boot)
-        PROVIDE(___start = .);
+        . = ALIGN(0x10);
         *(.init.rust .init)
         *(.text .text.*)
         PROVIDE(__end_text = .);
@@ -48,7 +48,7 @@ SECTIONS {
     PROVIDE(__kernel_end = .);
 
     . = ALIGN(2M);
-
+    PROVIDE(__stack_bottom = .);
     PROVIDE(__stack_top = . + 2M);
     PROVIDE(__scratch_stack = __stack_top + 2M);
     PROVIDE(__heap_start = __scratch_stack);
