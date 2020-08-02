@@ -1,6 +1,7 @@
 [alias]
-run-with-dbg = "run -- -gdb tcp::1234 -S"
-run-with-dbg-release = "run --release -- -gdb tcp::1234 -S"
+run-with-dbg = "run -- -gdb tcp::1234 -S -nographic -serial mon:stdio"
+run-with-dbg-release = "run --release -- -gdb tcp::1234 -S -nographic -serial mon:stdio"
+run-with-monitor-release = "run --release -- -gdb tcp::1234 -S -monitor stdio"
 
 [build]
 target = "riscv64gc-unknown-none-elf"
@@ -11,4 +12,4 @@ rustflags = [
     "-C", "link-arg=--Map=link_map.txt",
     "-C", "code-model=medium",
 ]
-runner = "qemu-system-riscv64 -machine virt -cpu rv64 -smp 1 -m 128M -nographic -serial mon:stdio -bios none -kernel "
+runner = "qemu-system-riscv64 -machine virt -cpu rv64 -smp 1 -m 128M -bios none -kernel "
