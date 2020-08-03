@@ -1,10 +1,4 @@
-use crate::{kernel_entry, utils::ptr::LinkerSymbol};
-
-#[link_section = ".init.boot"]
-#[no_mangle]
-#[naked]
-pub unsafe extern "C" fn _boot() -> ! {
-    #[rustfmt::skip]
+#[rustfmt::skip]
     asm!(r#"
         .equ PHYS_ADDR_MASK, 0x0FFF
         .equ PHYS_ADDR_SHIFT_DOWN, 12
@@ -95,7 +89,7 @@ pub unsafe extern "C" fn _boot() -> ! {
         
         map_kernel:
             bge a1, t6, map_kernel_done
-            li a2, READ | WRITE | EXECUTE | VALID
+            li a2, READ | EXECUTE | VALID
             call map_region
 
             li t0, TWO_MiB
@@ -287,29 +281,3 @@ pub unsafe extern "C" fn _boot() -> ! {
 
         .section .init.boot
     "#);
-
-    loop {}
-}
-
-#[link_section = ".init.rust"]
-#[no_mangle]
-pub unsafe extern "C" fn _start() -> ! {
-    let hart_id;
-    let fdt;
-
-    #[rustfmt::skip]
-    asm!("
-        .align 8
-        nop
-        nop
-        nop
-        mv {}, x19
-        mv {}, x20
-    ", out(reg) hart_id , out(reg) fdt);
-    kernel_entry(hart_id, fdt);
-
-    #[allow(unreachable_code)]
-    asm!("1: wfi", "j 1b");
-
-    loop {}
-}

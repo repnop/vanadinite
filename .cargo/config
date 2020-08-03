@@ -1,7 +1,7 @@
 [alias]
-run-with-dbg = "run -- -gdb tcp::1234 -S -nographic -serial mon:stdio"
-run-with-dbg-release = "run --release -- -gdb tcp::1234 -S -nographic -serial mon:stdio"
-run-with-monitor-release = "run --release -- -gdb tcp::1234 -S -monitor stdio"
+run-with-dbg = "run -- -gdb tcp::1234 -S -nographic -serial mon:stdio -d trace:riscv_trap"
+run-with-dbg-release = "run --release -- -gdb tcp::1234 -S -nographic -serial mon:stdio -d trace:riscv_trap"
+run-with-monitor-release = "run --release -- -monitor stdio -d trace:riscv_trap"
 
 [build]
 target = "riscv64gc-unknown-none-elf"

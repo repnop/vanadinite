@@ -22,6 +22,9 @@ use log::info;
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[no_mangle]
 pub extern "C" fn kernel_entry(hart_id: usize, fdt: *const u8) -> ! {
+    unsafe {
+        asm!("nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n");
+    }
     virt::init_uart_logger();
 
     info!("log test!");
