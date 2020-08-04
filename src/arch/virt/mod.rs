@@ -72,8 +72,6 @@ enum Finisher {
 pub fn exit(exit_status: ExitStatus) -> ! {
     const VIRT_TEST: *mut u64 = 0x10_0000 as *mut u64;
 
-    log::info!("Exiting QEMU with exit status: {:?}", exit_status);
-
     unsafe {
         core::ptr::write_volatile(VIRT_TEST, exit_status.to_u64());
     }

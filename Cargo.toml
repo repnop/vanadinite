@@ -6,11 +6,12 @@ edition = "2018"
 #build = "build.rs"
 
 [dependencies]
-lazy_static = { version = "1", features = ["spin_no_std"] }
-log = "0.4"
-spin = "0.5"
-static_assertions = "1"
-tinyvec = "0.3"
+log = "0.4.11"
+lock_api = "0.4.1"
+
+[features]
+default = ["virt"]
+virt = []
 
 [profile.release]
 debug = true

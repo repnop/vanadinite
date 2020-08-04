@@ -1,7 +1,3 @@
-#![allow(dead_code)]
-
-use crate::locked::Locked;
-
 const UART_DATA_REG_OFFSET: usize = 0;
 const UART_INT_ENABLE_REG_OFFSET: usize = 1;
 const UART_INT_ID_FIFO_CTRL_REG_OFFSET: usize = 2;
@@ -10,10 +6,6 @@ const UART_MODEM_CTRL_REG_OFFSET: usize = 4;
 const UART_LINE_STATUS_REG_OFFSET: usize = 5;
 const UART_MODEM_STATUS_REG_OFFSET: usize = 6;
 const UART_SCRATCH_REG_OFFSET: usize = 7;
-
-lazy_static::lazy_static! {
-    pub static ref UART0: Locked<Uart16550> = Locked::new(unsafe { let mut uart = Uart16550::new(); uart.init(); uart });
-}
 
 pub struct Uart16550 {
     base: *mut u8,
@@ -96,23 +88,6 @@ impl core::fmt::Write for Uart16550 {
     }
 }
 
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => ($crate::virt::uart::_print(format_args!($($arg)*)));
-}
-
-#[macro_export]
-macro_rules! println {
-    () => ($crate::print!("\n"));
-    ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
-}
-
-#[doc(hidden)]
-pub fn _print(args: core::fmt::Arguments) {
-    use core::fmt::Write;
-    UART0.lock().write_fmt(args).unwrap();
-}
-
 pub struct UartLogger;
 
 impl log::Log for UartLogger {
@@ -127,36 +102,26 @@ impl log::Log for UartLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            let mut mod_path = record
-                .module_path_static()
-                .or_else(|| record.module_path())
-                .unwrap_or("<n/a>");
+            let mut mod_path = record.module_path_static().or_else(|| record.module_path()).unwrap_or("<n/a>");
 
-            mod_path = if mod_path == "vanadinite" {
-                "vanadinite::main"
-            } else {
-                mod_path
-            };
+            mod_path = if mod_path == "vanadinite" { "vanadinite::main" } else { mod_path };
 
-            #[cfg(debug_assertions)]
-            {
-                let file = record
-                    .file_static()
-                    .or_else(|| record.file())
-                    .unwrap_or("<n/a>");
-
-                println!(
-                    "[ {:>5} ] [{} {}:{}] {}",
-                    record.level(),
-                    mod_path,
-                    file,
-                    record.line().unwrap_or(0),
-                    record.args()
-                );
-            }
-
-            #[cfg(not(debug_assertions))]
-            println!("[ {:>5} ] [{}] {}", record.level(), mod_path, record.args());
+            //#[cfg(debug_assertions)]
+            //{
+            //    let file = record.file_static().or_else(|| record.file()).unwrap_or("<n/a>");
+            //
+            //    println!(
+            //        "[ {:>5} ] [{} {}:{}] {}",
+            //        record.level(),
+            //        mod_path,
+            //        file,
+            //        record.line().unwrap_or(0),
+            //        record.args()
+            //    );
+            //}
+            //
+            //#[cfg(not(debug_assertions))]
+            //println!("[ {:>5} ] [{}] {}", record.level(), mod_path, record.args());
         }
     }
 
