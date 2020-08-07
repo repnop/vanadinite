@@ -16,8 +16,6 @@ SECTIONS {
     .data : {
         *(.data .data.* .rodata .rodata.*)
         . = ALIGN(8);
-        PROVIDE(__tmp_stack = .);
-        BYTE(4K);
     }
 
     . = ALIGN(8);
@@ -34,6 +32,10 @@ SECTIONS {
 
     .bss : {
         *(.bss .bss.*)
+        . = ALIGN(8);
+        PROVIDE(__tmp_stack_bottom = .);
+        . += 1024 * 1024 * 8;
+        PROVIDE(__tmp_stack_top = .);
     }
 
     PROVIDE(__bss_end = .);

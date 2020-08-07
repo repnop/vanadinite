@@ -14,14 +14,12 @@ pub struct Uart16550 {
 unsafe impl Send for Uart16550 {}
 
 impl Uart16550 {
-    const unsafe fn new() -> Uart16550 {
-        let base = 0x1000_0000 as *mut u8;
-
+    pub const unsafe fn new(base: *mut u8) -> Uart16550 {
         Self { base }
     }
 
     #[rustfmt::skip]
-    unsafe fn init(&mut self) {
+    pub unsafe fn init(&mut self) {
         // Disable interrupts
         self.base.add(UART_INT_ENABLE_REG_OFFSET).write_volatile(0x00);
         // Enable DLAB

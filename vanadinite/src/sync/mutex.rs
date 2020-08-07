@@ -16,7 +16,7 @@ unsafe impl lock_api::RawMutex for SpinMutex {
     }
 
     fn try_lock(&self) -> bool {
-        self.lock.compare_and_swap(false, true, Ordering::Release)
+        self.lock.compare_and_swap(false, true, Ordering::Acquire)
     }
 
     unsafe fn unlock(&self) {

@@ -1,17 +1,8 @@
-[package]
-name = "vanadinite"
-version = "0.1.0"
-authors = ["Wesley Norris <repnop@outlook.com>"]
-edition = "2018"
-#build = "build.rs"
-
-[dependencies]
-log = "0.4.11"
-lock_api = "0.4.1"
-
-[features]
-default = ["virt"]
-virt = []
+[workspace]
+members = [
+    "fdt",
+    "vanadinite",
+]
 
 [profile.release]
 debug = true
