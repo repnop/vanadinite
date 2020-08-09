@@ -8,6 +8,12 @@ pub struct SpinRwLock {
     lock: AtomicU32,
 }
 
+impl SpinRwLock {
+    pub const fn new() -> Self {
+        Self { lock: AtomicU32::new(0) }
+    }
+}
+
 unsafe impl lock_api::RawRwLock for SpinRwLock {
     const INIT: Self = SpinRwLock { lock: AtomicU32::new(0) };
 

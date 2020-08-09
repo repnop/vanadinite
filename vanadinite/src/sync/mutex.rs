@@ -4,6 +4,12 @@ pub struct SpinMutex {
     lock: AtomicBool,
 }
 
+impl SpinMutex {
+    pub const fn new() -> Self {
+        Self { lock: AtomicBool::new(false) }
+    }
+}
+
 unsafe impl lock_api::RawMutex for SpinMutex {
     const INIT: Self = SpinMutex { lock: AtomicBool::new(false) };
 

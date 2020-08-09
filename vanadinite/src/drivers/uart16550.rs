@@ -7,36 +7,30 @@ const UART_LINE_STATUS_REG_OFFSET: usize = 5;
 const UART_MODEM_STATUS_REG_OFFSET: usize = 6;
 const UART_SCRATCH_REG_OFFSET: usize = 7;
 
+#[repr(C)]
 pub struct Uart16550 {
-    base: *mut u8,
+    data_register: u8,
+    interrupt_enable: u8,
+    int_id_fifo_control: u8,
+    line_control: u8,
+    modem_control: u8,
+    line_status: u8,
+    modem_status: u8,
+    scratch: u8,
 }
 
-unsafe impl Send for Uart16550 {}
-
 impl Uart16550 {
-    pub const unsafe fn new(base: *mut u8) -> Uart16550 {
-        Self { base }
-    }
-
-    #[rustfmt::skip]
-    pub unsafe fn init(&mut self) {
-        // Disable interrupts
-        self.base.add(UART_INT_ENABLE_REG_OFFSET).write_volatile(0x00);
-        // Enable DLAB
-        self.base.add(UART_LINE_CTRL_REG_OFFSET).write_volatile(0x80);
-        // Set baud ratew to 38400
-        self.base.add(UART_DATA_REG_OFFSET).write_volatile(0x03);
-        self.base.add(UART_INT_ENABLE_REG_OFFSET).write_volatile(0x00);
-        // 8 bits, no parity, one stop bit
-        self.base.add(UART_LINE_CTRL_REG_OFFSET).write_volatile(0x03);
-        // Enable FIFO, clear, with 14-byte threshold
-        self.base.add(UART_INT_ID_FIFO_CTRL_REG_OFFSET).write_volatile(0xC7);
-        // IRQ enable, RTS/DSR set
-        self.base.add(UART_MODEM_CTRL_REG_OFFSET).write_volatile(0x0B);
+    pub fn init(&mut self) {
+        self.interrupt_enable = 0x00;
+        self.line_control = 0x80;
+        self.data_register = 0x03;
+        self.line_control = 0x03;
+        self.int_id_fifo_control = 0xC7;
+        self.modem_control = 0x0B;
     }
 
     pub fn line_status(&self) -> u8 {
-        unsafe { self.base.add(UART_LINE_STATUS_REG_OFFSET).read_volatile() }
+        unsafe { (&self.line_status as *const u8).read_volatile() }
     }
 
     pub fn data_waiting(&self) -> bool {
@@ -46,18 +40,18 @@ impl Uart16550 {
     }
 
     // TODO: error handling?
-    pub fn read(&mut self) -> u8 {
+    pub fn read(&self) -> u8 {
         while !self.data_waiting() {}
 
-        unsafe { self.base.add(UART_DATA_REG_OFFSET).read_volatile() }
+        self.data_register
     }
 
-    pub fn try_read(&mut self) -> Option<u8> {
+    pub fn try_read(&self) -> Option<u8> {
         if !self.data_waiting() {
             return None;
         }
 
-        unsafe { Some(self.base.add(UART_DATA_REG_OFFSET).read_volatile()) }
+        Some(self.data_register)
     }
 
     pub fn data_empty(&self) -> bool {
@@ -69,7 +63,7 @@ impl Uart16550 {
     pub fn write(&mut self, data: u8) {
         while !self.data_empty() {}
 
-        unsafe { self.base.add(UART_DATA_REG_OFFSET).write_volatile(data) }
+        self.data_register = data;
     }
 
     pub fn write_str(&mut self, s: &str) {
@@ -86,42 +80,16 @@ impl core::fmt::Write for Uart16550 {
     }
 }
 
-pub struct UartLogger;
-
-impl log::Log for UartLogger {
-    #[allow(unused_variables)]
-    fn enabled(&self, metadata: &log::Metadata) -> bool {
-        #[cfg(debug_assertions)]
-        return true;
-
-        #[cfg(not(debug_assertions))]
-        return metadata.level() <= log::Level::Info;
+impl crate::io::ConsoleDevice for Uart16550 {
+    fn init(&mut self) {
+        self.init();
     }
 
-    fn log(&self, record: &log::Record) {
-        if self.enabled(record.metadata()) {
-            let mut mod_path = record.module_path_static().or_else(|| record.module_path()).unwrap_or("<n/a>");
-
-            mod_path = if mod_path == "vanadinite" { "vanadinite::main" } else { mod_path };
-
-            //#[cfg(debug_assertions)]
-            //{
-            //    let file = record.file_static().or_else(|| record.file()).unwrap_or("<n/a>");
-            //
-            //    println!(
-            //        "[ {:>5} ] [{} {}:{}] {}",
-            //        record.level(),
-            //        mod_path,
-            //        file,
-            //        record.line().unwrap_or(0),
-            //        record.args()
-            //    );
-            //}
-            //
-            //#[cfg(not(debug_assertions))]
-            //println!("[ {:>5} ] [{}] {}", record.level(), mod_path, record.args());
-        }
+    fn read(&self) -> u8 {
+        self.read()
     }
 
-    fn flush(&self) {}
+    fn write(&mut self, n: u8) {
+        self.write(n)
+    }
 }

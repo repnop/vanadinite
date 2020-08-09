@@ -6,9 +6,10 @@ mod node;
 
 use cstr_core::CStr;
 use ints::{BigEndianU32, BigEndianU64};
+pub use node::{MappedArea, MemoryNode, MemoryRegion, NodeProperty};
 
 #[repr(C)]
-pub struct FdtHeader {
+pub struct Fdt {
     /// FDT header magic
     magic: BigEndianU32,
     /// Total size in bytes of the FDT structure
@@ -32,7 +33,7 @@ pub struct FdtHeader {
     size_dt_struct: BigEndianU32,
 }
 
-impl FdtHeader {
+impl Fdt {
     /// # Safety
     /// This function checks the pointer alignment and performs a read to verify
     /// the magic value. If the pointer is invalid this can result in undefined
@@ -84,8 +85,51 @@ impl FdtHeader {
 
     /// # Safety
     /// yes this unsafe is made of unsafe
-    pub unsafe fn find_node(self: *const Self, name: &str, dbg: &mut dyn core::fmt::Write) -> Option<*const u32> {
-        node::find_node(self.structure_block().cast(), name, self, self.strings(), dbg)
+    pub unsafe fn find_node<'a>(self: *const Self, name: &str) -> Option<impl Iterator<Item = node::NodeProperty<'a>>> {
+        Some(node::node_properties(node::find_node(self.structure_block().cast(), name, self)?, self.strings()))
+    }
+
+    /// # Safety
+    /// I'm the captain now
+    pub unsafe fn memory<'a>(self: *const Self) -> MemoryNode<'a> {
+        let properties = self.find_node("/memory").expect("requires memory node");
+
+        let mut regions = &[][..];
+        let mut initial_mapped_area = None;
+
+        for property in properties {
+            match property.name {
+                "reg" => {
+                    assert_eq!(property.value.as_ptr() as usize % 8, 0);
+                    regions = core::slice::from_raw_parts(
+                        property.value.as_ptr() as *const MemoryRegion,
+                        property.value.len() / 16,
+                    );
+                }
+                "initial-mapped-area" => {
+                    assert_eq!(property.value.as_ptr() as usize % 8, 0);
+
+                    let mut ptr = property.value.as_ptr();
+                    let effective_address: BigEndianU64 = *ptr.cast();
+
+                    node::advance_ptr(&mut ptr, 8);
+                    let physical_address: BigEndianU64 = *ptr.cast();
+
+                    node::advance_ptr(&mut ptr, 8);
+                    let size: BigEndianU32 = *ptr.cast();
+
+                    initial_mapped_area = Some(MappedArea {
+                        effective_address: effective_address.get(),
+                        physical_address: physical_address.get(),
+                        size: size.get(),
+                    });
+                }
+                "device_type" => {}
+                _ => unreachable!("bad memory node format"),
+            }
+        }
+
+        MemoryNode { regions, initial_mapped_area }
     }
 
     unsafe fn make_ref<'a>(self: *const Self) -> &'a Self {
