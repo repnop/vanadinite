@@ -1,7 +1,6 @@
 #![feature(arbitrary_self_types)]
 #![no_std]
 
-mod ints;
 mod node;
 
 use common::byteorder::{BigEndianU32, BigEndianU64};

@@ -12,7 +12,7 @@ mod drivers;
 mod io;
 mod mem;
 mod sync;
-mod trap;
+// mod trap;
 mod utils;
 
 use core::cell::UnsafeCell;
@@ -120,9 +120,8 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
         (&mut *TEMP_PAGE_TABLE_ROOT.0.get()).map(phys, ident, PageSize::Megapage, permissions, || ident_mem_phys);
     }
 
-    mem::satp(mem::SatpMode::Sv39, 0, PhysicalAddress::from_ptr(&TEMP_PAGE_TABLE_ROOT));
-    mem::sfence();
-    let boot_entry_addr = core::mem::transmute::<_, fn(usize, *const u8, fdt::MemoryRegion) -> !>(boot_entry_addr);
+    let start = memory_region.starting_address();
+    let size = memory_region.size();
 
     let sp: usize;
     let gp: usize;
@@ -131,10 +130,21 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     let new_sp = (sp - phys_load) + page_offset_value;
     let new_gp = (gp - phys_load) + page_offset_value;
-    asm!("mv sp, {}", in(reg) new_sp);
-    asm!("mv gp, {}", in(reg) new_gp);
 
-    boot_entry_addr(hart_id, fdt, memory_region)
+    mem::satp(mem::SatpMode::Sv39, 0, PhysicalAddress::from_ptr(&TEMP_PAGE_TABLE_ROOT));
+    mem::sfence();
+
+    vmem_trampoline(hart_id, fdt, start, size, new_sp, new_gp, boot_entry_addr)
+}
+
+#[naked]
+#[inline(never)]
+unsafe extern "C" fn vmem_trampoline(_: usize, _: *const u8, _: u64, _: u64, sp: usize, gp: usize, dest: usize) -> ! {
+    asm!("mv sp, {}", in(reg) sp);
+    asm!("mv gp, {}", in(reg) gp);
+    asm!("jr {}", in(reg) dest);
+
+    core::hint::unreachable_unchecked()
 }
 
 const TWO_MEBS: usize = 2 * 1024 * 1024;
@@ -142,7 +152,7 @@ const TWO_MEBS: usize = 2 * 1024 * 1024;
 /// # Safety
 /// Uh, probably none
 #[no_mangle]
-pub unsafe extern "C" fn boot_entry(hart_id: usize, fdt: *const u8, region: fdt::MemoryRegion) -> ! {
+pub unsafe extern "C" fn boot_entry(hart_id: usize, fdt: *const u8, region_start: u64, size: u64) -> ! {
     if hart_id != 0 {
         panic!("not hart 0");
     }
