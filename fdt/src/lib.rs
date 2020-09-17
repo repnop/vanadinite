@@ -4,8 +4,8 @@
 mod ints;
 mod node;
 
+use common::byteorder::{BigEndianU32, BigEndianU64};
 use cstr_core::CStr;
-use ints::{BigEndianU32, BigEndianU64};
 pub use node::{MappedArea, MemoryNode, MemoryRegion, NodeProperty};
 
 #[repr(C)]
@@ -148,7 +148,7 @@ impl FdtStrings {
     /// Requires a valid pointer to `Self` and the offset in bytes must point to
     /// a valid C string
     pub unsafe fn cstr_at_offset<'a>(self: *const Self, offset: usize) -> &'a CStr {
-        CStr::from_ptr(self.cast::<u8>().add(offset))
+        CStr::from_ptr(self.cast::<cstr_core::c_char>().add(offset))
     }
 }
 

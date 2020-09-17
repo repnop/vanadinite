@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match std::env::var(VIRT) {
         Ok(_) => println!(r#"cargo:rustc-cfg=feature="virt""#),
-        Err(_) => panic!(),
+        Err(_) => {}
     }
 
     Ok(())

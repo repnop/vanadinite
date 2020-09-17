@@ -11,5 +11,4 @@ log = "0.4.11"
 lock_api = "0.4.1"
 
 [features]
-default = ["virt"]
 virt = []

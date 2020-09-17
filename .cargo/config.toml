@@ -1,18 +1,2 @@
-[alias]
-run-with-nographic = "run -p vanadinite -- --nographic -serial mon:stdio"
-run-with-dbg = "run -p vanadinite -- -gdb tcp::1234 -S -nographic -serial mon:stdio -d trace:riscv_trap"
-run-with-dbg-release = "run -p vanadinite --release -- -gdb tcp::1234 -S -nographic -serial mon:stdio -d trace:riscv_trap"
-run-with-monitor-release = "run -p vanadinite --release -- -monitor stdio -d trace:riscv_trap"
-run-stdout = "run -p vanadinite -- -serial mon:stdio"
-run-stdout-release = "run -p vanadinite --release -- -serial mon:stdio"
-
 [build]
 target = "riscv64gc-unknown-none-elf"
-
-[target.riscv64gc-unknown-none-elf]
-rustflags = [
-    "-C", "link-arg=-Tvanadinite/lds/virt.lds",
-    "-C", "code-model=medium",
-]
-runner = "qemu-system-riscv64 -machine virt -cpu rv64 -smp 1 -m 128M -bios none -kernel "
-

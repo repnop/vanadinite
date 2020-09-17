@@ -1,5 +1,5 @@
 [package]
-name = "fdt"
+name = "fat32"
 version = "0.1.0"
 authors = ["repnop <repnop@repnop.dev>"]
 edition = "2018"
@@ -8,4 +8,3 @@ edition = "2018"
 
 [dependencies]
 common = { path = "../common" }
-cstr_core = "0.2.0"

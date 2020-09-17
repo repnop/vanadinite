@@ -93,3 +93,9 @@ impl crate::io::ConsoleDevice for Uart16550 {
         self.write(n)
     }
 }
+
+impl super::CompatibleWith for Uart16550 {
+    fn list() -> &'static [&'static str] {
+        &["ns16550", "ns16550a"]
+    }
+}

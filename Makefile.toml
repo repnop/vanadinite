@@ -1,0 +1,63 @@
+[config]
+default_to_workspace = false
+
+[tasks.build-vanadinite.env]
+RUSTFLAGS = "-C link-arg=-Tvanadinite/lds/virt.lds -C code-model=medium"
+CARGO_FEATURE_VIRT = ""
+
+[tasks.build-vanadinite]
+command = "cargo"
+args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown-none-elf"]
+
+[tasks.build-bbl]
+dependencies = ["build-vanadinite"]
+script = ['''
+    git submodule update --init
+    mkdir -p riscv-pk/build
+    cd riscv-pk/build
+    ../configure --host=riscv64-unknown-elf --with-payload=../../target/riscv64gc-unknown-none-elf/release/vanadinite
+    make
+''']
+
+[tasks.run]
+dependencies = ["build-bbl"]
+command = "qemu-system-riscv64"
+args= [
+    "-machine", "virt",
+    "-cpu", "rv64",
+    "-smp", "1",
+    "-m", "128M",
+    "-bios", "none",
+    # "-kernel", "target/riscv64gc-unknown-none-elf/release/bootloader",
+    "-kernel", "riscv-pk/build/bbl",
+    "-serial", "mon:stdio",
+    "-nographic"
+]
+
+[tasks.debug]
+dependencies = ["build-bbl"]
+command = "qemu-system-riscv64"
+args= [
+    "-machine", "virt",
+    "-cpu", "rv64",
+    "-smp", "1",
+    "-m", "128M",
+    "-bios", "none",
+    # "-kernel", "target/riscv64gc-unknown-none-elf/release/bootloader",
+    "-kernel", "riscv-pk/build/bbl",
+    #"-serial", "mon:stdio",
+    "-monitor", "stdio",
+    #"-nographic",
+    "-gdb", "tcp::1234",
+    "-S"
+]
+
+[tasks.gdb]
+command = "riscv64-unknown-elf-gdb"
+args = [
+    "target/riscv64gc-unknown-none-elf/release/vanadinite",
+    "--eval-command", "target remote :1234",
+    #"--eval-command", "break _bootloader_entry",
+    #"--eval-command", "c",
+    "--eval-command", "break *0x80200000"
+]
