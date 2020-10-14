@@ -6,6 +6,23 @@
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("vanadinite assumes a 64-bit pointer size, cannot compile on non-64 bit systems");
 
+extern crate alloc;
+
+struct Heck;
+
+unsafe impl alloc::alloc::GlobalAlloc for Heck {
+    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        todo!()
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        todo!()
+    }
+}
+
+#[global_allocator]
+static HECK: Heck = Heck;
+
 mod arch;
 mod asm;
 mod drivers;
@@ -18,7 +35,8 @@ mod utils;
 use core::cell::UnsafeCell;
 use mem::{
     kernel_patching, perms,
-    sv39::{self, PageSize, PhysicalAddress, Sv39PageTable, VirtualAddress},
+    phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
+    sv39::{PageSize, PhysicalAddress, Sv39PageTable, VirtualAddress},
 };
 
 /// # Safety
@@ -89,6 +107,8 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
         None => arch::exit(arch::ExitStatus::Error(&"magic's fucked, my dude")),
     };
 
+    let fdt_size = fdt_struct.total_size() as u64;
+
     let page_offset_value = kernel_patching::page_offset();
     // These are physical addresses before paging is enabled
     let kernel_start = kernel_patching::kernel_start() as usize;
@@ -110,14 +130,28 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let high_mem_phys = (TEMP_PAGE_TABLE_HIGH_MEM.0.get(), PhysicalAddress::from_ptr(&TEMP_PAGE_TABLE_HIGH_MEM));
     let ident_mem_phys = (TEMP_PAGE_TABLE_IDENTITY.0.get(), PhysicalAddress::from_ptr(&TEMP_PAGE_TABLE_IDENTITY));
 
-    for address in (kernel_start..(kernel_end + TWO_MEBS)).step_by(TWO_MEBS) {
+    for address in (kernel_start..(kernel_end + TWO_MEBS + TWO_MEBS)).step_by(TWO_MEBS) {
         let virt = VirtualAddress::new(page_offset_value + (address - kernel_start));
         let ident = VirtualAddress::new(address);
         let phys = PhysicalAddress::new(address);
         let permissions = perms::Read | perms::Write | perms::Execute;
 
-        (&mut *TEMP_PAGE_TABLE_ROOT.0.get()).map(phys, virt, PageSize::Megapage, permissions, || high_mem_phys);
-        (&mut *TEMP_PAGE_TABLE_ROOT.0.get()).map(phys, ident, PageSize::Megapage, permissions, || ident_mem_phys);
+        (&mut *TEMP_PAGE_TABLE_ROOT.0.get()).map(
+            phys,
+            virt,
+            PageSize::Megapage,
+            permissions,
+            || high_mem_phys,
+            |p| VirtualAddress::new(p.as_usize()),
+        );
+        (&mut *TEMP_PAGE_TABLE_ROOT.0.get()).map(
+            phys,
+            ident,
+            PageSize::Megapage,
+            permissions,
+            || ident_mem_phys,
+            |p| VirtualAddress::new(p.as_usize()),
+        );
     }
 
     let start = memory_region.starting_address();
@@ -134,38 +168,106 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     mem::satp(mem::SatpMode::Sv39, 0, PhysicalAddress::from_ptr(&TEMP_PAGE_TABLE_ROOT));
     mem::sfence();
 
-    vmem_trampoline(hart_id, fdt, start, size, new_sp, new_gp, boot_entry_addr)
+    vmem_trampoline(hart_id, fdt, start, size, new_sp, new_gp, boot_entry_addr, fdt_size)
 }
 
-#[naked]
-#[inline(never)]
-unsafe extern "C" fn vmem_trampoline(_: usize, _: *const u8, _: u64, _: u64, sp: usize, gp: usize, dest: usize) -> ! {
-    asm!("mv sp, {}", in(reg) sp);
-    asm!("mv gp, {}", in(reg) gp);
-    asm!("jr {}", in(reg) dest);
-
-    core::hint::unreachable_unchecked()
+extern "C" {
+    fn vmem_trampoline(_: usize, _: *const u8, _: u64, _: u64, sp: usize, gp: usize, dest: usize, _: u64) -> !;
 }
+
+#[rustfmt::skip]
+global_asm!("
+    .section .text
+    .globl vmem_trampoline
+    vmem_trampoline:
+        mv sp, a4
+        mv gp, a5
+        mv a4, a7
+        jr a6
+");
 
 const TWO_MEBS: usize = 2 * 1024 * 1024;
 
 /// # Safety
 /// Uh, probably none
 #[no_mangle]
-pub unsafe extern "C" fn boot_entry(hart_id: usize, fdt: *const u8, region_start: u64, size: u64) -> ! {
+pub unsafe extern "C" fn boot_entry(
+    hart_id: usize,
+    fdt: *const u8,
+    region_start: u64,
+    region_size: u64,
+    fdt_size: u64,
+) -> ! {
+    let region_start = region_start as usize;
+    let region_size = region_size as usize;
+
     if hart_id != 0 {
         panic!("not hart 0");
     }
 
+    let root_page_table = &mut *TEMP_PAGE_TABLE_ROOT.0.get();
+
     // Remove identity mapping after paging initialization
     let kernel_start = kernel_patching::kernel_start() as usize;
     let kernel_end = kernel_patching::kernel_end() as usize;
-    for address in (kernel_start..(kernel_end + TWO_MEBS)).step_by(TWO_MEBS) {
+    for address in (kernel_start..(kernel_end + TWO_MEBS + TWO_MEBS)).step_by(TWO_MEBS) {
         // `kernel_start()` and `kernel_end()` now refer to virtual addresses so
         // we need to patch them back to physical "virtual" addresses to be
         // unmapped
         let patched = VirtualAddress::new(kernel_patching::virt2phys(VirtualAddress::new(address)).as_usize());
-        (&mut *TEMP_PAGE_TABLE_ROOT.0.get()).unmap(patched, kernel_patching::phys2virt);
+        root_page_table.unmap(patched, kernel_patching::phys2virt);
+    }
+
+    // Calculate the RAM size after taking into account the kernel image size
+    let ram_end_virt = kernel_patching::phys2virt(PhysicalAddress::new(region_start)).as_usize() + region_size;
+    let mut ram_size = ram_end_virt - kernel_end;
+
+    let fdt_usize = fdt as usize;
+    let fdt_phys = PhysicalAddress::new(fdt_usize);
+    let fdt_virt = VirtualAddress::new(fdt_usize);
+
+    let alloc_start = if fdt as usize >= kernel_patching::virt2phys(VirtualAddress::new(kernel_end)).as_usize() {
+        // round up to next page size after the FDT
+        let addr = ((kernel_patching::phys2virt(fdt_phys).as_usize() + fdt_size as usize) & !0xFFFusize) + 0x1000;
+        ram_size = ram_end_virt - addr;
+
+        addr
+    } else {
+        kernel_end
+    };
+
+    // Set the allocator to start allocating memory after the end of the kernel or fdt
+    let kernel_end_phys = kernel_patching::virt2phys(VirtualAddress::new(alloc_start)).as_mut_ptr();
+
+    let mut pf_alloc = PHYSICAL_MEMORY_ALLOCATOR.lock();
+    pf_alloc.init(kernel_end_phys, ram_size);
+
+    let mut page_alloc = || {
+        let phys_addr = pf_alloc.alloc().unwrap().as_phys_address();
+        let virt_addr = kernel_patching::phys2virt(phys_addr);
+
+        (virt_addr.as_mut_ptr() as *mut Sv39PageTable, phys_addr)
+    };
+
+    //#[cfg(feature = "virt")]
+    root_page_table.map(
+        PhysicalAddress::new(0x10_0000),
+        VirtualAddress::new(0x10_0000),
+        PageSize::Kilopage,
+        perms::Read | perms::Write | perms::Execute,
+        &mut page_alloc,
+        kernel_patching::phys2virt,
+    );
+
+    if !root_page_table.is_mapped(fdt_virt, kernel_patching::phys2virt) {
+        root_page_table.map(
+            fdt_phys,
+            fdt_virt,
+            PageSize::Kilopage,
+            perms::Read,
+            &mut page_alloc,
+            kernel_patching::phys2virt,
+        );
     }
 
     io::init_logging();
@@ -179,11 +281,31 @@ pub unsafe extern "C" fn boot_entry(hart_id: usize, fdt: *const u8, region_start
 
     for property in uart_fdt.unwrap() {
         if let Some(reg) = property.reg() {
-            io::set_console(reg.starting_address() as usize as *mut drivers::uart16550::Uart16550);
+            let uart_addr = reg.starting_address() as usize;
+            let uart_phys = PhysicalAddress::new(uart_addr);
+            let uart_virt = VirtualAddress::new(uart_addr);
+            let perms = perms::Read | perms::Write;
+            root_page_table.map(
+                uart_phys,
+                uart_virt,
+                PageSize::Kilopage,
+                perms,
+                &mut page_alloc,
+                kernel_patching::phys2virt,
+            );
+
+            io::set_console(uart_addr as *mut drivers::uart16550::Uart16550);
         }
     }
 
-    log::info!("# of memory reservations: {}", fdt.memory_reservations().len());
+    let page = pf_alloc.alloc().unwrap();
+    log::info!("{:?}", page);
+    pf_alloc.dealloc(page);
+    pf_alloc.dealloc(page);
+
+    drop(pf_alloc);
+
+    log::info!("# of memory reservations: {}\r", fdt.memory_reservations().len());
     log::info!("{:#x?}", fdt.memory());
 
     arch::exit(arch::ExitStatus::Ok)
@@ -198,4 +320,9 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 #[no_mangle]
 pub extern "C" fn abort() -> ! {
     panic!("we've aborted")
+}
+
+#[alloc_error_handler]
+fn alloc_error_handler(_: alloc::alloc::Layout) -> ! {
+    panic!()
 }

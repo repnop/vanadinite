@@ -13,3 +13,10 @@ impl LinkerSymbol {
 
 unsafe impl Sync for LinkerSymbol {}
 unsafe impl Send for LinkerSymbol {}
+
+#[inline(always)]
+pub fn manual_debug_point() {
+    unsafe {
+        asm!("1: j 1b");
+    }
+}

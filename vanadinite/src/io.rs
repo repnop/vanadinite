@@ -116,8 +116,8 @@ impl log::Log for Logger {
 
 pub fn init_logging() {
     log::set_logger(&Logger).expect("failed to init logging");
-    #[cfg(debug_assertions)]
+    //#[cfg(debug_assertions)]
     log::set_max_level(log::LevelFilter::Trace);
-    #[cfg(not(debug_assertions))]
-    log::set_max_level(log::LevelFilter::Info);
+    //#[cfg(not(debug_assertions))]
+    //log::set_max_level(log::LevelFilter::Info);
 }

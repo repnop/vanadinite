@@ -11,7 +11,8 @@ impl SpinMutex {
 }
 
 unsafe impl lock_api::RawMutex for SpinMutex {
-    const INIT: Self = SpinMutex { lock: AtomicBool::new(false) };
+    #[allow(clippy::declare_interior_mutable_const)]
+    const INIT: Self = SpinMutex::new();
 
     type GuardMarker = lock_api::GuardSend;
 

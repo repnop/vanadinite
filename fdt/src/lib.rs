@@ -138,6 +138,12 @@ impl Fdt {
     unsafe fn offset_bytes(self: *const Self, n: usize) -> *const u8 {
         self.cast::<u8>().add(n)
     }
+
+    /// # Safety
+    /// yes
+    pub unsafe fn total_size(self: *const Self) -> u32 {
+        self.make_ref().totalsize.get()
+    }
 }
 
 pub struct FdtStrings;

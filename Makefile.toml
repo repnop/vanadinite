@@ -12,11 +12,11 @@ args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown
 [tasks.build-bbl]
 dependencies = ["build-vanadinite"]
 script = ['''
-    git submodule update --init
+    git submodule update --init --quiet
     mkdir -p riscv-pk/build
     cd riscv-pk/build
-    ../configure --host=riscv64-unknown-elf --with-payload=../../target/riscv64gc-unknown-none-elf/release/vanadinite
-    make
+    ../configure --host=riscv64-unknown-elf --with-payload=../../target/riscv64gc-unknown-none-elf/release/vanadinite --silent
+    make --silent
 ''']
 
 [tasks.run]
@@ -31,7 +31,8 @@ args= [
     # "-kernel", "target/riscv64gc-unknown-none-elf/release/bootloader",
     "-kernel", "riscv-pk/build/bbl",
     "-serial", "mon:stdio",
-    "-nographic"
+    "-nographic",
+    "-d", "guest_errors",
 ]
 
 [tasks.debug]
@@ -49,7 +50,9 @@ args= [
     "-monitor", "stdio",
     #"-nographic",
     "-gdb", "tcp::1234",
-    "-S"
+    "-S",
+    "-d", "guest_errors,trace:riscv_trap,trace:sifive_gpio_write,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write",
+    "-D", "qemu.log",
 ]
 
 [tasks.gdb]
@@ -57,7 +60,17 @@ command = "riscv64-unknown-elf-gdb"
 args = [
     "target/riscv64gc-unknown-none-elf/release/vanadinite",
     "--eval-command", "target remote :1234",
-    #"--eval-command", "break _bootloader_entry",
     #"--eval-command", "c",
-    "--eval-command", "break *0x80200000"
+    #"--eval-command", "set $pc += 2",
+    #"--eval-command", "break *0x80200000"
+]
+
+[tasks.lldb]
+command = "lldb"
+args = [
+    "target/riscv64gc-unknown-none-elf/release/vanadinite",
+    #"--eval-command", "target remote :1234",
+    #"--eval-command", "c",
+    #"--eval-command", "set $pc += 2",
+    #"--eval-command", "break *0x80200000"
 ]

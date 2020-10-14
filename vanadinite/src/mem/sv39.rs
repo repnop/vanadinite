@@ -11,9 +11,17 @@ impl Sv39PageTable {
     }
 
     #[track_caller]
-    pub fn map<F, P>(&mut self, phys: PhysicalAddress, virt: VirtualAddress, size: PageSize, permissions: P, f: F)
-    where
-        F: Fn() -> (*mut Sv39PageTable, PhysicalAddress),
+    pub fn map<F, A, P>(
+        &mut self,
+        phys: PhysicalAddress,
+        virt: VirtualAddress,
+        size: PageSize,
+        permissions: P,
+        mut page_alloc: F,
+        address_conversion: A,
+    ) where
+        F: FnMut() -> (*mut Sv39PageTable, PhysicalAddress),
+        A: Fn(PhysicalAddress) -> VirtualAddress,
         P: ToPermissions,
     {
         size.assert_addr_aligned(phys.0);
@@ -23,15 +31,17 @@ impl Sv39PageTable {
         let mut pte = &mut page_table.entries[virt.vpns()[2]];
 
         for i in size.i() {
-            let (pt, phys_addr) = f();
-            pte.make_branch(phys_addr);
-            page_table = unsafe { &mut *pt };
+            if pte.is_branch() {
+                page_table = unsafe { &mut *address_conversion(pte.subtable().unwrap()).as_mut_ptr().cast() };
+            } else {
+                let (pt, phys_addr) = page_alloc();
+                pte.make_branch(phys_addr);
+                page_table = unsafe { &mut *pt };
+            }
             pte = &mut page_table.entries[virt.vpns()[i]];
         }
 
-        if pte.valid() {
-            panic!("Sv39PageTable::map: {:#p} -> {:#p}, page table entry already populated!", phys, virt);
-        }
+        assert!(!pte.valid(), "Sv39PageTable::map: {:#p} -> {:#p}, page table entry already populated!", phys, virt);
 
         pte.make_leaf(phys, permissions);
     }
@@ -63,6 +73,24 @@ impl Sv39PageTable {
         }
 
         va
+    }
+
+    pub fn is_mapped<F>(&self, virt: VirtualAddress, address_conversion: F) -> bool
+    where
+        F: Fn(PhysicalAddress) -> VirtualAddress,
+    {
+        let mut page_table = self;
+
+        for vpn in virt.vpns().iter().copied().rev() {
+            let pte = &page_table.entries[vpn];
+            if pte.is_branch() {
+                page_table = unsafe { &*address_conversion(pte.subtable().unwrap()).as_ptr().cast() };
+            } else {
+                return pte.valid();
+            }
+        }
+
+        false
     }
 }
 
@@ -100,10 +128,14 @@ impl PageTableEntry {
         self.valid() && (self.0 & 0b1110 != 0)
     }
 
+    pub fn is_branch(self) -> bool {
+        self.valid() && (self.0 & 0b1110 == 0)
+    }
+
     pub fn subtable(self) -> Option<PhysicalAddress> {
-        match self.is_leaf() {
-            true => None,
-            false => Some(PhysicalAddress::new((self.0 >> 10) << 12)),
+        match self.is_branch() {
+            true => Some(PhysicalAddress::new((self.0 >> 10) << 12)),
+            false => None,
         }
     }
 }

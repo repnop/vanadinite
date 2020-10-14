@@ -10,10 +10,7 @@ pub enum ExitStatus<'a> {
 pub fn exit(status: ExitStatus) -> ! {
     let exit_status = match status {
         ExitStatus::Ok => virt::ExitStatus::Pass,
-        ExitStatus::Error(msg) => {
-            log::error!("Exiting kernel, reason: {}", msg);
-            virt::ExitStatus::Fail(1)
-        }
+        ExitStatus::Error(msg) => virt::ExitStatus::Fail(1),
     };
 
     virt::exit(exit_status)

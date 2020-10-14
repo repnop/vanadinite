@@ -15,7 +15,8 @@ impl SpinRwLock {
 }
 
 unsafe impl lock_api::RawRwLock for SpinRwLock {
-    const INIT: Self = SpinRwLock { lock: AtomicU32::new(0) };
+    #[allow(clippy::declare_interior_mutable_const)]
+    const INIT: Self = SpinRwLock::new();
 
     type GuardMarker = lock_api::GuardSend;
 
