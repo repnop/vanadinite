@@ -1,6 +1,13 @@
-pub mod perms;
+pub mod heap;
 pub mod phys;
-pub mod sv39;
+pub mod paging {
+    mod manager;
+    mod perms;
+    mod sv39;
+
+    pub use perms::*;
+    pub use sv39::*;
+}
 
 #[inline(always)]
 pub fn sfence() {
@@ -8,7 +15,7 @@ pub fn sfence() {
 }
 
 #[inline(always)]
-pub fn satp(mode: SatpMode, asid: u16, root_page_table: sv39::PhysicalAddress) {
+pub fn satp(mode: SatpMode, asid: u16, root_page_table: paging::PhysicalAddress) {
     let value = ((mode as usize) << 60) | ((asid as usize) << 44) | root_page_table.ppn();
     unsafe { asm!("csrw satp, {}", in(reg) value) };
 }
@@ -21,7 +28,7 @@ pub enum SatpMode {
 }
 
 pub mod kernel_patching {
-    use super::sv39::{PhysicalAddress, VirtualAddress};
+    use crate::mem::paging::{PhysicalAddress, VirtualAddress};
     use crate::utils;
     use core::cell::UnsafeCell;
 

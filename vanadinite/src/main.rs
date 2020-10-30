@@ -34,9 +34,9 @@ mod utils;
 
 use core::cell::UnsafeCell;
 use mem::{
-    kernel_patching, perms,
+    kernel_patching,
+    paging::{Execute, PageSize, PhysicalAddress, Read, Sv39PageTable, ToPermissions, VirtualAddress, Write},
     phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
-    sv39::{PageSize, PhysicalAddress, Sv39PageTable, VirtualAddress},
 };
 
 /// # Safety
@@ -134,7 +134,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
         let virt = VirtualAddress::new(page_offset_value + (address - kernel_start));
         let ident = VirtualAddress::new(address);
         let phys = PhysicalAddress::new(address);
-        let permissions = perms::Read | perms::Write | perms::Execute;
+        let permissions = Read | Write | Execute;
 
         (&mut *TEMP_PAGE_TABLE_ROOT.0.get()).map(
             phys,
@@ -254,20 +254,13 @@ pub unsafe extern "C" fn boot_entry(
         PhysicalAddress::new(0x10_0000),
         VirtualAddress::new(0x10_0000),
         PageSize::Kilopage,
-        perms::Read | perms::Write | perms::Execute,
+        Read | Write | Execute,
         &mut page_alloc,
         kernel_patching::phys2virt,
     );
 
     if !root_page_table.is_mapped(fdt_virt, kernel_patching::phys2virt) {
-        root_page_table.map(
-            fdt_phys,
-            fdt_virt,
-            PageSize::Kilopage,
-            perms::Read,
-            &mut page_alloc,
-            kernel_patching::phys2virt,
-        );
+        root_page_table.map(fdt_phys, fdt_virt, PageSize::Kilopage, Read, &mut page_alloc, kernel_patching::phys2virt);
     }
 
     io::init_logging();
@@ -284,7 +277,7 @@ pub unsafe extern "C" fn boot_entry(
             let uart_addr = reg.starting_address() as usize;
             let uart_phys = PhysicalAddress::new(uart_addr);
             let uart_virt = VirtualAddress::new(uart_addr);
-            let perms = perms::Read | perms::Write;
+            let perms = Read | Write;
             root_page_table.map(
                 uart_phys,
                 uart_virt,
@@ -300,7 +293,6 @@ pub unsafe extern "C" fn boot_entry(
 
     let page = pf_alloc.alloc().unwrap();
     log::info!("{:?}", page);
-    pf_alloc.dealloc(page);
     pf_alloc.dealloc(page);
 
     drop(pf_alloc);

@@ -51,3 +51,5 @@ SECTIONS {
 
     /DISCARD/ : { *(.eh_frame_hdr .eh_frame) }
 }
+
+PROVIDE(HEAP_START = 0xffffffff90000000);

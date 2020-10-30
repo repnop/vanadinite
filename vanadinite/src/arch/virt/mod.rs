@@ -54,7 +54,7 @@ enum Finisher {
 ///
 ///     1. Construct a 32-bit value to write
 ///         1a. The bottom 16-bits are the status code
-///         1b. The next set of 16-bits are the exit code (this is ignored for Finisher::Pass which is always 0)
+///         1b. The top 16-bits are the exit code (this is ignored for Finisher::Pass which is always 0)
 ///     2. Write this value to VIRT_TEST (0x100000) + 0x000000
 ///     3. Pray we've actually exited, otherwise panic
 ///

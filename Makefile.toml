@@ -13,9 +13,9 @@ args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown
 dependencies = ["build-vanadinite"]
 script = ['''
     git submodule update --init --quiet
-    mkdir -p riscv-pk/build
-    cd riscv-pk/build
-    ../configure --host=riscv64-unknown-elf --with-payload=../../target/riscv64gc-unknown-none-elf/release/vanadinite --silent
+    mkdir -p submodules/riscv-pk/build
+    cd submodules/riscv-pk/build
+    ../configure --host=riscv64-unknown-elf --with-payload=../../../target/riscv64gc-unknown-none-elf/release/vanadinite --silent
     make --silent
 ''']
 
@@ -29,7 +29,7 @@ args= [
     "-m", "128M",
     "-bios", "none",
     # "-kernel", "target/riscv64gc-unknown-none-elf/release/bootloader",
-    "-kernel", "riscv-pk/build/bbl",
+    "-kernel", "submodules/riscv-pk/build/bbl",
     "-serial", "mon:stdio",
     "-nographic",
     "-d", "guest_errors",
@@ -45,7 +45,7 @@ args= [
     "-m", "128M",
     "-bios", "none",
     # "-kernel", "target/riscv64gc-unknown-none-elf/release/bootloader",
-    "-kernel", "riscv-pk/build/bbl",
+    "-kernel", "submodules/riscv-pk/build/bbl",
     #"-serial", "mon:stdio",
     "-monitor", "stdio",
     #"-nographic",

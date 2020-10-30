@@ -1,6 +1,6 @@
 pub mod bitmap;
 
-use crate::{mem::sv39::PhysicalAddress, sync::Mutex};
+use crate::{mem::paging::PhysicalAddress, sync::Mutex};
 use bitmap::BitmapAllocator;
 
 #[cfg(any(not(any(feature = "pmalloc.allocator.buddy")), feature = "pmalloc.allocator.bitmap"))]
