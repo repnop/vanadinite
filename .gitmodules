@@ -1,3 +1,12 @@
 [submodule "riscv-pk"]
 	path = riscv-pk
 	url = https://github.com/riscv/riscv-pk
+[submodule "riscv-sbi-doc"]
+	path = riscv-sbi-doc
+	url = https://github.com/riscv/riscv-sbi-doc
+[submodule "submodules/riscv-sbi-doc"]
+	path = submodules/riscv-sbi-doc
+	url = https://github.com/riscv/riscv-sbi-doc
+[submodule "submodules/riscv-pk"]
+	path = submodules/riscv-pk
+	url = https://github.com/riscv/riscv-pk
