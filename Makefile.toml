@@ -7,7 +7,7 @@ CARGO_FEATURE_VIRT = ""
 
 [tasks.build-vanadinite]
 command = "cargo"
-args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown-none-elf"]
+args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown-none-elf", "--manifest-path", "src/Cargo.toml"]
 
 [tasks.build-bbl]
 dependencies = ["build-vanadinite"]
