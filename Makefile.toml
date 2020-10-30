@@ -15,7 +15,7 @@ script = ['''
     git submodule update --init --quiet
     mkdir -p submodules/riscv-pk/build
     cd submodules/riscv-pk/build
-    ../configure --host=riscv64-unknown-elf --with-payload=../../../target/riscv64gc-unknown-none-elf/release/vanadinite --silent
+    ../configure --host=riscv64-unknown-elf --with-payload=../../../src/target/riscv64gc-unknown-none-elf/release/vanadinite --silent
     make --silent
 ''']
 
