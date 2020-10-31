@@ -7,7 +7,7 @@ SECTIONS {
     /* . = 0x80000000; */
     . = 0xffffffff80000000;
     PROVIDE(PAGE_OFFSET = .);
-    .text : {
+    .text : AT(ADDR(.text) - 0xFFFFFFFEFFE00000) {
         PROVIDE(KERNEL_START = .);
         *(.init.boot)
         *(.init.rust)
@@ -17,7 +17,7 @@ SECTIONS {
 
     . = ALIGN(4K);
 
-    .data : {
+    .data : AT(ADDR(.data) - 0xFFFFFFFEFFE00000) {
         *(.data .data.* .rodata .rodata.*)
         . = ALIGN(8);
         PROVIDE(__tmp_stack_bottom = .);
@@ -28,7 +28,7 @@ SECTIONS {
 
     . = ALIGN(8);
 
-    .sdata : {
+    .sdata : AT(ADDR(.sdata) - 0xFFFFFFFEFFE00000) {
         PROVIDE(__global_pointer$ = .);
         *(.sdata .sdata.*)        
     }
@@ -36,11 +36,11 @@ SECTIONS {
     . = ALIGN(4K);
 
     PROVIDE(__bss_start = .);
-    .sbss : {
+    .sbss : AT(ADDR(.sbss) - 0xFFFFFFFEFFE00000) {
         *(.sbss .sbss.*);
     }
 
-    .bss : {
+    .bss : AT(ADDR(.bss) - 0xFFFFFFFEFFE00000) {
         *(.bss .bss.*)
     }
     . = ALIGN(8);
@@ -52,4 +52,4 @@ SECTIONS {
     /DISCARD/ : { *(.eh_frame_hdr .eh_frame) }
 }
 
-PROVIDE(HEAP_START = 0xffffffff90000000);
+PROVIDE(HEAP_START = 0xffffff9000000000);

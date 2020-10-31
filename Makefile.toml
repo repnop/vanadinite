@@ -27,12 +27,11 @@ args= [
     "-cpu", "rv64",
     "-smp", "1",
     "-m", "128M",
-    "-bios", "none",
-    # "-kernel", "target/riscv64gc-unknown-none-elf/release/bootloader",
-    "-kernel", "submodules/riscv-pk/build/bbl",
+    "-bios", "opensbi-riscv64-virt-fw_jump.bin",
+    "-kernel", "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
+    #"-kernel", "submodules/riscv-pk/build/bbl",
     "-serial", "mon:stdio",
     "-nographic",
-    "-d", "guest_errors",
 ]
 
 [tasks.debug]
@@ -43,12 +42,10 @@ args= [
     "-cpu", "rv64",
     "-smp", "1",
     "-m", "128M",
-    "-bios", "none",
-    # "-kernel", "target/riscv64gc-unknown-none-elf/release/bootloader",
-    "-kernel", "submodules/riscv-pk/build/bbl",
-    #"-serial", "mon:stdio",
+    "-bios", "opensbi-riscv64-virt-fw_jump.bin",
+    #"-kernel", "submodules/riscv-pk/build/bbl",
+    "-kernel", "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
     "-monitor", "stdio",
-    #"-nographic",
     "-gdb", "tcp::1234",
     "-S",
     "-d", "guest_errors,trace:riscv_trap,trace:sifive_gpio_write,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write",
@@ -58,11 +55,11 @@ args= [
 [tasks.gdb]
 command = "riscv64-unknown-elf-gdb"
 args = [
-    "target/riscv64gc-unknown-none-elf/release/vanadinite",
+    "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
     "--eval-command", "target remote :1234",
     #"--eval-command", "c",
     #"--eval-command", "set $pc += 2",
-    #"--eval-command", "break *0x80200000"
+    "--eval-command", "break *0x80200000"
 ]
 
 [tasks.lldb]
