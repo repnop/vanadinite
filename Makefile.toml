@@ -9,18 +9,8 @@ CARGO_FEATURE_VIRT = ""
 command = "cargo"
 args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown-none-elf", "--manifest-path", "src/Cargo.toml"]
 
-[tasks.build-bbl]
-dependencies = ["build-vanadinite"]
-script = ['''
-    git submodule update --init --quiet
-    mkdir -p submodules/riscv-pk/build
-    cd submodules/riscv-pk/build
-    ../configure --host=riscv64-unknown-elf --with-payload=../../../src/target/riscv64gc-unknown-none-elf/release/vanadinite --silent
-    make --silent
-''']
-
 [tasks.run]
-dependencies = ["build-bbl"]
+dependencies = ["build-vanadinite"]
 command = "qemu-system-riscv64"
 args= [
     "-machine", "virt",
@@ -35,7 +25,7 @@ args= [
 ]
 
 [tasks.debug]
-dependencies = ["build-bbl"]
+dependencies = ["build-vanadinite"]
 command = "qemu-system-riscv64"
 args= [
     "-machine", "virt",
