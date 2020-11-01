@@ -7,7 +7,7 @@ use bitmap::BitmapAllocator;
 pub static PHYSICAL_MEMORY_ALLOCATOR: Mutex<BitmapAllocator> = Mutex::new(BitmapAllocator::new());
 
 pub unsafe trait PhysicalMemoryAllocator {
-    fn init(&mut self, start: *mut u8, size: usize);
+    fn init(&mut self, start: *mut u8, end: *mut u8);
     unsafe fn alloc(&mut self) -> Option<PhysicalPage>;
     unsafe fn dealloc(&mut self, page: PhysicalPage);
 }

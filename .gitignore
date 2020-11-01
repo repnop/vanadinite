@@ -4,3 +4,4 @@ Cargo.lock
 .gdb_history
 *.dtb
 *.dts
+qemu.log

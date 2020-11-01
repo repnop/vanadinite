@@ -9,8 +9,11 @@ edition = "2018"
 fdt = { path = "../fdt" }
 log = "0.4.11"
 lock_api = "0.4.1"
+sbi = { path = "../sbi" }
 
 [features]
+default-features = ["virt"]
+
 virt = []
 "pmalloc.allocator.bitmap" = []
 "pmalloc.allocator.buddy" = []

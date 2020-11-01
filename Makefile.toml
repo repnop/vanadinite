@@ -49,7 +49,7 @@ args = [
     "--eval-command", "target remote :1234",
     #"--eval-command", "c",
     #"--eval-command", "set $pc += 2",
-    "--eval-command", "break *0x80200000"
+    #"--eval-command", "break *0x80200000"
 ]
 
 [tasks.lldb]

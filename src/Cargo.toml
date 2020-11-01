@@ -3,6 +3,7 @@ members = [
     "common",
     "fat32",
     "fdt",
+    "sbi",
     "vanadinite",
 ]
 

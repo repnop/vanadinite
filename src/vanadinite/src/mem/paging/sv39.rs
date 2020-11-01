@@ -154,6 +154,10 @@ impl VirtualAddress {
         VirtualAddress(addr)
     }
 
+    pub fn from_ptr<T>(ptr: *const T) -> Self {
+        Self(ptr as usize)
+    }
+
     pub fn as_ptr(self) -> *const u8 {
         self.0 as *const u8
     }

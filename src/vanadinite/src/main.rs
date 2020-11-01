@@ -218,29 +218,35 @@ pub unsafe extern "C" fn boot_entry(
         root_page_table.unmap(patched, kernel_patching::phys2virt);
     }
 
-    // Calculate the RAM size after taking into account the kernel image size
-    let ram_end_virt = kernel_patching::phys2virt(PhysicalAddress::new(region_start)).as_usize() + region_size;
-    let mut ram_size = ram_end_virt - kernel_end;
-
     let fdt_usize = fdt as usize;
     let fdt_phys = PhysicalAddress::new(fdt_usize);
     let fdt_virt = VirtualAddress::new(fdt_usize);
 
     let alloc_start = if fdt as usize >= kernel_patching::virt2phys(VirtualAddress::new(kernel_end)).as_usize() {
         // round up to next page size after the FDT
-        let addr = ((kernel_patching::phys2virt(fdt_phys).as_usize() + fdt_size as usize) & !0xFFFusize) + 0x1000;
-        ram_size = ram_end_virt - addr;
-
-        addr
+        ((kernel_patching::phys2virt(fdt_phys).as_usize() + fdt_size as usize) & !0x1FFFFFusize) + 0x200000
     } else {
         kernel_end
     };
+
+    if !root_page_table.is_mapped(VirtualAddress::new(alloc_start), kernel_patching::phys2virt) {
+        let alloc_start = VirtualAddress::new(alloc_start);
+        let high_mem_phys = kernel_patching::virt2phys(VirtualAddress::from_ptr(&TEMP_PAGE_TABLE_HIGH_MEM));
+        root_page_table.map(
+            kernel_patching::virt2phys(alloc_start),
+            alloc_start,
+            PageSize::Megapage,
+            Read | Write | Execute,
+            || (TEMP_PAGE_TABLE_HIGH_MEM.0.get(), high_mem_phys),
+            kernel_patching::phys2virt,
+        );
+    }
 
     // Set the allocator to start allocating memory after the end of the kernel or fdt
     let kernel_end_phys = kernel_patching::virt2phys(VirtualAddress::new(alloc_start)).as_mut_ptr();
 
     let mut pf_alloc = PHYSICAL_MEMORY_ALLOCATOR.lock();
-    pf_alloc.init(kernel_end_phys, ram_size);
+    pf_alloc.init(kernel_end_phys, (region_start + region_size) as *mut u8);
 
     let mut page_alloc = || {
         let phys_addr = pf_alloc.alloc().unwrap().as_phys_address();
@@ -249,7 +255,7 @@ pub unsafe extern "C" fn boot_entry(
         (virt_addr.as_mut_ptr() as *mut Sv39PageTable, phys_addr)
     };
 
-    //#[cfg(feature = "virt")]
+    #[cfg(feature = "virt")]
     root_page_table.map(
         PhysicalAddress::new(0x10_0000),
         VirtualAddress::new(0x10_0000),
@@ -299,6 +305,10 @@ pub unsafe extern "C" fn boot_entry(
 
     log::info!("# of memory reservations: {}\r", fdt.memory_reservations().len());
     log::info!("{:#x?}", fdt.memory());
+
+    log::info!("SBI spec version: {:?}", sbi::base::spec_version());
+    log::info!("SBI implementor: {:?}", sbi::base::impl_id());
+    log::info!("marchid: {:#x}", sbi::base::marchid());
 
     arch::exit(arch::ExitStatus::Ok)
 }
