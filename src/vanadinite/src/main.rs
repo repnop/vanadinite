@@ -120,9 +120,6 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     log::info!("SBI implementor: {:?}", sbi::base::impl_id());
     log::info!("marchid: {:#x}", sbi::base::marchid());
 
-    let mut pagetablemanager = mem::paging::PageTableManager {};
-    pagetablemanager.map_page(Read | Write, VirtualAddress::new(0xFFFFFFD000000000));
-
     arch::exit(arch::ExitStatus::Ok)
 }
 

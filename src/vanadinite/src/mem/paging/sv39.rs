@@ -56,7 +56,8 @@ impl Sv39PageTable {
 
         for i in size.i() {
             if pte.is_branch() {
-                page_table = unsafe { &mut *address_conversion(pte.subtable().unwrap()).as_mut_ptr().cast() };
+                let addr = pte.subtable().unwrap();
+                page_table = unsafe { &mut *address_conversion(addr).as_mut_ptr().cast() };
             } else {
                 let (pt, phys_addr) = page_alloc();
                 pte.make_branch(phys_addr);

@@ -10,16 +10,17 @@ SECTIONS {
 
     __offset = . - 0x80200000;
     .text : AT(ADDR(.text) - __offset) {
+        PROVIDE(__text_start = .);
         PROVIDE(KERNEL_START = .);
         *(.init.boot)
         *(.init.rust)
         *(.text .text.*)
-        PROVIDE(__end_text = .);
+        . = ALIGN(4K);
+        PROVIDE(__text_end = .);
     }
 
-    . = ALIGN(4K);
-
     .data : AT(ADDR(.data) - __offset) {
+        PROVIDE(__data_start = .);
         *(.data .data.* .rodata .rodata.*)
         . = ALIGN(8);
         PROVIDE(__tmp_stack_bottom = .);
@@ -32,10 +33,10 @@ SECTIONS {
 
     .sdata : AT(ADDR(.sdata) - __offset) {
         PROVIDE(__global_pointer$ = .);
-        *(.sdata .sdata.*)        
+        *(.sdata .sdata.*)       
+        . = ALIGN(4K);
+        PROVIDE(__data_end = .); 
     }
-
-    . = ALIGN(4K);
 
     PROVIDE(__bss_start = .);
     .sbss : AT(ADDR(.sbss) - __offset) {
@@ -45,7 +46,7 @@ SECTIONS {
     .bss : AT(ADDR(.bss) - __offset) {
         *(.bss .bss.*)
     }
-    . = ALIGN(8);
+    . = ALIGN(4K);
     PROVIDE(__bss_end = .);
 
     . = ALIGN(2M);
