@@ -9,6 +9,10 @@ impl LinkerSymbol {
     pub fn as_mut_ptr(&'static mut self) -> *mut u8 {
         self as *mut Self as *mut u8
     }
+
+    pub fn as_usize(&'static self) -> usize {
+        self.as_ptr() as usize
+    }
 }
 
 unsafe impl Sync for LinkerSymbol {}

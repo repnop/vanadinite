@@ -1,4 +1,28 @@
 use super::perms::ToPermissions;
+use core::cell::UnsafeCell;
+
+#[repr(transparent)]
+pub struct StaticPageTable(UnsafeCell<Sv39PageTable>);
+
+impl StaticPageTable {
+    pub const fn new(table: UnsafeCell<Sv39PageTable>) -> Self {
+        Self(table)
+    }
+}
+
+impl core::ops::Deref for StaticPageTable {
+    type Target = UnsafeCell<Sv39PageTable>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+unsafe impl Send for StaticPageTable {}
+unsafe impl Sync for StaticPageTable {}
+
+// FIXME: add synchronization somehow
+pub static PAGE_TABLE_ROOT: StaticPageTable = StaticPageTable(UnsafeCell::new(Sv39PageTable::new()));
 
 #[repr(C, align(4096))]
 pub struct Sv39PageTable {

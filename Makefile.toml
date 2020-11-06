@@ -19,7 +19,6 @@ args= [
     "-m", "128M",
     "-bios", "opensbi-riscv64-virt-fw_jump.bin",
     "-kernel", "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
-    #"-kernel", "submodules/riscv-pk/build/bbl",
     "-serial", "mon:stdio",
     "-nographic",
 ]
@@ -33,7 +32,6 @@ args= [
     "-smp", "1",
     "-m", "128M",
     "-bios", "opensbi-riscv64-virt-fw_jump.bin",
-    #"-kernel", "submodules/riscv-pk/build/bbl",
     "-kernel", "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
     "-monitor", "stdio",
     "-gdb", "tcp::1234",
@@ -47,17 +45,10 @@ command = "riscv64-unknown-elf-gdb"
 args = [
     "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
     "--eval-command", "target remote :1234",
-    #"--eval-command", "c",
-    #"--eval-command", "set $pc += 2",
-    #"--eval-command", "break *0x80200000"
 ]
 
 [tasks.lldb]
 command = "lldb"
 args = [
     "target/riscv64gc-unknown-none-elf/release/vanadinite",
-    #"--eval-command", "target remote :1234",
-    #"--eval-command", "c",
-    #"--eval-command", "set $pc += 2",
-    #"--eval-command", "break *0x80200000"
 ]

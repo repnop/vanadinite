@@ -43,7 +43,7 @@ impl Uart16550 {
     pub fn read(&self) -> u8 {
         while !self.data_waiting() {}
 
-        self.data_register
+        unsafe { (&self.data_register as *const u8).read_volatile() }
     }
 
     pub fn try_read(&self) -> Option<u8> {
@@ -63,7 +63,9 @@ impl Uart16550 {
     pub fn write(&mut self, data: u8) {
         while !self.data_empty() {}
 
-        self.data_register = data;
+        unsafe {
+            (&mut self.data_register as *mut u8).write_volatile(data);
+        }
     }
 
     pub fn write_str(&mut self, s: &str) {
