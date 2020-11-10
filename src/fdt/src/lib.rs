@@ -85,7 +85,7 @@ impl Fdt {
     /// # Safety
     /// yes this unsafe is made of unsafe
     pub unsafe fn find_node<'a>(self: *const Self, name: &str) -> Option<impl Iterator<Item = node::NodeProperty<'a>>> {
-        Some(node::node_properties(node::find_node(self.structure_block().cast(), name, self)?, self.strings()))
+        Some(node::node_properties(node::find_node(&mut self.structure_block().cast(), name, self)?, self.strings()))
     }
 
     /// # Safety
