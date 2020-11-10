@@ -1,6 +1,8 @@
 use super::perms::ToPermissions;
 use core::cell::UnsafeCell;
 
+pub const KIB_PAGE_SIZE: usize = 4096;
+
 #[repr(transparent)]
 pub struct StaticPageTable(UnsafeCell<Sv39PageTable>);
 

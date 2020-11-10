@@ -8,21 +8,6 @@ compile_error!("vanadinite assumes a 64-bit pointer size, cannot compile on non-
 
 extern crate alloc;
 
-struct Heck;
-
-unsafe impl alloc::alloc::GlobalAlloc for Heck {
-    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        todo!()
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-        todo!()
-    }
-}
-
-#[global_allocator]
-static HECK: Heck = Heck;
-
 mod arch;
 mod asm;
 mod boot;
@@ -56,8 +41,6 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     let mut pf_alloc = PHYSICAL_MEMORY_ALLOCATOR.lock();
 
-    let phys = pf_alloc.alloc().unwrap().as_phys_address();
-
     let mut page_alloc = || {
         let phys_addr = pf_alloc.alloc().unwrap().as_phys_address();
         //let virt_addr = kernel_patching::phys2virt(phys_addr);
@@ -66,14 +49,6 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     };
 
     let root_page_table = &mut *PAGE_TABLE_ROOT.get();
-    root_page_table.map(
-        phys,
-        VirtualAddress::new(0xFFFFFFE000000000),
-        PageSize::Kilopage,
-        Read | Write,
-        &mut page_alloc,
-        kernel_patching::phys2virt,
-    );
 
     let uart_fdt = fdt.find_node("/uart");
     for property in uart_fdt.unwrap() {
@@ -119,6 +94,18 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     log::info!("SBI spec version: {:?}", sbi::base::spec_version());
     log::info!("SBI implementor: {:?}", sbi::base::impl_id());
     log::info!("marchid: {:#x}", sbi::base::marchid());
+
+    log::info!("Heap test!");
+    let s = alloc::string::String::from("nice.");
+    let mut v = alloc::vec::Vec::new();
+
+    for i in 0..10 {
+        v.push(i);
+        println!("{:?}", v);
+    }
+
+    println!("{}", s);
+    log::info!("Yay heap!");
 
     arch::exit(arch::ExitStatus::Ok)
 }

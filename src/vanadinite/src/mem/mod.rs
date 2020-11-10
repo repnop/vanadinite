@@ -1,12 +1,12 @@
 pub mod heap;
 pub mod phys;
 pub mod paging {
+    mod manager;
     mod perms;
-    mod region;
     mod sv39;
 
+    pub use manager::*;
     pub use perms::*;
-    pub use region::*;
     pub use sv39::*;
 }
 
