@@ -127,30 +127,23 @@ impl Trap {
 }
 
 #[no_mangle]
-pub extern "C" fn trap_handler(
-    regs: &TrapFrame,
-    mepc: usize,
-    mcause: usize,
-    mtval: usize,
-) -> usize {
+pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stval: usize) -> usize {
     log::info!("we trappin': {:x?}", regs);
-    log::info!(
-        "mcause: {:?}, mepc: {:#x}, mtval (as ptr): {:#p}",
-        Trap::from_cause(mcause),
-        mepc,
-        mtval as *mut u8
-    );
-    mepc + 4
+    log::info!("mcause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
+
+    if let Trap::LoadPageFault = Trap::from_cause(scause) {
+        panic!("Load access fault accessing {:#p}", stval as *mut u8);
+    }
+    sepc + 4
 }
 
 #[rustfmt::skip]
 global_asm!("
     .section .text
-    .globl mtvec_trap_shim
-    .p2align 2
-    mtvec_trap_shim:
+    .globl stvec_trap_shim
+    stvec_trap_shim:
         .align 4
-        csrw mscratch, sp
+        csrw sscratch, sp
 
         la sp, __scratch_stack
 
@@ -159,7 +152,7 @@ global_asm!("
         sd x1, 0(sp)
 
         # push original sp
-        csrr x1, mscratch
+        csrr x1, sscratch
         sd x1, 8(sp)
 
         # restore x1's value
@@ -196,19 +189,16 @@ global_asm!("
         sd x31, 240(sp)
 
         mv a0, sp
-        csrr a1, mepc
-        csrr a2, mcause
-        csrr a3, mtval
+        csrr a1, sepc
+        csrr a2, scause
+        csrr a3, stval
 
         call trap_handler
 
-        csrw mepc, a0
+        csrw sepc, a0
 
         ld x1, 0(sp)
-        
-        # *facepalm*
-        # ld x2, 8(sp)
-        
+        # skip x2 as its the stack pointer
         ld x3, 16(sp)
         ld x4, 24(sp)
         ld x5, 32(sp)
@@ -239,9 +229,9 @@ global_asm!("
         ld x30, 232(sp)
         ld x31, 240(sp)
         
-        csrr sp, mscratch
+        csrr sp, sscratch
         
         sc.d zero, zero, 0(sp)
         # gtfo
-        mret
+        sret
 ");

@@ -79,10 +79,10 @@ struct Logger;
 impl log::Log for Logger {
     #[allow(unused_variables)]
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        #[cfg(debug_assertions)]
+        #[cfg(any(debug_assertions, feature = "debug_log"))]
         return true;
 
-        #[cfg(not(debug_assertions))]
+        #[cfg(all(not(debug_assertions), not(feature = "debug_log")))]
         return metadata.level() <= log::Level::Info;
     }
 

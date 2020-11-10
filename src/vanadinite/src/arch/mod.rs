@@ -1,3 +1,4 @@
+pub mod csr;
 #[cfg(feature = "virt")]
 pub mod virt;
 

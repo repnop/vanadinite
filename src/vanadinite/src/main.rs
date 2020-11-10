@@ -1,5 +1,6 @@
 #![allow(clippy::match_bool)]
-#![feature(asm, naked_functions, global_asm, alloc_error_handler, raw_ref_op)]
+#![allow(incomplete_features)]
+#![feature(asm, naked_functions, global_asm, alloc_error_handler, raw_ref_op, const_generics)]
 #![no_std]
 #![no_main]
 
@@ -15,9 +16,10 @@ mod drivers;
 mod io;
 mod mem;
 mod sync;
-// mod trap;
+mod trap;
 mod utils;
 
+use arch::csr;
 use mem::{
     kernel_patching,
     paging::{PageSize, PhysicalAddress, Read, Sv39PageTable, VirtualAddress, Write, PAGE_TABLE_ROOT},
@@ -26,12 +28,12 @@ use mem::{
 
 const TWO_MEBS: usize = 2 * 1024 * 1024;
 
-#[no_mangle]
-unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
-    if hart_id != 0 {
-        panic!("not hart 0");
-    }
+extern "C" {
+    static stvec_trap_shim: utils::LinkerSymbol;
+}
 
+#[no_mangle]
+unsafe extern "C" fn kmain(_hart_id: usize, fdt: *const u8) -> ! {
     crate::io::init_logging();
 
     let fdt = match fdt::Fdt::new(fdt) {
@@ -43,7 +45,6 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     let mut page_alloc = || {
         let phys_addr = pf_alloc.alloc().unwrap().as_phys_address();
-        //let virt_addr = kernel_patching::phys2virt(phys_addr);
 
         (kernel_patching::phys2virt(phys_addr).as_mut_ptr() as *mut Sv39PageTable, phys_addr)
     };
@@ -65,7 +66,7 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
                 kernel_patching::phys2virt,
             );
 
-            crate::io::set_console(uart_addr as *mut crate::drivers::uart16550::Uart16550);
+            crate::io::set_console(uart_addr as *mut crate::drivers::misc::uart16550::Uart16550);
         }
     }
 
@@ -80,32 +81,13 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         root_page_table.unmap(patched, kernel_patching::phys2virt);
     }
 
-    let mut pf_alloc = PHYSICAL_MEMORY_ALLOCATOR.lock();
-
-    let page = pf_alloc.alloc().unwrap();
-    log::info!("{:?}", page);
-    pf_alloc.dealloc(page);
-
-    drop(pf_alloc);
-
-    log::info!("# of memory reservations: {}\r", fdt.memory_reservations().len());
-    log::info!("{:#x?}", fdt.memory());
-
     log::info!("SBI spec version: {:?}", sbi::base::spec_version());
     log::info!("SBI implementor: {:?}", sbi::base::impl_id());
     log::info!("marchid: {:#x}", sbi::base::marchid());
+    log::info!("Setting stvec to {:#p}", stvec_trap_shim.as_ptr());
+    csr::stvec::set(core::mem::transmute(stvec_trap_shim.as_ptr()));
 
-    log::info!("Heap test!");
-    let s = alloc::string::String::from("nice.");
-    let mut v = alloc::vec::Vec::new();
-
-    for i in 0..10 {
-        v.push(i);
-        println!("{:?}", v);
-    }
-
-    println!("{}", s);
-    log::info!("Yay heap!");
+    log::info!("{:#?}", fdt.find_node("/soc/interrupt-controller").map(|i| i.collect::<alloc::vec::Vec<_>>()));
 
     arch::exit(arch::ExitStatus::Ok)
 }

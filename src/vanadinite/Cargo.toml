@@ -12,8 +12,9 @@ lock_api = "0.4.1"
 sbi = { path = "../sbi" }
 
 [features]
-default-features = ["virt"]
+default = ["virt"]
 
+debug_log = []
 virt = []
 "pmalloc.allocator.bitmap" = []
 "pmalloc.allocator.buddy" = []

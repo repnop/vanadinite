@@ -1,16 +1,19 @@
 [config]
 default_to_workspace = false
 
-[tasks.build-vanadinite.env]
-RUSTFLAGS = "-C link-arg=-Tvanadinite/lds/virt.lds -C code-model=medium"
-CARGO_FEATURE_VIRT = ""
-
-[tasks.build-vanadinite]
+[tasks.'build-vanadinite.release']
+env = { RUSTFLAGS = "-C link-arg=-Tvanadinite/lds/virt.lds -C code-model=medium" }
 command = "cargo"
-args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown-none-elf", "--manifest-path", "src/Cargo.toml"]
+args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown-none-elf", "--manifest-path", "src/vanadinite/Cargo.toml"]
+
+[tasks.'build-vanadinite.debug']
+env = { RUSTFLAGS = "-C link-arg=-Tvanadinite/lds/virt.lds -C code-model=medium" }
+command = "cargo"
+args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown-none-elf", "--manifest-path", "src/vanadinite/Cargo.toml", "--features", "virt debug_log"]
+
 
 [tasks.run]
-dependencies = ["build-vanadinite"]
+dependencies = ["build-vanadinite.release"]
 command = "qemu-system-riscv64"
 args= [
     "-machine", "virt",
@@ -24,7 +27,7 @@ args= [
 ]
 
 [tasks.debug]
-dependencies = ["build-vanadinite"]
+dependencies = ["build-vanadinite.debug"]
 command = "qemu-system-riscv64"
 args= [
     "-machine", "virt",

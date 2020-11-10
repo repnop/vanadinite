@@ -22,7 +22,6 @@ extern "C" {
 
 const TWO_MEBS: usize = 2 * 1024 * 1024;
 
-pub static TEMP_PAGE_TABLE_HIGH_MEM: StaticPageTable = StaticPageTable::new(UnsafeCell::new(Sv39PageTable::new()));
 pub static TEMP_PAGE_TABLE_IDENTITY: StaticPageTable = StaticPageTable::new(UnsafeCell::new(Sv39PageTable::new()));
 
 /// # Safety
@@ -64,7 +63,9 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let start = memory_region.starting_address() as usize;
     let size = memory_region.size() as usize;
 
-    let high_mem_phys = (TEMP_PAGE_TABLE_HIGH_MEM.get(), PhysicalAddress::from_ptr(&TEMP_PAGE_TABLE_HIGH_MEM));
+    // let start = 0x80000000;
+    // let size = 0x8000000;
+
     let ident_mem_phys = (TEMP_PAGE_TABLE_IDENTITY.get(), PhysicalAddress::from_ptr(&TEMP_PAGE_TABLE_IDENTITY));
 
     let root_page_table = &mut *PAGE_TABLE_ROOT.get();
@@ -94,7 +95,6 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     };
 
     for address in (kernel_start..kernel_end).step_by(TWO_MEBS) {
-        let virt = VirtualAddress::new(page_offset_value + (address - kernel_start));
         let ident = VirtualAddress::new(address);
         let phys = PhysicalAddress::new(address);
         let permissions = Read | Write | Execute;
@@ -177,8 +177,15 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     );
 
     if !root_page_table.is_mapped(fdt_virt, |p| VirtualAddress::new(p.as_usize())) {
-        root_page_table
-            .map(fdt_phys, fdt_virt, PageSize::Kilopage, Read, &mut page_alloc, |p| VirtualAddress::new(p.as_usize()));
+        let rounded_up = ((fdt_phys.as_usize() + fdt_size as usize) & !0xFFF) + 0x1000;
+
+        for addr in (fdt_phys.as_usize()..rounded_up).step_by(4096) {
+            let fdt_phys = PhysicalAddress::new(addr);
+            let fdt_virt = VirtualAddress::new(addr);
+            root_page_table.map(fdt_phys, fdt_virt, PageSize::Kilopage, Read, &mut page_alloc, |p| {
+                VirtualAddress::new(p.as_usize())
+            });
+        }
     }
 
     drop(pf_alloc);
