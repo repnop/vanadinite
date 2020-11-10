@@ -1,3 +1,5 @@
+testing files/
+docs/
 target/
 **/*.rs.bk
 Cargo.lock
