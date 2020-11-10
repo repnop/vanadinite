@@ -1,4 +1,3 @@
-#![feature(arbitrary_self_types)]
 #![no_std]
 
 mod node;
@@ -37,10 +36,12 @@ impl Fdt {
     /// This function checks the pointer alignment and performs a read to verify
     /// the magic value. If the pointer is invalid this can result in undefined
     /// behavior.
-    pub unsafe fn new(ptr: *const u8) -> Option<*const Self> {
-        assert_eq!(ptr as usize % 4, 0);
+    pub unsafe fn new<'a>(ptr: *const u8) -> Option<&'a Self> {
+        if ptr.is_null() || ptr.align_offset(4) != 0 {
+            return None;
+        }
 
-        let this: *const Self = ptr.cast();
+        let this: &Self = &*ptr.cast();
 
         match this.validate_magic() {
             true => Some(this),
@@ -50,72 +51,65 @@ impl Fdt {
 
     /// # Safety
     /// This reads from a pointer to `Self`, and if invalid can result in UB
-    pub unsafe fn validate_magic(self: *const Self) -> bool {
-        self.make_ref().magic.get() == 0xd00dfeed
+    fn validate_magic(&self) -> bool {
+        self.magic.get() == 0xd00dfeed
     }
 
-    /// # Safety
-    /// Requires a valid pointer to `Self`
-    pub unsafe fn strings(self: *const Self) -> *const FdtStrings {
-        self.offset_bytes(self.make_ref().off_dt_strings.get() as usize).cast()
+    pub fn strings(&self) -> impl Iterator<Item = &str> {
+        let mut ptr = self.strings_ptr();
+
+        core::iter::from_fn(move || {
+            if ptr >= self.strings_limit() {
+                return None;
+            }
+
+            let cstr = unsafe { CStr::from_ptr(ptr) };
+            ptr = unsafe { ptr.add(cstr.to_bytes().len() + 1) };
+            Some(cstr.to_str().ok()?)
+        })
     }
 
-    /// # Safety
-    /// Requres a valid pointer to `Self` and the header must specify a valid
-    /// memory offset into the memory reservation block
-    pub unsafe fn memory_reservations<'a>(self: *const Self) -> &'a [MemoryReservation] {
-        let offset = self.make_ref().off_mem_rsvmap.get() as usize;
+    pub fn memory_reservations<'a>(&self) -> &'a [MemoryReservation] {
+        let offset = self.off_mem_rsvmap.get() as usize;
         let mut length = 0;
 
         let mut ptr = self.offset_bytes(offset).cast::<MemoryReservation>();
-        while (*ptr).address.get() != 0 && (*ptr).size.get() != 0 {
-            length += 1;
-            ptr = ptr.add(1);
+        unsafe {
+            while (*ptr).address.get() != 0 && (*ptr).size.get() != 0 {
+                length += 1;
+                ptr = ptr.add(1);
+            }
         }
 
-        core::slice::from_raw_parts(self.offset_bytes(offset).cast(), length)
+        unsafe { core::slice::from_raw_parts(self.offset_bytes(offset).cast(), length) }
     }
 
-    /// # Safety
-    /// yes
-    pub unsafe fn structure_block(self: *const Self) -> *const u32 {
-        self.offset_bytes(self.make_ref().off_dt_struct.get() as usize).cast()
+    pub fn find_node(&self, name: &str) -> Option<node::FdtNode<'_>> {
+        unsafe { node::find_node(&mut self.structs_ptr().cast(), name, self) }
     }
 
-    /// # Safety
-    /// yes this unsafe is made of unsafe
-    pub unsafe fn find_node<'a>(self: *const Self, name: &str) -> Option<impl Iterator<Item = node::NodeProperty<'a>>> {
-        Some(node::node_properties(node::find_node(&mut self.structure_block().cast(), name, self)?, self.strings()))
-    }
-
-    /// # Safety
-    /// I'm the captain now
-    pub unsafe fn memory<'a>(self: *const Self) -> MemoryNode<'a> {
-        let properties = self.find_node("/memory").expect("requires memory node");
+    pub fn memory<'a>(&self) -> MemoryNode<'a> {
+        let node = self.find_node("/memory").expect("requires memory node");
 
         let mut regions = &[][..];
         let mut initial_mapped_area = None;
 
-        for property in properties {
+        for property in node.properties() {
             match property.name {
                 "reg" => {
                     assert_eq!(property.value.as_ptr() as usize % 8, 0);
-                    regions = core::slice::from_raw_parts(
-                        property.value.as_ptr() as *const MemoryRegion,
-                        property.value.len() / 16,
-                    );
+                    regions = unsafe {
+                        core::slice::from_raw_parts(
+                            property.value.as_ptr() as *const MemoryRegion,
+                            property.value.len() / 16,
+                        )
+                    };
                 }
                 "initial-mapped-area" => {
-                    assert_eq!(property.value.as_ptr() as usize % 8, 0);
-
-                    let mut ptr = property.value.as_ptr();
-                    let effective_address: BigEndianU64 = *ptr.cast();
-
-                    node::advance_ptr(&mut ptr, 8);
-                    let physical_address: BigEndianU64 = *ptr.cast();
-
-                    node::advance_ptr(&mut ptr, 8);
-                    let size: BigEndianU32 = *ptr.cast();
+                    let mut stream = common::byteorder::IntegerStream::new(property.value);
+                    let effective_address: BigEndianU64 = stream.next().expect("effective address");
+                    let physical_address: BigEndianU64 = stream.next().expect("physical address");
+                    let size: BigEndianU32 = stream.next().expect("size");
 
                     initial_mapped_area = Some(MappedArea {
                         effective_address: effective_address.get(),
@@ -131,35 +125,74 @@ impl Fdt {
         MemoryNode { regions, initial_mapped_area }
     }
 
-    unsafe fn make_ref<'a>(self: *const Self) -> &'a Self {
-        &*self
+    pub fn total_size(&self) -> usize {
+        self.totalsize.get() as usize
     }
 
-    unsafe fn offset_bytes(self: *const Self, n: usize) -> *const u8 {
-        self.cast::<u8>().add(n)
+    fn limit(&self) -> *const u8 {
+        unsafe { (self as *const Self).cast::<u8>().add(self.total_size()) }
     }
 
-    /// # Safety
-    /// yes
-    pub unsafe fn total_size(self: *const Self) -> u32 {
-        self.make_ref().totalsize.get()
+    fn cstr_at_offset<'a>(&self, offset: usize) -> &'a CStr {
+        let ptr = unsafe { self.strings_ptr().add(offset) };
+        assert!(ptr < self.limit(), "cstr past limit");
+        unsafe { CStr::from_ptr(ptr) }
     }
-}
 
-pub struct FdtStrings;
+    fn str_at_offset<'a>(&self, offset: usize) -> &'a str {
+        self.cstr_at_offset(offset).to_str().expect("not utf-8 cstr")
+    }
 
-impl FdtStrings {
-    /// # Safety
-    /// Requires a valid pointer to `Self` and the offset in bytes must point to
-    /// a valid C string
-    pub unsafe fn cstr_at_offset<'a>(self: *const Self, offset: usize) -> &'a CStr {
-        CStr::from_ptr(self.cast::<cstr_core::c_char>().add(offset))
+    fn strings_ptr(&self) -> *const u8 {
+        self.offset_bytes(self.off_dt_strings.get() as usize)
+    }
+
+    fn strings_limit(&self) -> *const u8 {
+        unsafe { self.offset_bytes(self.off_dt_strings.get() as usize).add(self.size_dt_strings.get() as usize) }
+    }
+
+    fn structs_ptr(&self) -> *const u8 {
+        self.offset_bytes(self.off_dt_struct.get() as usize)
+    }
+
+    fn structs_limit(&self) -> *const u8 {
+        unsafe { self.offset_bytes(self.off_dt_struct.get() as usize).add(self.size_dt_struct.get() as usize) }
+    }
+
+    fn offset_bytes(&self, n: usize) -> *const u8 {
+        let ptr = unsafe { (self as *const Self).cast::<u8>().add(n) };
+        assert!(ptr < self.limit(), "offset past limit");
+
+        ptr
     }
 }
 
 #[derive(Debug)]
 #[repr(C)]
 pub struct MemoryReservation {
-    pub address: BigEndianU64,
-    pub size: BigEndianU64,
+    address: BigEndianU64,
+    size: BigEndianU64,
+}
+
+impl MemoryReservation {
+    pub fn address(&self) -> *const u8 {
+        self.address.get() as usize as *const u8
+    }
+
+    pub fn size(&self) -> usize {
+        self.size.get() as usize
+    }
+}
+
+trait PtrHelpers {
+    type Output;
+    unsafe fn offset_bytes(&mut self, bytes: usize) -> Self::Output;
+}
+
+impl<T> PtrHelpers for *const T {
+    type Output = *const T;
+    unsafe fn offset_bytes(&mut self, bytes: usize) -> Self::Output {
+        *self = (*self).cast::<u8>().add(bytes).cast();
+        *self
+    }
 }

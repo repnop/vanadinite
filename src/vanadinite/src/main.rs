@@ -51,24 +51,40 @@ unsafe extern "C" fn kmain(_hart_id: usize, fdt: *const u8) -> ! {
 
     let root_page_table = &mut *PAGE_TABLE_ROOT.get();
 
-    let uart_fdt = fdt.find_node("/uart");
-    for property in uart_fdt.unwrap() {
-        if let Some(reg) = property.reg() {
-            let uart_addr = reg.starting_address() as usize;
-            let uart_phys = PhysicalAddress::new(uart_addr);
-            let uart_virt = VirtualAddress::new(uart_addr);
-            root_page_table.map(
-                uart_phys,
-                uart_virt,
-                PageSize::Kilopage,
-                Read | Write,
-                &mut page_alloc,
-                kernel_patching::phys2virt,
-            );
+    {
+        let uart_addr = 0x10000000;
+        let uart_phys = PhysicalAddress::new(uart_addr);
+        let uart_virt = VirtualAddress::new(uart_addr);
+        root_page_table.map(
+            uart_phys,
+            uart_virt,
+            PageSize::Kilopage,
+            Read | Write,
+            &mut page_alloc,
+            kernel_patching::phys2virt,
+        );
 
-            crate::io::set_console(uart_addr as *mut crate::drivers::misc::uart16550::Uart16550);
-        }
+        crate::io::set_console(uart_addr as *mut crate::drivers::misc::uart16550::Uart16550);
     }
+
+    //let uart_fdt = fdt.find_node("/uart");
+    //for property in uart_fdt.unwrap() {
+    //    if let Some(reg) = property.reg() {
+    //        let uart_addr = reg.starting_address() as usize;
+    //        let uart_phys = PhysicalAddress::new(uart_addr);
+    //        let uart_virt = VirtualAddress::new(uart_addr);
+    //        root_page_table.map(
+    //            uart_phys,
+    //            uart_virt,
+    //            PageSize::Kilopage,
+    //            Read | Write,
+    //            &mut page_alloc,
+    //            kernel_patching::phys2virt,
+    //        );
+    //
+    //        crate::io::set_console(uart_addr as *mut crate::drivers::misc::uart16550::Uart16550);
+    //    }
+    //}
 
     // Remove identity mapping after paging initialization
     let kernel_start = kernel_patching::kernel_start() as usize;
@@ -87,7 +103,12 @@ unsafe extern "C" fn kmain(_hart_id: usize, fdt: *const u8) -> ! {
     log::info!("Setting stvec to {:#p}", stvec_trap_shim.as_ptr());
     csr::stvec::set(core::mem::transmute(stvec_trap_shim.as_ptr()));
 
-    log::info!("{:#?}", fdt.find_node("/soc/interrupt-controller").map(|i| i.collect::<alloc::vec::Vec<_>>()));
+    for child in fdt.find_node("/soc").unwrap().children() {
+        println!("{}", child.name);
+        for prop in child.properties() {
+            println!("    {}: {:?}", prop.name, prop.value);
+        }
+    }
 
     arch::exit(arch::ExitStatus::Ok)
 }

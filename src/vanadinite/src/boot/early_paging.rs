@@ -54,7 +54,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
         .copied()
         .find(|region| {
             let start = region.starting_address() as usize;
-            let end = (region.starting_address() + region.size()) as usize;
+            let end = region.starting_address() as usize + region.size();
 
             start <= kernel_start && kernel_start <= end
         })
