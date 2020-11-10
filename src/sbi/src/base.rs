@@ -28,6 +28,7 @@ pub enum SbiImplId {
     Xvisor,
     Kvm,
     RustSbi,
+    Diosix,
     Other(usize),
 }
 
@@ -39,6 +40,7 @@ impl SbiImplId {
             SbiImplId::Xvisor => 2,
             SbiImplId::Kvm => 3,
             SbiImplId::RustSbi => 4,
+            SbiImplId::Diosix => 5,
             SbiImplId::Other(n) => n,
         }
     }
@@ -50,6 +52,7 @@ impl SbiImplId {
             2 => SbiImplId::Xvisor,
             3 => SbiImplId::Kvm,
             4 => SbiImplId::RustSbi,
+            5 => SbiImplId::Diosix,
             n => SbiImplId::Other(n),
         }
     }
