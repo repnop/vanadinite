@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License,
+// v. 2.0. If a copy of the MPL was not distributed with this file, You can
+// obtain one at https://mozilla.org/MPL/2.0/.
+
 #![allow(clippy::match_bool)]
 #![allow(incomplete_features)]
 #![feature(asm, naked_functions, global_asm, alloc_error_handler, raw_ref_op, const_generics)]

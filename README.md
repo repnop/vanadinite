@@ -2,9 +2,14 @@
 
 A toy RISC-V OS made with Rust.
 
+## License
+
+The source code in this project is licensed under the Mozilla Public License 2.0
+
 ## Building
 
-To build the project you must have the `riscv64-unknown-elf-*` tools installed and in your path, along with the `riscv64gc-unknown-none-elf` rustc target installed.
+To build the project you must have the `riscv64gc-unknown-none-elf` rustc target
+installed.
 
 ## Running
 

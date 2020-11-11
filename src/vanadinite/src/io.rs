@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License,
+// v. 2.0. If a copy of the MPL was not distributed with this file, You can
+// obtain one at https://mozilla.org/MPL/2.0/.
+
 use crate::{
     drivers::{misc::uart16550::Uart16550, sifive::fu540_c000::uart::SiFiveUart, CompatibleWith},
     sync::Mutex,
