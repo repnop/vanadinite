@@ -49,19 +49,17 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     let memory_region = fdt_struct
         .memory()
-        .regions
-        .iter()
-        .copied()
+        .regions()
         .find(|region| {
-            let start = region.starting_address() as usize;
-            let end = region.starting_address() as usize + region.size();
+            let start = region.starting_address as usize;
+            let end = region.starting_address as usize + region.size.unwrap();
 
             start <= kernel_start && kernel_start <= end
         })
         .expect("wtf");
 
-    let start = memory_region.starting_address() as usize;
-    let size = memory_region.size() as usize;
+    let start = memory_region.starting_address as usize;
+    let size = memory_region.size.unwrap() as usize;
 
     // let start = 0x80000000;
     // let size = 0x8000000;
@@ -74,18 +72,27 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let fdt_phys = PhysicalAddress::new(fdt_usize);
     let fdt_virt = VirtualAddress::new(fdt_usize);
 
-    let alloc_start = if fdt_usize >= kernel_end {
-        // round up to next page size after the FDT
-        ((kernel_patching::phys2virt(fdt_phys).as_usize() + fdt_size as usize) & !0x1FFFFFusize) + 0x200000
-    } else {
-        kernel_end
-    };
+    //let alloc_start = if fdt_usize >= kernel_end {
+    //    // round up to next page size after the FDT
+    //    ((kernel_patching::phys2virt(fdt_phys).as_usize() + fdt_size as usize) & !0x1FFFFFusize) + 0x200000
+    //} else {
+    //    kernel_end
+    //};
+
+    let kernel_end_phys = kernel_end as *mut u8;
 
     // Set the allocator to start allocating memory after the end of the kernel or fdt
-    let kernel_end_phys = kernel_patching::virt2phys(VirtualAddress::new(alloc_start)).as_mut_ptr();
+    //let kernel_end_phys = kernel_patching::virt2phys(VirtualAddress::new(alloc_start)).as_mut_ptr();
 
     let mut pf_alloc = PHYSICAL_MEMORY_ALLOCATOR.lock();
     pf_alloc.init(kernel_end_phys, (start + size) as *mut u8);
+
+    if fdt > kernel_end_phys {
+        let n_pages = fdt_size as usize / 4096 + 1;
+        for i in 0..n_pages {
+            pf_alloc.set_used(crate::mem::phys::PhysicalPage::from_ptr(fdt.add(i * 4096) as *mut _));
+        }
+    }
 
     let mut page_alloc = || {
         let phys_addr = pf_alloc.alloc().unwrap().as_phys_address();

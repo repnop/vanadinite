@@ -134,6 +134,8 @@ pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stv
     if let Trap::LoadPageFault = Trap::from_cause(scause) {
         panic!("Load access fault accessing {:#p}", stval as *mut u8);
     }
+
+    loop {}
     sepc + 4
 }
 

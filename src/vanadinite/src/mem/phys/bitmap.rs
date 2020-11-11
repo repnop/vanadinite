@@ -4,14 +4,14 @@ const SINGLE_ENTRY_SIZE_BYTES: usize = 64 * 4096;
 const FULL_ENTRY: u64 = 0xFFFF_FFFF_FFFF_FFFF;
 
 pub struct BitmapAllocator {
-    bitmap: [u64; 510],
+    bitmap: [u64; 4096],
     mem_start: *mut u8,
     mem_end: *mut u8,
 }
 
 impl BitmapAllocator {
     pub const fn new() -> Self {
-        Self { bitmap: [0; 510], mem_start: core::ptr::null_mut(), mem_end: core::ptr::null_mut() }
+        Self { bitmap: [0; 4096], mem_start: core::ptr::null_mut(), mem_end: core::ptr::null_mut() }
     }
 }
 
@@ -55,6 +55,26 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
                 page.as_phys_address().as_ptr()
             );
         }
+
+        *entry &= !(1 << bit);
+    }
+
+    #[track_caller]
+    unsafe fn set_used(&mut self, page: PhysicalPage) {
+        let index = (page.as_phys_address().as_usize() - self.mem_start as usize) / SINGLE_ENTRY_SIZE_BYTES;
+        let bit = ((page.as_phys_address().as_usize() - self.mem_start as usize) / 4096) % 64;
+
+        let entry = &mut self.bitmap[index];
+
+        *entry |= 1 << bit;
+    }
+
+    #[track_caller]
+    unsafe fn set_unused(&mut self, page: PhysicalPage) {
+        let index = (page.as_phys_address().as_usize() - self.mem_start as usize) / SINGLE_ENTRY_SIZE_BYTES;
+        let bit = ((page.as_phys_address().as_usize() - self.mem_start as usize) / 4096) % 64;
+
+        let entry = &mut self.bitmap[index];
 
         *entry &= !(1 << bit);
     }

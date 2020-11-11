@@ -10,6 +10,8 @@ pub unsafe trait PhysicalMemoryAllocator {
     fn init(&mut self, start: *mut u8, end: *mut u8);
     unsafe fn alloc(&mut self) -> Option<PhysicalPage>;
     unsafe fn dealloc(&mut self, page: PhysicalPage);
+    unsafe fn set_used(&mut self, page: PhysicalPage);
+    unsafe fn set_unused(&mut self, page: PhysicalPage);
 }
 
 #[derive(Debug, Clone, Copy)]

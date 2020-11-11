@@ -12,10 +12,11 @@ lock_api = "0.4.1"
 sbi = { path = "../sbi" }
 
 [features]
-default = ["virt"]
+default = []
 
 debug_log = []
 virt = []
+sifive_u = []
 "pmalloc.allocator.bitmap" = []
 "pmalloc.allocator.buddy" = []
 "vmalloc.allocator.freelist" = []

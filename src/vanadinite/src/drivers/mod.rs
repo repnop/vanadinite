@@ -1,7 +1,7 @@
 pub mod sifive {
     pub mod fu540_c000 {
-        // pub mod uart;
         pub mod clint;
+        pub mod uart;
     }
 }
 

@@ -1,4 +1,7 @@
-use crate::sync::Mutex;
+use crate::{
+    drivers::{misc::uart16550::Uart16550, sifive::fu540_c000::uart::SiFiveUart, CompatibleWith},
+    sync::Mutex,
+};
 use core::cell::UnsafeCell;
 
 pub trait ConsoleDevice: 'static {
@@ -55,6 +58,30 @@ pub static CONSOLE: Mutex<StaticConsoleDevice> = Mutex::new(StaticConsoleDevice(
 /// The device will also have `.init()` called on it.
 pub unsafe fn set_console<T: ConsoleDevice>(device: *mut T) {
     *CONSOLE.lock() = StaticConsoleDevice::new(device);
+}
+
+pub enum ConsoleDevices {
+    Uart16550(*mut Uart16550),
+    SiFiveUart(*mut SiFiveUart),
+}
+
+impl ConsoleDevices {
+    pub fn from_compatible(ptr: *mut u8, compatible: fdt::Compatible<'_>) -> Option<Self> {
+        if compatible.all().any(|s| Uart16550::list().contains(&s)) {
+            Some(ConsoleDevices::Uart16550(ptr.cast()))
+        } else if compatible.all().any(|s| SiFiveUart::list().contains(&s)) {
+            Some(ConsoleDevices::SiFiveUart(ptr.cast()))
+        } else {
+            None
+        }
+    }
+
+    pub fn set_console(self) {
+        match self {
+            ConsoleDevices::Uart16550(ptr) => unsafe { set_console(ptr) },
+            ConsoleDevices::SiFiveUart(ptr) => unsafe { set_console(ptr) },
+        }
+    }
 }
 
 #[macro_export]

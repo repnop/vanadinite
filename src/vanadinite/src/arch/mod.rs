@@ -20,5 +20,7 @@ pub fn exit(status: ExitStatus) -> ! {
 #[cfg(not(feature = "virt"))]
 pub fn exit(_: ExitStatus) -> ! {
     // FIXME: do print here
-    loop {}
+    loop {
+        unsafe { asm!("nop") };
+    }
 }

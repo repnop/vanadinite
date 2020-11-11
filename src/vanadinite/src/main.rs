@@ -33,7 +33,7 @@ extern "C" {
 }
 
 #[no_mangle]
-unsafe extern "C" fn kmain(_hart_id: usize, fdt: *const u8) -> ! {
+unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     crate::io::init_logging();
 
     let fdt = match fdt::Fdt::new(fdt) {
@@ -51,40 +51,26 @@ unsafe extern "C" fn kmain(_hart_id: usize, fdt: *const u8) -> ! {
 
     let root_page_table = &mut *PAGE_TABLE_ROOT.get();
 
-    {
-        let uart_addr = 0x10000000;
-        let uart_phys = PhysicalAddress::new(uart_addr);
-        let uart_virt = VirtualAddress::new(uart_addr);
-        root_page_table.map(
-            uart_phys,
-            uart_virt,
-            PageSize::Kilopage,
-            Read | Write,
-            &mut page_alloc,
-            kernel_patching::phys2virt,
-        );
+    let stdout = fdt.chosen().and_then(|n| n.stdout());
+    if let Some((reg, compatible)) = stdout.and_then(|n| Some((n.reg()?.next()?, n.compatible()?))) {
+        let stdout_addr = reg.starting_address as *mut u8;
+        let stdout_size = reg.size.unwrap();
 
-        crate::io::set_console(uart_addr as *mut crate::drivers::misc::uart16550::Uart16550);
+        if let Some(device) = crate::io::ConsoleDevices::from_compatible(stdout_addr, compatible) {
+            let stdout_phys = PhysicalAddress::from_ptr(stdout_addr);
+            let stdout_virt = VirtualAddress::from_ptr(stdout_addr);
+            root_page_table.map(
+                stdout_phys,
+                stdout_virt,
+                PageSize::Kilopage,
+                Read | Write,
+                &mut page_alloc,
+                kernel_patching::phys2virt,
+            );
+
+            device.set_console();
+        }
     }
-
-    //let uart_fdt = fdt.find_node("/uart");
-    //for property in uart_fdt.unwrap() {
-    //    if let Some(reg) = property.reg() {
-    //        let uart_addr = reg.starting_address() as usize;
-    //        let uart_phys = PhysicalAddress::new(uart_addr);
-    //        let uart_virt = VirtualAddress::new(uart_addr);
-    //        root_page_table.map(
-    //            uart_phys,
-    //            uart_virt,
-    //            PageSize::Kilopage,
-    //            Read | Write,
-    //            &mut page_alloc,
-    //            kernel_patching::phys2virt,
-    //        );
-    //
-    //        crate::io::set_console(uart_addr as *mut crate::drivers::misc::uart16550::Uart16550);
-    //    }
-    //}
 
     // Remove identity mapping after paging initialization
     let kernel_start = kernel_patching::kernel_start() as usize;
@@ -97,18 +83,35 @@ unsafe extern "C" fn kmain(_hart_id: usize, fdt: *const u8) -> ! {
         root_page_table.unmap(patched, kernel_patching::phys2virt);
     }
 
+    log::info!(
+        "Booted on a {} on hart {}",
+        fdt.find_node("/")
+            .unwrap()
+            .properties()
+            .find(|p| p.name == "model")
+            .map(|p| core::str::from_utf8(&p.value[..p.value.len() - 1]).unwrap())
+            .unwrap(),
+        hart_id
+    );
     log::info!("SBI spec version: {:?}", sbi::base::spec_version());
     log::info!("SBI implementor: {:?}", sbi::base::impl_id());
     log::info!("marchid: {:#x}", sbi::base::marchid());
     log::info!("Setting stvec to {:#p}", stvec_trap_shim.as_ptr());
     csr::stvec::set(core::mem::transmute(stvec_trap_shim.as_ptr()));
 
-    for child in fdt.find_node("/soc").unwrap().children() {
+    log::info!("{:?}", fdt.find_node("/uart@10000000").map(|n| n.name));
+
+    for child in fdt.find_node("/").unwrap().children() {
         println!("{}", child.name);
-        for prop in child.properties() {
-            println!("    {}: {:?}", prop.name, prop.value);
+        println!("sizes: {:?}", child.cell_sizes());
+        if let Some(compat) = child.compatible() {
+            for compatible in compat.all() {
+                println!("    compatible with: {:?}", compatible);
+            }
         }
     }
+
+    println!("{:?}", fdt.find_node("/soc/interrupt-controller@c000000"));
 
     arch::exit(arch::ExitStatus::Ok)
 }
