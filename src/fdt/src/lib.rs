@@ -4,8 +4,9 @@ mod node;
 
 use common::byteorder::{BigEndianU32, BigEndianU64};
 use cstr_core::CStr;
-pub use node::{MappedArea, MemoryNode, MemoryRegion, NodeProperty};
+pub use node::{Compatible, MappedArea, MemoryNode, MemoryRegion, NodeProperty};
 
+#[derive(Debug)]
 #[repr(C)]
 pub struct Fdt {
     /// FDT header magic
@@ -84,45 +85,24 @@ impl Fdt {
         unsafe { core::slice::from_raw_parts(self.offset_bytes(offset).cast(), length) }
     }
 
-    pub fn find_node(&self, name: &str) -> Option<node::FdtNode<'_>> {
-        unsafe { node::find_node(&mut self.structs_ptr().cast(), name, self) }
+    /// Returns the first node that matches the node path, if you want all that
+    /// match the path, use `find_all_nodes`
+    pub fn find_node(&self, path: &str) -> Option<node::FdtNode<'_>> {
+        unsafe { node::find_node(&mut self.structs_ptr().cast(), path, self, None) }
     }
 
-    pub fn memory<'a>(&self) -> MemoryNode<'a> {
-        let node = self.find_node("/memory").expect("requires memory node");
+    pub fn find_all_nodes(&self, path: &str) -> impl Iterator<Item = node::FdtNode<'_>> {
+        // let parent_path = path.rsplitn('/');
+        // let parent = unsafe { node::find_node(&mut self.structs_ptr().cast(), name, self) };
+        None.into_iter()
+    }
 
-        let mut regions = &[][..];
-        let mut initial_mapped_area = None;
+    pub fn chosen(&self) -> Option<Chosen<'_>> {
+        unsafe { node::find_node(&mut self.structs_ptr().cast(), "/chosen", self, None) }.map(|node| Chosen { node })
+    }
 
-        for property in node.properties() {
-            match property.name {
-                "reg" => {
-                    assert_eq!(property.value.as_ptr() as usize % 8, 0);
-                    regions = unsafe {
-                        core::slice::from_raw_parts(
-                            property.value.as_ptr() as *const MemoryRegion,
-                            property.value.len() / 16,
-                        )
-                    };
-                }
-                "initial-mapped-area" => {
-                    let mut stream = common::byteorder::IntegerStream::new(property.value);
-                    let effective_address: BigEndianU64 = stream.next().expect("effective address");
-                    let physical_address: BigEndianU64 = stream.next().expect("physical address");
-                    let size: BigEndianU32 = stream.next().expect("size");
-
-                    initial_mapped_area = Some(MappedArea {
-                        effective_address: effective_address.get(),
-                        physical_address: physical_address.get(),
-                        size: size.get(),
-                    });
-                }
-                "device_type" => {}
-                _ => unreachable!("bad memory node format"),
-            }
-        }
-
-        MemoryNode { regions, initial_mapped_area }
+    pub fn memory(&self) -> MemoryNode<'_> {
+        MemoryNode { node: self.find_node("/memory").expect("requires memory node") }
     }
 
     pub fn total_size(&self) -> usize {
@@ -164,6 +144,36 @@ impl Fdt {
         assert!(ptr < self.limit(), "offset past limit");
 
         ptr
+    }
+}
+
+pub struct Chosen<'a> {
+    node: node::FdtNode<'a>,
+}
+
+impl<'a> Chosen<'a> {
+    pub fn bootargs(self) -> Option<&'a str> {
+        self.node
+            .properties()
+            .find(|n| n.name == "bootargs")
+            .and_then(|n| core::str::from_utf8(&n.value[..n.value.len() - 1]).ok())
+    }
+
+    pub fn stdout(self) -> Option<node::FdtNode<'a>> {
+        self.node
+            .properties()
+            .find(|n| n.name == "stdout-path")
+            .and_then(|n| core::str::from_utf8(&n.value[..n.value.len() - 1]).ok())
+            .and_then(|name| self.node.header.find_node(name))
+    }
+
+    pub fn stdin(self) -> Option<node::FdtNode<'a>> {
+        self.node
+            .properties()
+            .find(|n| n.name == "stdin-path")
+            .and_then(|n| core::str::from_utf8(&n.value[..n.value.len() - 1]).ok())
+            .and_then(|name| self.node.header.find_node(name))
+            .or_else(|| self.stdout())
     }
 }
 
