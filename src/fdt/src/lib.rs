@@ -95,10 +95,47 @@ impl Fdt {
         unsafe { node::find_node(&mut self.structs_ptr().cast(), path, self, None) }
     }
 
-    pub fn find_all_nodes(&self, path: &str) -> impl Iterator<Item = node::FdtNode<'_>> {
-        // let parent_path = path.rsplitn('/');
-        // let parent = unsafe { node::find_node(&mut self.structs_ptr().cast(), name, self) };
-        None.into_iter()
+    pub fn find_all_nodes<'a>(&'a self, path: &'a str) -> impl Iterator<Item = node::FdtNode<'a>> {
+        let mut done = false;
+        let only_root = path == "/";
+        let valid_path = path.chars().fold(0, |acc, c| acc + if c == '/' { 1 } else { 0 }) >= 1;
+
+        let mut path_split = path.rsplitn(2, '/');
+        let child_name = path_split.next().unwrap();
+        let parent_path = match path_split.next().unwrap() {
+            "" => "/",
+            s => s,
+        };
+        let parent = unsafe { node::find_node(&mut self.structs_ptr().cast(), parent_path, self, None) };
+        let (parent, bad_parent) = match parent {
+            Some(parent) => (parent, false),
+            None => (self.find_node("/").unwrap(), true),
+        };
+
+        let mut child_iter = parent.children();
+
+        core::iter::from_fn(move || {
+            if done || !valid_path || bad_parent {
+                return None;
+            }
+
+            if only_root {
+                done = true;
+                return self.find_node("/");
+            }
+
+            let mut ret = None;
+
+            #[allow(clippy::while_let_on_iterator)]
+            while let Some(child) = child_iter.next() {
+                if child.name.split('@').next()? == child_name {
+                    ret = Some(child);
+                    break;
+                }
+            }
+
+            ret
+        })
     }
 
     pub fn chosen(&self) -> Option<Chosen<'_>> {
