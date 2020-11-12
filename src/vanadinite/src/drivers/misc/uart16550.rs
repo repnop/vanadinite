@@ -2,7 +2,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{drivers::CompatibleWith, utils::Volatile};
+use crate::{drivers::CompatibleWith, utils::volatile::Volatile};
 
 #[repr(C)]
 pub struct Uart16550 {

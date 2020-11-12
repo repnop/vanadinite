@@ -24,6 +24,12 @@ args= [
     "-cpu", "rv64",
     "-smp", "4",
     "-m", "${RAM}",
+    
+    # force the most recent VirtIO spec version
+    "-global", "virtio-mmio.force-legacy=false",
+    "-drive", "file=testing_files/test_fat.fs,if=none,format=raw,id=hd",
+    "-device", "virtio-blk-device,drive=hd",
+
     "-bios", "opensbi-riscv64-${MACHINE}-fw_jump.bin",
     "-kernel", "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
     "-serial", "mon:stdio",
@@ -38,6 +44,12 @@ args= [
     "-cpu", "rv64",
     "-smp", "4",
     "-m", "${RAM}",
+    
+    # force the most recent VirtIO spec version
+    "-global", "virtio-mmio.force-legacy=false",
+    "-drive", "file=testing_files/test_fat.fs,if=virtio",
+    "-device", "virtio-blk-device,drive=hd",
+
     "-bios", "opensbi-riscv64-${MACHINE}-fw_jump.bin",
     "-kernel", "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
     "-monitor", "stdio",

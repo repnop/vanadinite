@@ -62,7 +62,7 @@ impl crate::drivers::CompatibleWith for SiFiveUart {
 }
 
 mod registers {
-    use crate::utils::Volatile;
+    use crate::utils::volatile::Volatile;
     #[derive(Debug)]
     #[repr(transparent)]
     pub struct TxData(Volatile<u32>);
@@ -149,7 +149,7 @@ mod registers {
     pub struct InterruptPending(Volatile<u32>);
 
     impl InterruptPending {
-        pub fn tx_watermark_pending(self) -> bool {
+        pub fn tx_watermark_pending(&self) -> bool {
             self.0.read() & 1 == 1
         }
 
