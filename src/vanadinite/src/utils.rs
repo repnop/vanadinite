@@ -82,7 +82,7 @@ pub mod volatile {
 
     impl<T: Copy, const N: usize> core::ops::IndexMut<usize> for Volatile<[T; N], ReadWrite> {
         fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-            unsafe { &mut core::mem::transmute::<_, &mut [Volatile<T>; N]>(self)[index] }
+            unsafe { &mut core::mem::transmute::<_, &mut [Volatile<T, ReadWrite>; N]>(self)[index] }
         }
     }
 }
