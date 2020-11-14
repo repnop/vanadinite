@@ -90,7 +90,7 @@ pub fn impl_version() -> usize {
     value
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum ExtensionAvailability {
     Available(core::num::NonZeroUsize),
     Unavailable,

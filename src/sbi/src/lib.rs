@@ -6,6 +6,7 @@
 #![no_std]
 
 pub mod base;
+pub mod timer;
 
 /// Error codes returned by SBI calls
 ///
