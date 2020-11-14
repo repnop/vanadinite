@@ -38,6 +38,10 @@ impl SiFiveUart {
         while self.tx_data.is_full() {}
 
         self.tx_data.write(n);
+
+        if n == b'\n' {
+            self.write(b'\r');
+        }
     }
 }
 
@@ -83,7 +87,7 @@ mod registers {
 
     impl RxData {
         pub fn read(&self) -> u8 {
-            self.read() as u8
+            self.0.read() as u8
         }
 
         pub fn is_empty(&self) -> bool {
