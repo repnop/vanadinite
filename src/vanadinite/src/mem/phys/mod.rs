@@ -13,7 +13,9 @@ pub static PHYSICAL_MEMORY_ALLOCATOR: Mutex<BitmapAllocator> = Mutex::new(Bitmap
 pub unsafe trait PhysicalMemoryAllocator {
     fn init(&mut self, start: *mut u8, end: *mut u8);
     unsafe fn alloc(&mut self) -> Option<PhysicalPage>;
+    unsafe fn alloc_contiguous(&mut self, n: usize) -> Option<PhysicalPage>;
     unsafe fn dealloc(&mut self, page: PhysicalPage);
+    unsafe fn dealloc_contiguous(&mut self, page: PhysicalPage, n: usize);
     unsafe fn set_used(&mut self, page: PhysicalPage);
     unsafe fn set_unused(&mut self, page: PhysicalPage);
 }
@@ -31,4 +33,21 @@ impl PhysicalPage {
     pub fn as_phys_address(self) -> PhysicalAddress {
         PhysicalAddress::from_ptr(self.0)
     }
+}
+
+pub fn alloc_page() -> PhysicalPage {
+    unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc().expect("out of memory") }
+}
+
+pub fn zalloc_page() -> PhysicalPage {
+    let page = alloc_page();
+    let ptr = crate::kernel_patching::phys2virt(page.as_phys_address()).as_mut_ptr().cast::<u64>();
+
+    unsafe {
+        for i in 0..(4096 / 8) {
+            *ptr.add(i) = 0;
+        }
+    }
+
+    page
 }

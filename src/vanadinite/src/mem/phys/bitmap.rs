@@ -46,6 +46,40 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
         page
     }
 
+    // FIXME: this should look for inter-u64 regions
+    unsafe fn alloc_contiguous(&mut self, n: usize) -> Option<PhysicalPage> {
+        assert!(n <= 64, "> 64 page allocations are currently not supported");
+        let mut page = None;
+        let mask = u64::max_value() << n;
+        for (index, entry) in self.bitmap.iter_mut().enumerate().filter(|(_, e)| e.count_zeros() as usize >= n) {
+            let mut bit_index = None;
+            for i in 0..=(64 - n as u64) {
+                let selected = *entry | mask.rotate_left(i as u32);
+                let shifted = selected >> i;
+
+                if !shifted & !mask == !mask {
+                    bit_index = Some(i as usize);
+                    break;
+                }
+            }
+
+            let bit_index = match bit_index {
+                Some(b) => b,
+                None => continue,
+            };
+
+            let page_ptr = (self.mem_start as usize + index * SINGLE_ENTRY_SIZE_BYTES) + (bit_index * 4096);
+            let page_ptr = page_ptr as *mut u8;
+
+            if page_ptr <= self.mem_end {
+                page = Some(PhysicalPage(page_ptr));
+                *entry |= (!mask).rotate_left(bit_index as u32);
+            }
+        }
+
+        page
+    }
+
     #[track_caller]
     unsafe fn dealloc(&mut self, page: PhysicalPage) {
         let index = (page.as_phys_address().as_usize() - self.mem_start as usize) / SINGLE_ENTRY_SIZE_BYTES;
@@ -61,6 +95,24 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
         }
 
         *entry &= !(1 << bit);
+    }
+
+    #[track_caller]
+    unsafe fn dealloc_contiguous(&mut self, page: PhysicalPage, n: usize) {
+        let index = (page.as_phys_address().as_usize() - self.mem_start as usize) / SINGLE_ENTRY_SIZE_BYTES;
+        let bit = ((page.as_phys_address().as_usize() - self.mem_start as usize) / 4096) % 64;
+        let mask = u64::max_value() << n;
+
+        let entry = &mut self.bitmap[index];
+
+        if (*entry >> bit) & !mask != !mask {
+            panic!(
+                "[pmalloc.allocator] BitmapAllocator::dealloc: double free detected for address {:#p}",
+                page.as_phys_address().as_ptr()
+            );
+        }
+
+        *entry &= mask.rotate_left(bit as u32);
     }
 
     #[track_caller]
