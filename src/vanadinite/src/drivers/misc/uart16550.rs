@@ -18,12 +18,21 @@ pub struct Uart16550 {
 
 impl Uart16550 {
     pub fn init(&mut self) {
-        self.interrupt_enable.write(0x00);
-        self.line_control.write(0x80);
-        self.data_register.write(0x03);
         self.line_control.write(0x03);
-        self.int_id_fifo_control.write(0xC7);
-        self.modem_control.write(0x0B);
+        self.int_id_fifo_control.write(0x01);
+        self.interrupt_enable.write(0x01);
+
+        let divisor: u16 = 592;
+        let divisor_least: u8 = (divisor & 0xff) as u8;
+        let divisor_most: u8 = (divisor >> 8) as u8;
+
+        let lcr = self.line_control.read();
+        self.line_control.write(lcr | (1 << 7));
+
+        self.data_register.write(divisor_least);
+        self.interrupt_enable.write(divisor_most);
+
+        self.line_control.write(lcr);
     }
 
     pub fn line_status(&self) -> u8 {
@@ -60,7 +69,11 @@ impl Uart16550 {
     pub fn write(&mut self, data: u8) {
         while !self.data_empty() {}
 
-        self.data_register.write(data)
+        self.data_register.write(data);
+
+        if data == b'\n' {
+            self.write(b'\r');
+        }
     }
 
     pub fn write_str(&mut self, s: &str) {
