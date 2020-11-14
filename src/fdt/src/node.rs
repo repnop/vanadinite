@@ -201,15 +201,18 @@ impl<'a> FdtNode<'a> {
             let parent = FdtNode { name: "", props: parent, header: self.header, parent_props: None };
             let parent_sizes = parent.cell_sizes();
 
-            match (&mut address_cells, &mut size_cells) {
-                (Some(_), Some(_)) => {}
-                (a, Some(_)) => *a = Some(parent_sizes.address_cells),
-                (Some(_), s) => *s = Some(parent_sizes.size_cells),
-                (a, s) => {
-                    *a = Some(parent_sizes.address_cells);
-                    *s = Some(parent_sizes.size_cells);
-                }
+            if address_cells.is_none() {
+                address_cells = Some(parent_sizes.address_cells);
             }
+
+            if size_cells.is_none() {
+                size_cells = Some(parent_sizes.size_cells);
+            }
+        }
+
+        // FIXME: this works around a bug(?) in the QEMU FDT
+        if address_cells == Some(0) {
+            address_cells = Some(2);
         }
 
         CellSizes { address_cells: address_cells.unwrap_or(2), size_cells: size_cells.unwrap_or(1) }
@@ -305,17 +308,13 @@ pub(crate) unsafe fn find_node<'a>(
     };
 
     while *ptr < header.structs_limit().cast() {
-        log::debug!("next_part: {}", next_part);
-
         let parent_props = Some(*ptr);
 
         while (**ptr).get() == FDT_PROP {
-            let prop = NodeProperty::parse(ptr, header);
-            log::debug!("parsed prop: {:?}", prop);
+            let _ = NodeProperty::parse(ptr, header);
         }
 
         while (**ptr).get() == FDT_BEGIN_NODE {
-            log::debug!("FDT_BEGIN_NODE");
             if let Some(p) = find_node(ptr, next_part, header, parent_props) {
                 return Some(p);
             }
