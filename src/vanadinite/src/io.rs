@@ -51,6 +51,28 @@ impl core::fmt::Write for StaticConsoleDevice {
     }
 }
 
+impl ConsoleDevice for StaticConsoleDevice {
+    fn init(&mut self) {
+        if let Some(inner) = &mut self.0 {
+            unsafe { &mut *inner.get() }.init();
+        }
+    }
+
+    fn read(&self) -> u8 {
+        if let Some(inner) = &self.0 {
+            return unsafe { &*inner.get() }.read();
+        }
+
+        0
+    }
+
+    fn write(&mut self, n: u8) {
+        if let Some(inner) = &mut self.0 {
+            unsafe { &mut *inner.get() }.write(n);
+        }
+    }
+}
+
 unsafe impl Send for StaticConsoleDevice {}
 unsafe impl Sync for StaticConsoleDevice {}
 
