@@ -22,13 +22,13 @@ command = "qemu-system-riscv64"
 args= [
     "-machine", "${MACHINE}",
     "-cpu", "rv64",
-    "-smp", "4",
+    "-smp", "5",
     "-m", "${RAM}",
     
     # force the most recent VirtIO spec version
-    "-global", "virtio-mmio.force-legacy=false",
-    "-drive", "file=testing_files/test_fat.fs,if=none,format=raw,id=hd",
-    "-device", "virtio-blk-device,drive=hd",
+    #"-global", "virtio-mmio.force-legacy=false",
+    #"-drive", "file=testing_files/test_fat.fs,if=none,format=raw,id=hd",
+    #"-device", "virtio-blk-device,drive=hd",
 
     "-bios", "opensbi-riscv64-${MACHINE}-fw_jump.bin",
     "-kernel", "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
@@ -42,20 +42,20 @@ command = "qemu-system-riscv64"
 args= [
     "-machine", "${MACHINE}",
     "-cpu", "rv64",
-    "-smp", "4",
+    "-smp", "5",
     "-m", "${RAM}",
     
     # force the most recent VirtIO spec version
-    "-global", "virtio-mmio.force-legacy=false",
-    "-drive", "file=testing_files/test_fat.fs,if=virtio",
-    "-device", "virtio-blk-device,drive=hd",
+    #"-global", "virtio-mmio.force-legacy=false",
+    #"-drive", "file=testing_files/test_fat.fs,if=none,format=raw,id=hd",
+    #"-device", "virtio-blk-device,drive=hd",
 
     "-bios", "opensbi-riscv64-${MACHINE}-fw_jump.bin",
     "-kernel", "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
     "-monitor", "stdio",
     "-gdb", "tcp::1234",
     "-S",
-    "-d", "guest_errors,trace:riscv_trap,trace:sifive_gpio_write,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write",
+    "-d", "guest_errors,trace:riscv_trap,trace:sifive_gpio_write,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int,trace:exynos_uart_read",
     "-D", "qemu.log",
 ]
 
