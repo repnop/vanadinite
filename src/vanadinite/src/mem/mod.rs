@@ -20,6 +20,11 @@ pub fn sfence() {
 }
 
 #[inline(always)]
+pub fn fence() {
+    unsafe { asm!("fence") };
+}
+
+#[inline(always)]
 pub fn satp(mode: SatpMode, asid: u16, root_page_table: paging::PhysicalAddress) {
     let value = ((mode as usize) << 60) | ((asid as usize) << 44) | root_page_table.ppn();
     unsafe { asm!("csrw satp, {}", in(reg) value) };
