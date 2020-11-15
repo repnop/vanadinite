@@ -4,15 +4,16 @@
 
 use crate::{SbiError, SbiResult};
 
-pub const EXTENSION_ID: usize = 0x54494D45;
+pub const EXTENSION_ID: usize = 0x735049;
 
-pub fn set_timer(time: u64) -> SbiResult<()> {
+pub fn send_ipi(hart_mask: usize, hart_mask_base: usize) -> SbiResult<()> {
     let error: isize;
 
     unsafe {
         asm!(
             "ecall",
-            in("a0") time,
+            in("a0") hart_mask,
+            in("a1") hart_mask_base,
             inout("a6") 0 => _,
             inout("a7") EXTENSION_ID => _,
             lateout("a0") error,

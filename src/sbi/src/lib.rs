@@ -6,7 +6,12 @@
 #![no_std]
 
 pub mod base;
+pub mod hart_state_management;
+pub mod ipi;
+pub mod rfence;
 pub mod timer;
+
+pub use base::{impl_id, impl_version, marchid, mimpid, mvendorid, probe_extension, spec_version};
 
 /// Error codes returned by SBI calls
 ///
@@ -38,4 +43,4 @@ impl SbiError {
     }
 }
 
-pub type SbiResult = Result<usize, SbiError>;
+pub type SbiResult<T> = Result<T, SbiError>;
