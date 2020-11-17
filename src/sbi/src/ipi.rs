@@ -4,8 +4,12 @@
 
 use crate::{SbiError, SbiResult};
 
+/// The IPI extension ID
 pub const EXTENSION_ID: usize = 0x735049;
 
+/// Send an inter-processor interrupt to the harts defined in `hart_mask`,
+/// starting at `hart_mask_base`. The IPI is received on a hart as a supervisor
+/// software interrupt.
 pub fn send_ipi(hart_mask: usize, hart_mask_base: usize) -> SbiResult<()> {
     let error: isize;
 

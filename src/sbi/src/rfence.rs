@@ -4,6 +4,7 @@
 
 use crate::{SbiError, SbiResult};
 
+/// The RFENCE extension ID
 pub const EXTENSION_ID: usize = 0x52464E43;
 
 pub fn remote_fence_i(hart_mask: usize, hart_mask_base: usize) -> SbiResult<()> {
