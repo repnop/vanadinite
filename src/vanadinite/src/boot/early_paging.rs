@@ -5,15 +5,11 @@
 use crate::{
     mem::{
         kernel_patching,
-        paging::{
-            Execute, PageSize, PhysicalAddress, Read, StaticPageTable, Sv39PageTable, VirtualAddress, Write,
-            PAGE_TABLE_ROOT,
-        },
+        paging::{Execute, PageSize, PhysicalAddress, Read, Sv39PageTable, VirtualAddress, Write, PAGE_TABLE_MANAGER},
         phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
     },
-    utils::LinkerSymbol,
+    utils::{LinkerSymbol, StaticMut},
 };
-use core::cell::UnsafeCell;
 
 extern "C" {
     static __bss_start: LinkerSymbol;
@@ -26,7 +22,7 @@ extern "C" {
 
 const TWO_MEBS: usize = 2 * 1024 * 1024;
 
-pub static TEMP_PAGE_TABLE_IDENTITY: StaticPageTable = StaticPageTable::new(UnsafeCell::new(Sv39PageTable::new()));
+pub static TEMP_PAGE_TABLE_IDENTITY: StaticMut<Sv39PageTable> = StaticMut::new(Sv39PageTable::new());
 
 /// # Safety
 /// no
@@ -70,8 +66,6 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     let ident_mem_phys = (TEMP_PAGE_TABLE_IDENTITY.get(), PhysicalAddress::from_ptr(&TEMP_PAGE_TABLE_IDENTITY));
 
-    let root_page_table = &mut *PAGE_TABLE_ROOT.get();
-
     let fdt_usize = fdt as usize;
     let fdt_phys = PhysicalAddress::new(fdt_usize);
     let fdt_virt = VirtualAddress::new(fdt_usize);
@@ -105,12 +99,14 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
         (phys_addr.as_mut_ptr() as *mut Sv39PageTable, phys_addr)
     };
 
+    let mut ptm = PAGE_TABLE_MANAGER.lock();
+
     for address in (kernel_start..kernel_end).step_by(TWO_MEBS) {
         let ident = VirtualAddress::new(address);
         let phys = PhysicalAddress::new(address);
         let permissions = Read | Write | Execute;
 
-        root_page_table.map(
+        ptm.map_with_allocator(
             phys,
             ident,
             PageSize::Megapage,
@@ -125,7 +121,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (bss_start..bss_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        root_page_table.map(
+        ptm.map_with_allocator(
             addr,
             kernel_patching::phys2virt(addr),
             PageSize::Kilopage,
@@ -140,7 +136,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (data_start..data_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        root_page_table.map(
+        ptm.map_with_allocator(
             addr,
             kernel_patching::phys2virt(addr),
             PageSize::Kilopage,
@@ -155,7 +151,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (text_start..text_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        root_page_table.map(
+        ptm.map_with_allocator(
             addr,
             kernel_patching::phys2virt(addr),
             PageSize::Kilopage,
@@ -167,7 +163,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     let phys = kernel_end_phys as usize;
     for addr in (phys..(phys + (start + size - phys))).step_by(4096) {
-        root_page_table.map(
+        ptm.map_with_allocator(
             PhysicalAddress::new(addr),
             kernel_patching::phys2virt(PhysicalAddress::new(addr)),
             PageSize::Kilopage,
@@ -178,7 +174,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     }
 
     #[cfg(feature = "virt")]
-    root_page_table.map(
+    ptm.map_with_allocator(
         PhysicalAddress::new(0x10_0000),
         VirtualAddress::new(0x10_0000),
         PageSize::Kilopage,
@@ -187,13 +183,13 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
         |p| VirtualAddress::new(p.as_usize()),
     );
 
-    if !root_page_table.is_mapped(fdt_virt, |p| VirtualAddress::new(p.as_usize())) {
+    if !ptm.is_mapped_with_translation(fdt_virt, |p| VirtualAddress::new(p.as_usize())) {
         let rounded_up = ((fdt_phys.as_usize() + fdt_size as usize) & !0xFFF) + 0x1000;
 
         for addr in (fdt_phys.as_usize()..rounded_up).step_by(4096) {
             let fdt_phys = PhysicalAddress::new(addr);
             let fdt_virt = VirtualAddress::new(addr);
-            root_page_table.map(fdt_phys, fdt_virt, PageSize::Kilopage, Read, &mut page_alloc, |p| {
+            ptm.map_with_allocator(fdt_phys, fdt_virt, PageSize::Kilopage, Read, &mut page_alloc, |p| {
                 VirtualAddress::new(p.as_usize())
             });
         }
@@ -209,8 +205,8 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let new_sp = (sp - phys_load) + page_offset_value;
     let new_gp = (gp - phys_load) + page_offset_value;
 
-    crate::mem::satp(crate::mem::SatpMode::Sv39, 0, PhysicalAddress::from_ptr(&PAGE_TABLE_ROOT));
-    crate::mem::sfence();
+    ptm.set_satp();
+    crate::mem::sfence(None, None);
 
     vmem_trampoline(hart_id, fdt, new_sp, new_gp, kmain)
 }

@@ -46,6 +46,16 @@ pub fn manual_debug_point() {
     }
 }
 
+pub fn round_up_to_next(n: usize, size: usize) -> usize {
+    assert!(size.is_power_of_two());
+
+    if n % size == 0 {
+        n
+    } else {
+        (n & !(size - 1)) + size
+    }
+}
+
 pub mod volatile {
     use core::cell::UnsafeCell;
     #[derive(Debug, Clone, Copy)]

@@ -4,7 +4,15 @@
 
 #![allow(clippy::match_bool)]
 #![allow(incomplete_features)]
-#![feature(asm, naked_functions, global_asm, alloc_error_handler, raw_ref_op, const_generics)]
+#![feature(
+    asm,
+    naked_functions,
+    global_asm,
+    alloc_error_handler,
+    raw_ref_op,
+    const_generics,
+    const_in_array_repeat_expressions
+)]
 #![no_std]
 #![no_main]
 
@@ -17,6 +25,7 @@ mod arch;
 mod asm;
 mod boot;
 mod drivers;
+mod hart_local;
 mod io;
 mod mem;
 mod sync;
@@ -26,7 +35,7 @@ mod utils;
 use arch::csr;
 use mem::{
     kernel_patching,
-    paging::{PageSize, PhysicalAddress, Read, Sv39PageTable, VirtualAddress, Write, PAGE_TABLE_ROOT},
+    paging::{PageSize, PhysicalAddress, Read, Sv39PageTable, VirtualAddress, Write, PAGE_TABLE_MANAGER},
     phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
 };
 
@@ -38,44 +47,7 @@ extern "C" {
 
 #[no_mangle]
 unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
-    crate::io::init_logging();
-
-    let fdt = match fdt::Fdt::new(fdt) {
-        Some(fdt) => fdt,
-        None => crate::arch::exit(crate::arch::ExitStatus::Error(&"magic's fucked, my dude")),
-    };
-
-    let mut pf_alloc = PHYSICAL_MEMORY_ALLOCATOR.lock();
-
-    let mut page_alloc = || {
-        let phys_addr = pf_alloc.alloc().unwrap().as_phys_address();
-
-        (kernel_patching::phys2virt(phys_addr).as_mut_ptr() as *mut Sv39PageTable, phys_addr)
-    };
-
-    let root_page_table = &mut *PAGE_TABLE_ROOT.get();
-
-    let stdout = fdt.chosen().and_then(|n| n.stdout());
-    if let Some((reg, compatible)) = stdout.and_then(|n| Some((n.reg()?.next()?, n.compatible()?))) {
-        let stdout_addr = reg.starting_address as *mut u8;
-        let stdout_size = reg.size.unwrap();
-
-        if let Some(device) = crate::io::ConsoleDevices::from_compatible(stdout_addr, compatible) {
-            let stdout_phys = PhysicalAddress::from_ptr(stdout_addr);
-            let stdout_virt = VirtualAddress::from_ptr(stdout_addr);
-            root_page_table.map(
-                stdout_phys,
-                stdout_virt,
-                PageSize::Kilopage,
-                Read | Write,
-                &mut page_alloc,
-                kernel_patching::phys2virt,
-            );
-
-            device.set_console();
-        }
-    }
-
+    let mut page_manager = PAGE_TABLE_MANAGER.lock();
     // Remove identity mapping after paging initialization
     let kernel_start = kernel_patching::kernel_start() as usize;
     let kernel_end = kernel_patching::kernel_end() as usize;
@@ -84,7 +56,29 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         // we need to patch them back to physical "virtual" addresses to be
         // unmapped
         let patched = VirtualAddress::new(kernel_patching::virt2phys(VirtualAddress::new(address)).as_usize());
-        root_page_table.unmap(patched, kernel_patching::phys2virt);
+        page_manager.unmap_with_translation(patched, kernel_patching::phys2virt);
+        //(&mut *mem::paging::PAGE_TABLE_ROOT.get()).unmap(patched, kernel_patching::phys2virt);
+    }
+
+    crate::hart_local::init_hart_local_info(hart_id);
+    crate::io::init_logging();
+
+    let fdt = match fdt::Fdt::new(fdt) {
+        Some(fdt) => fdt,
+        None => crate::arch::exit(crate::arch::ExitStatus::Error(&"magic's fucked, my dude")),
+    };
+
+    let stdout = fdt.chosen().and_then(|n| n.stdout());
+    if let Some((node, reg, compatible)) = stdout.and_then(|n| Some((n, n.reg()?.next()?, n.compatible()?))) {
+        let stdout_addr = reg.starting_address as *mut u8;
+        let stdout_size = utils::round_up_to_next(reg.size.unwrap(), 4096);
+
+        if let Some(device) = crate::io::ConsoleDevices::from_compatible(stdout_addr, compatible) {
+            let stdout_phys = PhysicalAddress::from_ptr(stdout_addr);
+            let ptr = page_manager.map_mmio(stdout_phys, stdout_size);
+
+            device.set_console(ptr.as_mut_ptr());
+        }
     }
 
     log::info!(
@@ -103,19 +97,53 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     log::info!("Setting stvec to {:#p}", stvec_trap_shim.as_ptr());
     csr::stvec::set(core::mem::transmute(stvec_trap_shim.as_ptr()));
 
-    log::info!("{:?}", fdt.find_node("/uart@10000000").map(|n| n.name));
+    if let Some(node) = fdt.find_phandle(0x0B) {
+        println!("phandle 0x0B: {}", node.name);
+    }
 
-    for child in fdt.find_node("/").unwrap().children() {
-        println!("{}", child.name);
-        println!("sizes: {:?}", child.cell_sizes());
-        if let Some(compat) = child.compatible() {
-            for compatible in compat.all() {
-                println!("    compatible with: {:?}", compatible);
-            }
+    for child in fdt.find_all_nodes("/virtio_mmio") {
+        use drivers::virtio::mmio::{
+            block::{FeatureBits, VirtIoBlockDevice},
+            common::{DeviceType, VirtIoHeader},
+        };
+        let reg = child.reg().unwrap().next().unwrap();
+
+        let virtio_mmio_phys = PhysicalAddress::from_ptr(reg.starting_address);
+        let stdout_virt = VirtualAddress::from_ptr(reg.starting_address);
+        let virtio_mmio_virt = page_manager.map_mmio(virtio_mmio_phys, reg.size.unwrap());
+
+        let device: &'static VirtIoHeader = &*(virtio_mmio_virt.as_ptr().cast());
+
+        if let Some(DeviceType::BlockDevice) = device.device_type() {
+            let block_device: &'static VirtIoBlockDevice = &*(device as *const _ as *const VirtIoBlockDevice);
+
+            println!("{:?}: {:?}", FeatureBits::SizeMax, block_device.features() & FeatureBits::SizeMax);
+            println!("{:?}: {:?}", FeatureBits::Geometry, block_device.features() & FeatureBits::Geometry);
+            println!("{:?}: {:?}", FeatureBits::ReadOnly, block_device.features() & FeatureBits::ReadOnly);
+            println!("{:?}: {:?}", FeatureBits::BlockSize, block_device.features() & FeatureBits::BlockSize);
+            println!("{:?}: {:?}", FeatureBits::WriteZeroes, block_device.features() & FeatureBits::WriteZeroes);
         }
     }
 
+    if let Some(ic) = fdt.find_node("/soc/interrupt-controller") {
+        use drivers::generic::plic::Plic;
+        println!("{:?}", ic.reg().unwrap().next());
+        let reg = ic.reg().unwrap().next().unwrap();
+        let ic_phys = PhysicalAddress::from_ptr(reg.starting_address);
+        let ic_virt = page_manager.map_mmio(ic_phys, reg.size.unwrap());
+    }
+
+    // TIMEBASE-FREQUENCY!!!!!!!!!!!!!!!!!!!
+
+    arch::csr::sstatus::enable_interrupts();
+    //arch::csr::sip::clear(arch::csr::InterruptKind::Software);
+    arch::csr::sie::enable();
+
+    println!("{:?}", sbi::base::probe_extension(sbi::timer::EXTENSION_ID));
+
     println!("{:?}", fdt.find_node("/soc/interrupt-controller@c000000"));
+
+    println!("{:?}", alloc::vec![1u32, 2, 3, 4]);
 
     arch::exit(arch::ExitStatus::Ok)
 }

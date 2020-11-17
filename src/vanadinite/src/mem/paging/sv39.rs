@@ -7,29 +7,6 @@ use core::cell::UnsafeCell;
 
 pub const KIB_PAGE_SIZE: usize = 4096;
 
-#[repr(transparent)]
-pub struct StaticPageTable(UnsafeCell<Sv39PageTable>);
-
-impl StaticPageTable {
-    pub const fn new(table: UnsafeCell<Sv39PageTable>) -> Self {
-        Self(table)
-    }
-}
-
-impl core::ops::Deref for StaticPageTable {
-    type Target = UnsafeCell<Sv39PageTable>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-unsafe impl Send for StaticPageTable {}
-unsafe impl Sync for StaticPageTable {}
-
-// FIXME: add synchronization somehow
-pub static PAGE_TABLE_ROOT: StaticPageTable = StaticPageTable(UnsafeCell::new(Sv39PageTable::new()));
-
 #[repr(C, align(4096))]
 pub struct Sv39PageTable {
     entries: [PageTableEntry; 512],
@@ -185,6 +162,10 @@ impl VirtualAddress {
         VirtualAddress(addr)
     }
 
+    pub fn offset(self, bytes: usize) -> Self {
+        Self(self.0 + bytes)
+    }
+
     pub fn from_ptr<T>(ptr: *const T) -> Self {
         Self(ptr as usize)
     }
@@ -206,10 +187,6 @@ impl VirtualAddress {
 
         [(self.0 >> 12) & VPN_BITMASK, (self.0 >> 21) & VPN_BITMASK, (self.0 >> 30) & VPN_BITMASK]
     }
-
-    pub unsafe fn into_phyiscal_address(self, root: &Sv39PageTable) -> Option<PhysicalAddress> {
-        todo!()
-    }
 }
 
 impl core::fmt::Pointer for VirtualAddress {
@@ -224,6 +201,10 @@ pub struct PhysicalAddress(usize);
 impl PhysicalAddress {
     pub const fn new(addr: usize) -> Self {
         PhysicalAddress(addr)
+    }
+
+    pub fn offset(self, bytes: usize) -> Self {
+        Self(self.0 + bytes)
     }
 
     pub fn from_ptr<T>(ptr: *const T) -> Self {

@@ -137,10 +137,10 @@ impl FreeList {
         let end = VirtualAddress::new(start.as_usize() + new_mem_size);
 
         if num_pages == 1 {
-            PAGE_TABLE_MANAGER.lock().map_page(Read | Write, start);
+            PAGE_TABLE_MANAGER.lock().alloc_virtual(start, Read | Write);
             self.limit = end;
         } else {
-            PAGE_TABLE_MANAGER.lock().map_range(Read | Write, start, end);
+            PAGE_TABLE_MANAGER.lock().alloc_virtual_range(start, new_mem_size, Read | Write);
             self.limit = VirtualAddress::new(end.as_usize() + KIB_PAGE_SIZE);
         }
 
