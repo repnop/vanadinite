@@ -138,6 +138,20 @@ impl Fdt {
         })
     }
 
+    pub fn all_nodes(&self) -> impl Iterator<Item = node::FdtNode<'_>> {
+        unsafe { node::all_nodes(self) }
+    }
+
+    pub fn find_phandle(&self, phandle: u32) -> Option<node::FdtNode<'_>> {
+        use common::byteorder::FromBytes;
+        self.all_nodes().find(|n| {
+            n.properties()
+                .find(|p| p.name == "phandle")
+                .and_then(|p| Some(BigEndianU32::from_bytes(p.value)?.get() == phandle))
+                .unwrap_or(false)
+        })
+    }
+
     pub fn chosen(&self) -> Option<Chosen<'_>> {
         unsafe { node::find_node(&mut self.structs_ptr().cast(), "/chosen", self, None) }.map(|node| Chosen { node })
     }

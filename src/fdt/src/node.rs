@@ -9,6 +9,7 @@ const FDT_BEGIN_NODE: u32 = 1;
 const FDT_END_NODE: u32 = 2;
 const FDT_PROP: u32 = 3;
 const FDT_NOP: u32 = 4;
+const FDT_END: u32 = 5;
 
 #[derive(Debug, Clone, Copy)]
 pub struct MemoryNode<'a> {
@@ -217,6 +218,25 @@ impl<'a> FdtNode<'a> {
 
         CellSizes { address_cells: address_cells.unwrap_or(2), size_cells: size_cells.unwrap_or(1) }
     }
+
+    pub fn interrupt_cells(self) -> Option<usize> {
+        let mut interrupt_cells = None;
+
+        if let Some(prop) = self.properties().find(|p| p.name == "#interrupt-cells") {
+            interrupt_cells = BigEndianU32::from_bytes(prop.value).map(|n| n.get() as usize)
+        }
+
+        if let Some(parent) = self.parent_props {
+            let parent = FdtNode { name: "", props: parent, header: self.header, parent_props: None };
+            let parent_sizes = parent.cell_sizes();
+
+            if interrupt_cells.is_none() {
+                interrupt_cells = Some(parent_sizes.address_cells);
+            }
+        }
+
+        interrupt_cells
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -332,6 +352,62 @@ pub(crate) unsafe fn find_node<'a>(
     }
 
     None
+}
+
+pub(crate) unsafe fn all_nodes(header: &Fdt) -> impl Iterator<Item = FdtNode<'_>> {
+    let mut ptr: *const BigEndianU32 = header.structs_ptr().cast();
+    let mut done = false;
+    let mut parents = [core::ptr::null(); 128];
+    let mut parent_index = 0;
+
+    core::iter::from_fn(move || {
+        if done {
+            return None;
+        }
+
+        while (*ptr).get() == FDT_END_NODE {
+            parent_index -= 1;
+            advance_ptr(&mut ptr, 4);
+        }
+
+        if (*ptr).get() == FDT_END {
+            done = true;
+            return None;
+        }
+
+        while (*ptr).get() == FDT_NOP {
+            advance_ptr(&mut ptr, 4);
+        }
+
+        match (*ptr).get() {
+            FDT_BEGIN_NODE => advance_ptr(&mut ptr, 4),
+            _ => return None,
+        }
+
+        parents[parent_index] = ptr;
+        parent_index += 1;
+
+        let unit_name = cstr_core::CStr::from_ptr(ptr.cast()).to_str().ok()?;
+
+        advance_ptr(&mut ptr, unit_name.as_bytes().len() + 1);
+        let offset = ptr.cast::<u8>().align_offset(4);
+        advance_ptr(&mut ptr, offset);
+
+        let node_ptr = ptr;
+        while (*ptr).get() == FDT_PROP {
+            NodeProperty::parse(&mut ptr, header);
+        }
+
+        Some(FdtNode {
+            name: if unit_name == "" { "/" } else { unit_name },
+            header,
+            parent_props: match parent_index {
+                1 => None,
+                _ => Some(parents[parent_index - 1]),
+            },
+            props: node_ptr,
+        })
+    })
 }
 
 pub(crate) unsafe fn skip_current_node(ptr: &mut *const BigEndianU32, header: &Fdt) {
