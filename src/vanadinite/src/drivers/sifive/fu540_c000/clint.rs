@@ -19,5 +19,5 @@ pub struct Clint {
     mtimecmp3: Volatile<u64>,
     mtimecmp4: Volatile<u64>,
     _reserved2: [u8; 32720],
-    mtime: Volatile<u64>,
+    pub mtime: Volatile<u64>,
 }

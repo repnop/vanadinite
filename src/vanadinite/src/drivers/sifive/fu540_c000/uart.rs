@@ -15,17 +15,29 @@ pub struct SiFiveUart {
 }
 
 impl SiFiveUart {
-    pub fn init(&mut self) {
+    pub fn init(&self) {
         // Enable receive
         self.rx_control.rx_enable(true);
         // Enable transmit
         self.tx_control.tx_enable(true);
+        crate::mem::fence();
+
         self.tx_control.extra_stop_bit(false);
-        // Disable interrupts
-        self.interrupt_enable.rx_watermark_enable(false);
-        self.interrupt_enable.tx_watermark_enable(false);
+        crate::mem::fence();
+
+        self.tx_control.watermark_level(1);
+
+        self.rx_control.watermark_level(1);
+        crate::mem::fence();
+
+        // Set interrupt enables
+        self.interrupt_enable.rx_watermark_enable(true);
+        crate::mem::fence();
+        self.interrupt_enable.tx_watermark_enable(true);
+
         // Set baud rate to 31250 Hz
         self.baud_rate_divisor.divisor(16000);
+        crate::mem::fence();
     }
 
     pub fn read(&self) -> u8 {
@@ -34,7 +46,7 @@ impl SiFiveUart {
         self.rx_data.read()
     }
 
-    pub fn write(&mut self, n: u8) {
+    pub fn write(&self, n: u8) {
         while self.tx_data.is_full() {}
 
         self.tx_data.write(n);
@@ -47,7 +59,7 @@ impl SiFiveUart {
 
 impl crate::io::ConsoleDevice for SiFiveUart {
     fn init(&mut self) {
-        self.init();
+        (&*self).init();
     }
 
     fn read(&self) -> u8 {
@@ -55,7 +67,7 @@ impl crate::io::ConsoleDevice for SiFiveUart {
     }
 
     fn write(&mut self, n: u8) {
-        self.write(n);
+        (&*self).write(n);
     }
 }
 
@@ -72,7 +84,7 @@ mod registers {
     pub struct TxData(Volatile<u32>);
 
     impl TxData {
-        pub fn write(&mut self, val: u8) {
+        pub fn write(&self, val: u8) {
             self.0.write(val as u32);
         }
 
@@ -100,50 +112,50 @@ mod registers {
     pub struct TxCtrl(Volatile<u32>);
 
     impl TxCtrl {
-        pub fn tx_enable(&mut self, enable: bool) {
-            let val = self.0.read() | (enable as u32);
+        pub fn tx_enable(&self, enable: bool) {
+            let val = (self.0.read() & !1) | (enable as u32);
             self.0.write(val);
         }
 
-        pub fn extra_stop_bit(&mut self, enable: bool) {
-            let val = self.0.read() | ((enable as u32) << 1);
+        pub fn extra_stop_bit(&self, enable: bool) {
+            let val = (self.0.read() & !2) | ((enable as u32) << 1);
             self.0.write(val);
         }
 
-        pub fn watermark_level(&mut self, watermark: u8) {
-            let val = self.0.read() | ((watermark as u32 & 0b111) << 16);
+        pub fn watermark_level(&self, watermark: u8) {
+            let val = (self.0.read() & !(0b111 << 16)) | ((watermark as u32 & 0b111) << 16);
             self.0.write(val);
         }
     }
 
     #[derive(Debug)]
     #[repr(transparent)]
-    pub struct RxCtrl(Volatile<u32>);
+    pub struct RxCtrl(pub Volatile<u32>);
 
     impl RxCtrl {
-        pub fn rx_enable(&mut self, enable: bool) {
-            let val = self.0.read() | (enable as u32);
+        pub fn rx_enable(&self, enable: bool) {
+            let val = (self.0.read() & !1) | (enable as u32);
             self.0.write(val);
         }
 
-        pub fn watermark_level(&mut self, watermark: u8) {
-            let val = self.0.read() | ((watermark as u32 & 0b111) << 16);
+        pub fn watermark_level(&self, watermark: u8) {
+            let val = (self.0.read() & !(0b111 << 16)) | ((watermark as u32 & 0b111) << 16);
             self.0.write(val);
         }
     }
 
     #[derive(Debug)]
     #[repr(transparent)]
-    pub struct InterruptEnable(Volatile<u32>);
+    pub struct InterruptEnable(pub Volatile<u32>);
 
     impl InterruptEnable {
-        pub fn tx_watermark_enable(&mut self, enable: bool) {
-            let val = self.0.read() | (enable as u32);
+        pub fn tx_watermark_enable(&self, enable: bool) {
+            let val = (self.0.read() & !1) | (enable as u32);
             self.0.write(val);
         }
 
-        pub fn rx_watermark_enable(&mut self, enable: bool) {
-            let val = self.0.read() | ((enable as u32) << 1);
+        pub fn rx_watermark_enable(&self, enable: bool) {
+            let val = (self.0.read() & !2) | ((enable as u32) << 1);
             self.0.write(val);
         }
     }
@@ -167,7 +179,7 @@ mod registers {
     pub struct BaudDivisor(Volatile<u32>);
 
     impl BaudDivisor {
-        pub fn divisor(&mut self, divisor: u16) {
+        pub fn divisor(&self, divisor: u16) {
             self.0.write(divisor as u32);
         }
     }

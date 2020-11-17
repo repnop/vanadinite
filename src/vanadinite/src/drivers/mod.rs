@@ -5,14 +5,29 @@
 pub mod sifive {
     pub mod fu540_c000 {
         pub mod clint;
+        pub mod plic;
         pub mod uart;
     }
 }
 
-pub mod misc {
+pub mod generic {
+    pub mod plic;
     pub mod uart16550;
+}
+
+pub mod virtio {
+    pub mod mmio {
+        pub mod block;
+        pub mod common;
+    }
+
+    pub mod queue;
 }
 
 pub trait CompatibleWith {
     fn list() -> &'static [&'static str];
+}
+
+pub trait InterruptServicable {
+    fn isr(a0: usize) -> Result<(), &'static str>;
 }

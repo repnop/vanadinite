@@ -131,11 +131,11 @@ mod registers {
     pub struct QueueReady(Volatile<u32, ReadWrite>);
 
     impl QueueReady {
-        pub fn ready(&mut self) {
+        pub fn ready(&self) {
             self.0.write(1);
         }
 
-        pub fn unready(&mut self) {
+        pub fn unready(&self) {
             self.0.write(0);
         }
     }
@@ -159,11 +159,11 @@ mod registers {
     pub struct InterruptAck(Volatile<u32, Write>);
 
     impl InterruptAck {
-        pub fn acknowledge_buffer_used(&mut self) {
+        pub fn acknowledge_buffer_used(&self) {
             self.0.write(1);
         }
 
-        pub fn acknowledge_config_change(&mut self) {
+        pub fn acknowledge_config_change(&self) {
             self.0.write(2);
         }
     }
@@ -173,11 +173,11 @@ mod registers {
     pub struct Status(Volatile<u32, ReadWrite>);
 
     impl Status {
-        pub fn reset(&mut self) {
+        pub fn reset(&self) {
             self.0.write(0);
         }
 
-        pub fn set_flag(&mut self, flag: StatusFlag) {
+        pub fn set_flag(&self, flag: StatusFlag) {
             self.0.write(self.0.read() | flag as u32);
             crate::mem::fence();
         }
@@ -192,7 +192,7 @@ mod registers {
             self.0.read() & bit == bit
         }
 
-        pub fn is_set(&mut self, flag: StatusFlag) -> bool {
+        pub fn is_set(&self, flag: StatusFlag) -> bool {
             self.0.read() & flag as u32 == flag as u32
         }
     }
@@ -213,7 +213,7 @@ mod registers {
     pub struct QueueDescriptor(Volatile<[u32; 2], ReadWrite>);
 
     impl QueueDescriptor {
-        pub fn set(&mut self, addr: PhysicalAddress) {
+        pub fn set(&self, addr: PhysicalAddress) {
             let low = (addr.as_usize() & 0xFFFF_FFFF) as u32;
             let high = (addr.as_usize() >> 32) as u32;
             self.0[0].write(low);
@@ -226,7 +226,7 @@ mod registers {
     pub struct QueueAvailable(Volatile<[u32; 2], ReadWrite>);
 
     impl QueueAvailable {
-        pub fn set(&mut self, addr: PhysicalAddress) {
+        pub fn set(&self, addr: PhysicalAddress) {
             let low = (addr.as_usize() & 0xFFFF_FFFF) as u32;
             let high = (addr.as_usize() >> 32) as u32;
             self.0[0].write(low);
@@ -239,7 +239,7 @@ mod registers {
     pub struct QueueUsed(Volatile<[u32; 2], ReadWrite>);
 
     impl QueueUsed {
-        pub fn set(&mut self, addr: PhysicalAddress) {
+        pub fn set(&self, addr: PhysicalAddress) {
             let low = (addr.as_usize() & 0xFFFF_FFFF) as u32;
             let high = (addr.as_usize() >> 32) as u32;
             self.0[0].write(low);

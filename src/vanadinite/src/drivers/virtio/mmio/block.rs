@@ -30,7 +30,7 @@ pub struct VirtIoBlockDevice {
 }
 
 impl VirtIoBlockDevice {
-    pub fn init(&mut self, queue: &SplitVirtqueue, queue_select: u32) -> Result<(), &'static str> {
+    pub fn init(&self, queue: &SplitVirtqueue, queue_select: u32) -> Result<(), &'static str> {
         // TODO: memory barriers??
         self.header.status.reset();
         self.header.status.set_flag(StatusFlag::Acknowledge);
