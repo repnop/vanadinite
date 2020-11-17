@@ -133,14 +133,16 @@ impl Trap {
 #[no_mangle]
 pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stval: usize) -> usize {
     log::info!("we trappin': {:x?}", regs);
-    log::info!("mcause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
+    log::info!("scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
 
     if let Trap::LoadPageFault = Trap::from_cause(scause) {
         panic!("Load access fault accessing {:#p}", stval as *mut u8);
     }
 
+    if let Trap::SupervisorExternalInterrupt = Trap::from_cause(scause) {}
+
     loop {}
-    sepc + 4
+    sepc
 }
 
 #[rustfmt::skip]
