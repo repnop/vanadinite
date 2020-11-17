@@ -15,8 +15,21 @@ pub mod paging {
 }
 
 #[inline(always)]
-pub fn sfence() {
-    unsafe { asm!("sfence.vma") };
+pub fn sfence(vaddr: Option<paging::VirtualAddress>, asid: Option<u16>) {
+    unsafe {
+        match (vaddr, asid) {
+            (Some(vaddr), Some(asid)) => {
+                let vaddr = vaddr.as_usize();
+                asm!("sfence.vma {}, {}", in(reg) vaddr, in(reg) asid);
+            }
+            (Some(vaddr), None) => {
+                let vaddr = vaddr.as_usize();
+                asm!("sfence.vma {}, zero", in(reg) vaddr);
+            }
+            (None, Some(asid)) => asm!("sfence.vma zero, {}", in(reg) asid),
+            (None, None) => asm!("sfence.vma zero, zero"),
+        }
+    }
 }
 
 #[inline(always)]
