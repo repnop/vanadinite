@@ -2,7 +2,10 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{drivers::CompatibleWith, utils::volatile::Volatile};
+use crate::{
+    drivers::{CompatibleWith, InterruptServicable},
+    utils::volatile::Volatile,
+};
 
 #[repr(C)]
 pub struct Uart16550 {
@@ -17,7 +20,7 @@ pub struct Uart16550 {
 }
 
 impl Uart16550 {
-    pub fn init(&mut self) {
+    pub fn init(&self) {
         self.line_control.write(0x03);
         self.int_id_fifo_control.write(0x01);
         self.interrupt_enable.write(0x01);
@@ -66,7 +69,7 @@ impl Uart16550 {
         value == (1 << 6)
     }
 
-    pub fn write(&mut self, data: u8) {
+    pub fn write(&self, data: u8) {
         while !self.data_empty() {}
 
         self.data_register.write(data);
@@ -76,7 +79,7 @@ impl Uart16550 {
         }
     }
 
-    pub fn write_str(&mut self, s: &str) {
+    pub fn write_str(&self, s: &str) {
         for byte in s.bytes() {
             self.write(byte);
         }
@@ -85,14 +88,14 @@ impl Uart16550 {
 
 impl core::fmt::Write for Uart16550 {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        self.write_str(s);
+        (&*self).write_str(s);
         Ok(())
     }
 }
 
 impl crate::io::ConsoleDevice for Uart16550 {
     fn init(&mut self) {
-        self.init();
+        (&*self).init();
     }
 
     fn read(&self) -> u8 {
@@ -100,12 +103,25 @@ impl crate::io::ConsoleDevice for Uart16550 {
     }
 
     fn write(&mut self, n: u8) {
-        self.write(n)
+        (&*self).write(n)
     }
 }
 
 impl CompatibleWith for Uart16550 {
     fn list() -> &'static [&'static str] {
         &["ns16550", "ns16550a"]
+    }
+}
+
+impl InterruptServicable for Uart16550 {
+    fn isr(a0: usize) -> Result<(), &'static str> {
+        let value = {
+            let this: &'static mut Self = unsafe { &mut *(a0 as *mut _) };
+            this.read()
+        };
+
+        crate::print!("{}", value as char);
+
+        Ok(())
     }
 }
