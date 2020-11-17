@@ -22,6 +22,22 @@ impl LinkerSymbol {
 unsafe impl Sync for LinkerSymbol {}
 unsafe impl Send for LinkerSymbol {}
 
+#[repr(transparent)]
+pub struct StaticMut<T>(core::cell::UnsafeCell<T>);
+
+impl<T> StaticMut<T> {
+    pub const fn new(t: T) -> Self {
+        Self(core::cell::UnsafeCell::new(t))
+    }
+
+    pub const unsafe fn get(&self) -> *mut T {
+        self.0.get()
+    }
+}
+
+unsafe impl<T> Sync for StaticMut<T> {}
+unsafe impl<T> Send for StaticMut<T> {}
+
 #[allow(dead_code)]
 #[inline(always)]
 pub fn manual_debug_point() {
@@ -31,6 +47,7 @@ pub fn manual_debug_point() {
 }
 
 pub mod volatile {
+    use core::cell::UnsafeCell;
     #[derive(Debug, Clone, Copy)]
     pub struct Read;
     #[derive(Debug, Clone, Copy)]
@@ -40,27 +57,27 @@ pub mod volatile {
 
     #[derive(Debug)]
     #[repr(transparent)]
-    pub struct Volatile<T, Direction = ReadWrite>(T, core::marker::PhantomData<Direction>);
+    pub struct Volatile<T, Direction = ReadWrite>(UnsafeCell<T>, core::marker::PhantomData<Direction>);
 
     impl<T: Copy + 'static> Volatile<T, Read> {
         pub fn read(&self) -> T {
-            unsafe { (self as *const _ as *const T).read_volatile() }
+            unsafe { self.0.get().read_volatile() }
         }
     }
 
     impl<T: Copy + 'static> Volatile<T, Write> {
-        pub fn write(&mut self, val: T) {
-            unsafe { (self as *mut _ as *mut T).write_volatile(val) }
+        pub fn write(&self, val: T) {
+            unsafe { self.0.get().write_volatile(val) }
         }
     }
 
     impl<T: Copy + 'static> Volatile<T, ReadWrite> {
         pub fn read(&self) -> T {
-            unsafe { (self as *const _ as *const T).read_volatile() }
+            unsafe { self.0.get().read_volatile() }
         }
 
-        pub fn write(&mut self, val: T) {
-            unsafe { (self as *mut _ as *mut T).write_volatile(val) }
+        pub fn write(&self, val: T) {
+            unsafe { self.0.get().write_volatile(val) }
         }
     }
 
@@ -77,12 +94,6 @@ pub mod volatile {
 
         fn index(&self, index: usize) -> &Self::Output {
             unsafe { &core::mem::transmute::<_, &[Volatile<T>; N]>(self)[index] }
-        }
-    }
-
-    impl<T: Copy, const N: usize> core::ops::IndexMut<usize> for Volatile<[T; N], ReadWrite> {
-        fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-            unsafe { &mut core::mem::transmute::<_, &mut [Volatile<T, ReadWrite>; N]>(self)[index] }
         }
     }
 }
