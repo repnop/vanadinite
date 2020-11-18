@@ -9,8 +9,7 @@ use crate::{
 
 #[repr(C)]
 pub struct Plic {
-    _reserved1: u32,
-    pub source_priorities: [registers::Priority; 1023],
+    pub source_priorities: [registers::Priority; 1024],
     pub interrupt_pending: registers::InterruptPending,
     _padding1: [u8; 3968],
     pub interrupt_enable: [registers::Context<registers::InterruptEnable>; 15872],
@@ -20,13 +19,17 @@ pub struct Plic {
 }
 
 impl Plic {
-    pub fn init(&self) {
-        for i in 0..1023 {
-            self.source_priorities[i].set(0);
-        }
-
-        self.interrupt_enable[current_context()].init();
-        self.threshold_and_claim[current_context()].priority_threshold.init();
+    // FIXME: actually do initialization
+    pub fn init(&self, num_interrupts: usize) {
+        // for i in 0..1023 {
+        //     self.source_priorities[i].set(1);
+        // }
+        // //
+        // for context in 1..=1 {
+        //     self.interrupt_enable[context].init();
+        //     self.threshold_and_claim[context].priority_threshold.init();
+        // }
+        // self.threshold_and_claim[0].priority_threshold.init();
     }
 }
 
@@ -75,17 +78,10 @@ mod registers {
     pub struct InterruptEnable(Volatile<[u32; 32], ReadWrite>);
 
     impl InterruptEnable {
-        pub(super) fn init(&self) {
-            for i in 0..32 {
-                self.0[i].write(0);
-            }
-        }
-
         pub fn enable(&self, interrupt_id: usize) {
             let (u32_index, bit_index) = (interrupt_id / 32, interrupt_id % 32);
 
             let val = self.0[u32_index].read() | (1 << bit_index);
-            log::info!("{:#p}, {:#x}", &self.0[u32_index], val);
             self.0[u32_index].write(val);
         }
 
@@ -102,15 +98,12 @@ mod registers {
     pub struct PriorityThreshold(Volatile<u32, ReadWrite>);
 
     impl PriorityThreshold {
-        pub(super) fn init(&self) {
-            self.0.write(0);
-        }
-
         pub fn get(&self) -> u32 {
             self.0.read()
         }
 
         pub fn set(&self, priority: u32) {
+            log::info!("{:#p}, {:#x}", &self.0, priority);
             self.0.write(priority);
         }
     }
@@ -153,6 +146,7 @@ mod registers {
     pub struct ThresholdAndClaim {
         pub priority_threshold: PriorityThreshold,
         pub claim_complete: ClaimComplete,
+        _reserved: [u8; 4088],
     }
 }
 
@@ -207,12 +201,5 @@ impl drivers::Plic for Plic {
 // FIXME: this is kind of hacky because contexts aren't currently standardized,
 // should look for a better way to do it in the future
 pub fn current_context() -> usize {
-    1 // 2 * crate::hart_local::hart_local_info().hart_id() + 1
+    2 * crate::hart_local::hart_local_info().hart_id() + 1
 }
-
-// FIXME: this is kind of hacky because contexts aren't currently standardized,
-// should look for a better way to do it in the future
-// #[cfg(not(feature = "sifive_u"))]
-// pub fn current_context() -> usize {
-//     1 + crate::hart_local::hart_local_info().hart_id()
-// }

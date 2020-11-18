@@ -84,13 +84,15 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             let ic_virt = page_manager.map_mmio(ic_phys, reg.size.unwrap());
 
             let plic = &*ic_virt.as_ptr().cast::<Plic>();
-            plic.init();
+            Plic::init(plic);
 
             log::info!("Registering PLIC @ {:#p}", ic_virt);
             interrupts::register_plic(plic as &'static dyn drivers::Plic);
         }
         None => panic!("Can't find interrupt controller!"),
     }
+
+    drivers::Plic::context_threshold(&*interrupts::PLIC.lock(), drivers::EnableMode::Local, 0x00);
 
     let stdout = fdt.chosen().and_then(|n| n.stdout());
     if let Some((node, reg, compatible)) = stdout.and_then(|n| Some((n, n.reg()?.next()?, n.compatible()?))) {
@@ -105,13 +107,14 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
             if let Some(interrupts) = node.interrupts() {
                 for interrupt in interrupts {
+                    log::info!("interrupt id: {}", interrupt);
                     device.register_isr(interrupt, ptr.as_usize());
                 }
             }
         }
     }
 
-    drivers::Plic::context_threshold(&*interrupts::PLIC.lock(), drivers::EnableMode::Local, 0x00);
+    //drivers::Plic::context_threshold(&*interrupts::PLIC.lock(), drivers::EnableMode::Local, 0x00);
 
     log::info!(
         "Booted on a {} on hart {}",
@@ -126,7 +129,7 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     log::info!("SBI spec version: {:?}", sbi::base::spec_version());
     log::info!("SBI implementor: {:?}", sbi::base::impl_id());
     log::info!("marchid: {:#x}", sbi::base::marchid());
-    log::info!("Setting stvec to {:#p}", stvec_trap_shim.as_ptr());
+    log::info!("Installing trap handler at {:#p}", stvec_trap_shim.as_ptr());
     csr::stvec::set(core::mem::transmute(stvec_trap_shim.as_ptr()));
 
     for child in fdt.find_all_nodes("/virtio_mmio") {
@@ -156,15 +159,10 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     arch::csr::sstatus::enable_interrupts();
     arch::csr::sie::enable();
-    println!("{:#x}", arch::csr::sie::read());
-
-    //sbi::timer::set_timer(arch::csr::time::read() as u64 + 0x10_000);
-
-    println!("sstatus: {:b}, sie: {:b}", arch::csr::sstatus::read(), arch::csr::sie::read());
 
     loop {
-        // println!("{}", drivers::Plic::is_pending(&*interrupts::PLIC.lock(), 0x0A));
-        // println!("    {:b}", arch::csr::sip::read());
+        //println!("{}", drivers::Plic::is_pending(&*interrupts::PLIC.lock(), 0x0A));
+        //println!("    {:b}", arch::csr::sip::read());
     }
 
     arch::exit(arch::ExitStatus::Ok)
