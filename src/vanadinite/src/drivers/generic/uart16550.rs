@@ -36,6 +36,8 @@ impl Uart16550 {
         self.interrupt_enable.write(divisor_most);
 
         self.line_control.write(lcr);
+
+        self.scratch.write(0);
     }
 
     pub fn line_status(&self) -> u8 {
@@ -72,10 +74,23 @@ impl Uart16550 {
     pub fn write(&self, data: u8) {
         while !self.data_empty() {}
 
+        if data == 127 {
+            self.write_str("\x1B[1D \x1B[1D");
+        }
+
         self.data_register.write(data);
 
-        if data == b'\n' {
+        // Normalize line endings into \r\n or \n\r
+        if data == b'\n' && self.scratch.read() != 1 {
+            self.scratch.write(1);
             self.write(b'\r');
+            self.scratch.write(0);
+        } else if data == b'\r' && self.scratch.read() != 1 {
+            self.scratch.write(1);
+            self.write(b'\n');
+            self.scratch.write(0);
+        } else {
+            self.scratch.write(0);
         }
     }
 

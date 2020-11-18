@@ -54,6 +54,8 @@ impl PageTableManager {
             },
             phys2virt,
         );
+
+        sfence(Some(map_to), None);
     }
 
     pub fn map_direct<P: ToPermissions>(
@@ -116,7 +118,6 @@ impl PageTableManager {
         P: ToPermissions,
     {
         let _disabler = InterruptDisabler::new();
-        //log::info!("PageTableManager::map_with_allocator: mapping {:#p} to {:#p}", map_from, map_to);
 
         { &mut *PAGE_TABLE_ROOT.get() }.map(map_from, map_to, page_size, perms, f, translation);
     }
@@ -127,7 +128,6 @@ impl PageTableManager {
         A: Fn(PhysicalAddress) -> VirtualAddress,
     {
         let _disabler = InterruptDisabler::new();
-        //log::info!("PageTableManager::unmap_with_allocator: unmapping {:#p}", map_to);
 
         { &mut *PAGE_TABLE_ROOT.get() }.unmap(map_to, translation);
     }

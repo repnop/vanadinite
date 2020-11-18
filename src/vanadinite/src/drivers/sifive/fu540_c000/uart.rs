@@ -146,7 +146,7 @@ mod registers {
 
     #[derive(Debug)]
     #[repr(transparent)]
-    pub struct InterruptEnable(pub Volatile<u32>);
+    pub struct InterruptEnable(Volatile<u32>);
 
     impl InterruptEnable {
         pub fn tx_watermark_enable(&self, enable: bool) {

@@ -2,6 +2,11 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::{
+    drivers::Plic,
+    interrupts::{isr::isr_entry, PLIC},
+};
+
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct Registers {
@@ -132,16 +137,24 @@ impl Trap {
 
 #[no_mangle]
 pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stval: usize) -> usize {
-    log::info!("we trappin': {:x?}", regs);
-    log::info!("scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
+    log::debug!("we trappin': {:x?}", regs);
+    log::debug!("scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
 
     if let Trap::LoadPageFault = Trap::from_cause(scause) {
         panic!("Load access fault accessing {:#p}", stval as *mut u8);
     }
 
-    if let Trap::SupervisorExternalInterrupt = Trap::from_cause(scause) {}
+    if let Trap::SupervisorExternalInterrupt = Trap::from_cause(scause) {
+        let plic = PLIC.lock();
+        if let Some(claimed) = plic.claim() {
+            if let Some((callback, private)) = isr_entry(claimed) {
+                callback(claimed, private).unwrap();
+            }
 
-    loop {}
+            plic.complete(claimed);
+        }
+    }
+
     sepc
 }
 

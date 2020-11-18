@@ -5,6 +5,8 @@
 use crate::drivers::InterruptServicable;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+pub type IsrCallback = fn(usize, usize) -> Result<(), &'static str>;
+
 const ISR_LIMIT: usize = 128;
 
 pub(super) static ISR_REGISTRY: [IsrEntry; ISR_LIMIT] = [IsrEntry::new(); ISR_LIMIT];
@@ -30,4 +32,14 @@ pub fn register_isr<T: InterruptServicable>(interrupt_id: usize, private: usize)
     slot.active.store(true, Ordering::SeqCst);
     slot.f.store(<T as InterruptServicable>::isr as usize, Ordering::SeqCst);
     slot.private.store(private, Ordering::SeqCst);
+}
+
+pub fn isr_entry(id: usize) -> Option<(IsrCallback, usize)> {
+    let entry = &ISR_REGISTRY[id];
+
+    if entry.active.load(Ordering::Relaxed) {
+        Some((unsafe { core::mem::transmute(entry.f.load(Ordering::Relaxed)) }, entry.private.load(Ordering::Relaxed)))
+    } else {
+        None
+    }
 }

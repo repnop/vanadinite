@@ -87,18 +87,25 @@ impl Sv39PageTable {
     where
         F: Fn(PhysicalAddress) -> VirtualAddress,
     {
+        self.translate(virt, address_conversion).is_some()
+    }
+
+    pub fn translate<F>(&self, virt: VirtualAddress, address_conversion: F) -> Option<PhysicalAddress>
+    where
+        F: Fn(PhysicalAddress) -> VirtualAddress,
+    {
         let mut page_table = self;
 
         for vpn in virt.vpns().iter().copied().rev() {
             let pte = &page_table.entries[vpn];
             if pte.is_branch() {
                 page_table = unsafe { &*address_conversion(pte.subtable().unwrap()).as_ptr().cast() };
-            } else {
-                return pte.valid();
+            } else if pte.valid() {
+                return pte.ppn();
             }
         }
 
-        false
+        None
     }
 }
 
@@ -143,6 +150,13 @@ impl PageTableEntry {
     pub fn subtable(self) -> Option<PhysicalAddress> {
         match self.is_branch() {
             true => Some(PhysicalAddress::new((self.0 >> 10) << 12)),
+            false => None,
+        }
+    }
+
+    pub fn ppn(self) -> Option<PhysicalAddress> {
+        match self.valid() {
+            true => Some(PhysicalAddress::new(((self.0 >> 10) & 0x0FFF_FFFF_FFFF) << 12)),
             false => None,
         }
     }

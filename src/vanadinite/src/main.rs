@@ -84,7 +84,7 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             let ic_virt = page_manager.map_mmio(ic_phys, reg.size.unwrap());
 
             let plic = &*ic_virt.as_ptr().cast::<Plic>();
-            Plic::init(plic);
+            // Plic::init(plic);
 
             log::info!("Registering PLIC @ {:#p}", ic_virt);
             interrupts::register_plic(plic as &'static dyn drivers::Plic);
@@ -161,8 +161,7 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     arch::csr::sie::enable();
 
     loop {
-        //println!("{}", drivers::Plic::is_pending(&*interrupts::PLIC.lock(), 0x0A));
-        //println!("    {:b}", arch::csr::sip::read());
+        asm!("nop");
     }
 
     arch::exit(arch::ExitStatus::Ok)
