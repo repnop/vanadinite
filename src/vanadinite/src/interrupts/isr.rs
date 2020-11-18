@@ -2,35 +2,32 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::drivers::InterruptServicable;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-pub type InterruptServiceRoutine = fn(usize) -> Result<(), &'static str>;
 
 const ISR_LIMIT: usize = 128;
 
-pub(super) static ISR_REGISTRY: [IsrEntry; ISR_LIMIT] = [IsrEntry::default(); ISR_LIMIT];
+pub(super) static ISR_REGISTRY: [IsrEntry; ISR_LIMIT] = [IsrEntry::new(); ISR_LIMIT];
 
 #[derive(Debug)]
 pub struct IsrEntry {
     active: AtomicBool,
     f: AtomicUsize,
-    a0: AtomicUsize,
+    private: AtomicUsize,
 }
 
 impl IsrEntry {
-    const fn default() -> Self {
-        Self { active: AtomicBool::new(false), f: AtomicUsize::new(0), a0: AtomicUsize::new(0) }
-    }
-
-    pub fn new(isr: InterruptServiceRoutine, a0: usize) -> Self {
-        Self { active: AtomicBool::new(true), f: AtomicUsize::new(isr as usize), a0: AtomicUsize::new(a0) }
+    const fn new() -> Self {
+        Self { active: AtomicBool::new(false), f: AtomicUsize::new(0), private: AtomicUsize::new(0) }
     }
 }
 
-pub fn register_isr(interrupt_id: usize, entry: IsrEntry) {
+pub fn register_isr<T: InterruptServicable>(interrupt_id: usize, private: usize) {
+    log::info!("Registering ISR for {} on ID {}", core::any::type_name::<T>(), interrupt_id);
+    let _disabler = super::InterruptDisabler::new();
     let slot = &ISR_REGISTRY[interrupt_id];
 
-    slot.active.store(entry.active.load(Ordering::Relaxed), Ordering::SeqCst);
-    slot.f.store(entry.f.load(Ordering::Relaxed), Ordering::SeqCst);
-    slot.a0.store(entry.a0.load(Ordering::Relaxed), Ordering::SeqCst);
+    slot.active.store(true, Ordering::SeqCst);
+    slot.f.store(<T as InterruptServicable>::isr as usize, Ordering::SeqCst);
+    slot.private.store(private, Ordering::SeqCst);
 }

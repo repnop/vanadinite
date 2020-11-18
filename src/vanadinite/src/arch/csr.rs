@@ -31,6 +31,17 @@ pub mod sie {
     }
 }
 
+pub mod sip {
+    #[inline(always)]
+    pub fn read() -> usize {
+        let val: usize;
+
+        unsafe { asm!("csrr {}, sip", out(reg) val) };
+
+        val
+    }
+}
+
 pub mod sstatus {
     pub fn enable_interrupts() {
         unsafe {
@@ -41,6 +52,15 @@ pub mod sstatus {
                 out(reg) _,
             );
         }
+    }
+
+    #[inline(always)]
+    pub fn read() -> usize {
+        let val: usize;
+
+        unsafe { asm!("csrr {}, sstatus", out(reg) val) };
+
+        val
     }
 
     pub fn disable_interrupts() {

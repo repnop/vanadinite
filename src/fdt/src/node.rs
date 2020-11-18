@@ -219,6 +219,12 @@ impl<'a> FdtNode<'a> {
         CellSizes { address_cells: address_cells.unwrap_or(2), size_cells: size_cells.unwrap_or(1) }
     }
 
+    pub fn interrupt_parent(self) -> Option<FdtNode<'a>> {
+        self.properties()
+            .find(|p| p.name == "interrupt-parent")
+            .and_then(|p| self.header.find_phandle(BigEndianU32::from_bytes(p.value)?.get()))
+    }
+
     pub fn interrupt_cells(self) -> Option<usize> {
         let mut interrupt_cells = None;
 
@@ -226,16 +232,35 @@ impl<'a> FdtNode<'a> {
             interrupt_cells = BigEndianU32::from_bytes(prop.value).map(|n| n.get() as usize)
         }
 
-        if let Some(parent) = self.parent_props {
-            let parent = FdtNode { name: "", props: parent, header: self.header, parent_props: None };
-            let parent_sizes = parent.cell_sizes();
-
-            if interrupt_cells.is_none() {
-                interrupt_cells = Some(parent_sizes.address_cells);
-            }
+        if let (None, Some(parent)) = (interrupt_cells, self.interrupt_parent()) {
+            interrupt_cells = parent.interrupt_cells();
         }
 
         interrupt_cells
+    }
+
+    /// Helper method for finding a `interrupts` property
+    pub fn interrupts(self) -> Option<impl Iterator<Item = usize> + 'a> {
+        let sizes = self.interrupt_cells()?;
+
+        let mut interrupt = None;
+        for prop in self.properties() {
+            if prop.name == "interrupts" {
+                let mut stream = common::byteorder::IntegerStream::new(prop.value);
+                interrupt = Some(core::iter::from_fn(move || {
+                    let interrupt = match sizes {
+                        1 => stream.next::<BigEndianU32>()?.get() as usize,
+                        2 => stream.next::<BigEndianU64>()?.get() as usize,
+                        _ => return None,
+                    };
+
+                    Some(interrupt)
+                }));
+                break;
+            }
+        }
+
+        interrupt
     }
 }
 

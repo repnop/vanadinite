@@ -4,6 +4,7 @@ default_to_workspace = false
 [env]
 MACHINE = "virt"
 RAM = "512M"
+CPUS = "1"
 
 [tasks.'build-vanadinite.release']
 env = { RUSTFLAGS = "-C link-arg=-Tvanadinite/lds/${MACHINE}.lds -C code-model=medium" }
@@ -22,7 +23,7 @@ command = "qemu-system-riscv64"
 args= [
     "-machine", "${MACHINE}",
     "-cpu", "rv64",
-    "-smp", "5",
+    "-smp", "${CPUS}",
     "-m", "${RAM}",
     
     # force the most recent VirtIO spec version
@@ -42,7 +43,7 @@ command = "qemu-system-riscv64"
 args= [
     "-machine", "${MACHINE}",
     "-cpu", "rv64",
-    "-smp", "5",
+    "-smp", "${CPUS}",
     "-m", "${RAM}",
     
     # force the most recent VirtIO spec version

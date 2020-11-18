@@ -108,15 +108,15 @@ impl crate::io::ConsoleDevice for Uart16550 {
 }
 
 impl CompatibleWith for Uart16550 {
-    fn list() -> &'static [&'static str] {
+    fn compatible_with() -> &'static [&'static str] {
         &["ns16550", "ns16550a"]
     }
 }
 
 impl InterruptServicable for Uart16550 {
-    fn isr(a0: usize) -> Result<(), &'static str> {
+    fn isr(source: usize, private: usize) -> Result<(), &'static str> {
         let value = {
-            let this: &'static mut Self = unsafe { &mut *(a0 as *mut _) };
+            let this: &'static Self = unsafe { &*(private as *const _) };
             this.read()
         };
 

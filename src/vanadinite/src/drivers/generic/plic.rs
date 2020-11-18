@@ -3,7 +3,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    drivers::CompatibleWith,
+    drivers::{self, CompatibleWith, EnableMode},
     utils::volatile::{Read, ReadWrite, Volatile},
 };
 
@@ -14,9 +14,20 @@ pub struct Plic {
     pub interrupt_pending: registers::InterruptPending,
     _padding1: [u8; 3968],
     pub interrupt_enable: [registers::Context<registers::InterruptEnable>; 15872],
-    _padding2: [u8; 57468],
+    _padding2: [u8; 57344],
     pub threshold_and_claim: [registers::Context<registers::ThresholdAndClaim>; 15872],
     _padding3: [u8; 8184],
+}
+
+impl Plic {
+    pub fn init(&self) {
+        for i in 0..1023 {
+            self.source_priorities[i].set(0);
+        }
+
+        self.interrupt_enable[current_context()].init();
+        self.threshold_and_claim[current_context()].priority_threshold.init();
+    }
 }
 
 mod registers {
@@ -64,10 +75,17 @@ mod registers {
     pub struct InterruptEnable(Volatile<[u32; 32], ReadWrite>);
 
     impl InterruptEnable {
+        pub(super) fn init(&self) {
+            for i in 0..32 {
+                self.0[i].write(0);
+            }
+        }
+
         pub fn enable(&self, interrupt_id: usize) {
             let (u32_index, bit_index) = (interrupt_id / 32, interrupt_id % 32);
 
             let val = self.0[u32_index].read() | (1 << bit_index);
+            log::info!("{:#p}, {:#x}", &self.0[u32_index], val);
             self.0[u32_index].write(val);
         }
 
@@ -84,6 +102,10 @@ mod registers {
     pub struct PriorityThreshold(Volatile<u32, ReadWrite>);
 
     impl PriorityThreshold {
+        pub(super) fn init(&self) {
+            self.0.write(0);
+        }
+
         pub fn get(&self) -> u32 {
             self.0.read()
         }
@@ -98,29 +120,34 @@ mod registers {
     pub struct ClaimComplete(Volatile<u32, ReadWrite>);
 
     impl ClaimComplete {
-        pub fn claim(&self) -> Option<InterruptClaim<'_>> {
-            match core::num::NonZeroU32::new(self.0.read()) {
-                None => None,
-                Some(n) => Some(InterruptClaim { interrupt_id: n.get(), register: self }),
+        pub fn claim(&self) -> Option<usize> {
+            match self.0.read() {
+                0 => None,
+                n => Some(n as usize),
             }
         }
-    }
 
-    #[derive(Debug)]
-    pub struct InterruptClaim<'a> {
-        interrupt_id: u32,
-        register: &'a ClaimComplete,
-    }
-
-    impl InterruptClaim<'_> {
-        pub fn source(&self) -> u32 {
-            self.interrupt_id
-        }
-
-        pub fn complete(self) {
-            self.register.0.write(self.interrupt_id);
+        pub fn complete(&self, interrupt_id: usize) {
+            self.0.write(interrupt_id as u32);
         }
     }
+
+    // Neat idea, but currently can't fit it into the design, oh well.
+    // #[derive(Debug)]
+    // pub struct InterruptClaim<'a> {
+    //     interrupt_id: u32,
+    //     register: &'a ClaimComplete,
+    // }
+    //
+    // impl InterruptClaim<'_> {
+    //     pub fn source(&self) -> u32 {
+    //         self.interrupt_id
+    //     }
+    //
+    //     pub fn complete(self) {
+    //         self.register.0.write(self.interrupt_id);
+    //     }
+    // }
 
     #[repr(C)]
     pub struct ThresholdAndClaim {
@@ -130,13 +157,62 @@ mod registers {
 }
 
 impl CompatibleWith for Plic {
-    fn list() -> &'static [&'static str] {
+    fn compatible_with() -> &'static [&'static str] {
         &["riscv,plic0"]
+    }
+}
+
+impl drivers::Plic for Plic {
+    fn enable_interrupt(&self, mode: EnableMode, source: usize) {
+        log::info!("Enabling interrupt {}", source);
+        match mode {
+            EnableMode::Local => self.interrupt_enable[current_context()].enable(source),
+            EnableMode::Global => todo!("plic global enable_interrupt"),
+        }
+    }
+
+    fn disable_interrupt(&self, mode: EnableMode, source: usize) {
+        match mode {
+            EnableMode::Local => self.interrupt_enable[current_context()].disable(source),
+            EnableMode::Global => todo!("plic global enable_interrupt"),
+        }
+    }
+
+    fn interrupt_priority(&self, source: usize, priority: usize) {
+        log::info!("Setting priority {} for source {}", priority, source);
+        self.source_priorities[source].set(priority as u32)
+    }
+
+    fn context_threshold(&self, mode: EnableMode, threshold: usize) {
+        log::info!("Setting threshold {} for context {}", threshold, current_context());
+        match mode {
+            EnableMode::Local => self.threshold_and_claim[current_context()].priority_threshold.set(threshold as u32),
+            EnableMode::Global => todo!("plic global enable_interrupt"),
+        }
+    }
+
+    fn is_pending(&self, source: usize) -> bool {
+        self.interrupt_pending.is_pending(source)
+    }
+
+    fn claim(&self) -> Option<usize> {
+        self.threshold_and_claim[current_context()].claim_complete.claim()
+    }
+
+    fn complete(&self, source: usize) {
+        self.threshold_and_claim[current_context()].claim_complete.complete(source)
     }
 }
 
 // FIXME: this is kind of hacky because contexts aren't currently standardized,
 // should look for a better way to do it in the future
 pub fn current_context() -> usize {
-    2 * crate::hart_local::hart_local_info().hart_id + 1
+    1 // 2 * crate::hart_local::hart_local_info().hart_id() + 1
 }
+
+// FIXME: this is kind of hacky because contexts aren't currently standardized,
+// should look for a better way to do it in the future
+// #[cfg(not(feature = "sifive_u"))]
+// pub fn current_context() -> usize {
+//     1 + crate::hart_local::hart_local_info().hart_id()
+// }

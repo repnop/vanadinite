@@ -3,10 +3,12 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    interrupts::InterruptDisabler,
     kernel_patching::phys2virt,
     mem::{
         paging::{PageSize, PhysicalAddress, Read, Sv39PageTable, ToPermissions, VirtualAddress, Write},
         phys::PhysicalMemoryAllocator,
+        sfence,
     },
     sync::Mutex,
     utils::StaticMut,
@@ -17,7 +19,6 @@ const MMIO_DEVICE_OFFSET: usize = 0xFFFFFFE000000000;
 
 pub static PAGE_TABLE_MANAGER: Mutex<PageTableManager> = Mutex::new(PageTableManager);
 
-// FIXME: add synchronization somehow
 static PAGE_TABLE_ROOT: StaticMut<Sv39PageTable> = StaticMut::new(Sv39PageTable::new());
 
 pub struct PageTableManager;
@@ -32,6 +33,7 @@ impl PageTableManager {
     }
 
     pub fn alloc_virtual<P: ToPermissions>(&mut self, map_to: VirtualAddress, perms: P) {
+        let _disabler = InterruptDisabler::new();
         let phys = Self::new_phys_page();
 
         //log::info!("PageTableManager::map_page: mapping {:#p} to {:#p}", phys, map_to);
@@ -61,6 +63,7 @@ impl PageTableManager {
         size: PageSize,
         perms: P,
     ) {
+        let _disabler = InterruptDisabler::new();
         //log::info!("PageTableManager::map_page: mapping {:#p} to {:#p}", map_from, map_to);
         unsafe { &mut *PAGE_TABLE_ROOT.get() }.map(
             map_from,
@@ -79,6 +82,8 @@ impl PageTableManager {
             },
             phys2virt,
         );
+
+        sfence(Some(map_to), None);
     }
 
     pub fn map_mmio(&mut self, map_from: PhysicalAddress, size: usize) -> VirtualAddress {
@@ -110,6 +115,7 @@ impl PageTableManager {
         A: Fn(PhysicalAddress) -> VirtualAddress,
         P: ToPermissions,
     {
+        let _disabler = InterruptDisabler::new();
         //log::info!("PageTableManager::map_with_allocator: mapping {:#p} to {:#p}", map_from, map_to);
 
         { &mut *PAGE_TABLE_ROOT.get() }.map(map_from, map_to, page_size, perms, f, translation);
@@ -120,6 +126,7 @@ impl PageTableManager {
     where
         A: Fn(PhysicalAddress) -> VirtualAddress,
     {
+        let _disabler = InterruptDisabler::new();
         //log::info!("PageTableManager::unmap_with_allocator: unmapping {:#p}", map_to);
 
         { &mut *PAGE_TABLE_ROOT.get() }.unmap(map_to, translation);
@@ -129,6 +136,7 @@ impl PageTableManager {
     where
         A: Fn(PhysicalAddress) -> VirtualAddress,
     {
+        let _disabler = InterruptDisabler::new();
         { &mut *PAGE_TABLE_ROOT.get() }.is_mapped(addr, translation)
     }
 

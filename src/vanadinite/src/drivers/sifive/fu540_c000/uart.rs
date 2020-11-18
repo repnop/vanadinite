@@ -4,7 +4,7 @@
 
 #[derive(Debug)]
 #[repr(C)]
-pub struct SiFiveUart {
+pub struct SifiveUart {
     tx_data: registers::TxData,
     rx_data: registers::RxData,
     tx_control: registers::TxCtrl,
@@ -14,7 +14,7 @@ pub struct SiFiveUart {
     baud_rate_divisor: registers::BaudDivisor,
 }
 
-impl SiFiveUart {
+impl SifiveUart {
     pub fn init(&self) {
         // Enable receive
         self.rx_control.rx_enable(true);
@@ -57,7 +57,7 @@ impl SiFiveUart {
     }
 }
 
-impl crate::io::ConsoleDevice for SiFiveUart {
+impl crate::io::ConsoleDevice for SifiveUart {
     fn init(&mut self) {
         (&*self).init();
     }
@@ -71,8 +71,8 @@ impl crate::io::ConsoleDevice for SiFiveUart {
     }
 }
 
-impl crate::drivers::CompatibleWith for SiFiveUart {
-    fn list() -> &'static [&'static str] {
+impl crate::drivers::CompatibleWith for SifiveUart {
+    fn compatible_with() -> &'static [&'static str] {
         &["sifive,uart0"]
     }
 }

@@ -25,9 +25,25 @@ pub mod virtio {
 }
 
 pub trait CompatibleWith {
-    fn list() -> &'static [&'static str];
+    fn compatible_with() -> &'static [&'static str];
 }
 
 pub trait InterruptServicable {
-    fn isr(a0: usize) -> Result<(), &'static str>;
+    fn isr(source: usize, private: usize) -> Result<(), &'static str>;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum EnableMode {
+    Local,
+    Global,
+}
+
+pub trait Plic {
+    fn enable_interrupt(&self, mode: EnableMode, source: usize);
+    fn disable_interrupt(&self, mode: EnableMode, source: usize);
+    fn interrupt_priority(&self, source: usize, priority: usize);
+    fn context_threshold(&self, mode: EnableMode, threshold: usize);
+    fn is_pending(&self, source: usize) -> bool;
+    fn claim(&self) -> Option<usize>;
+    fn complete(&self, source: usize);
 }

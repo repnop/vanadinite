@@ -3,7 +3,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    drivers::{generic::uart16550::Uart16550, sifive::fu540_c000::uart::SiFiveUart, CompatibleWith},
+    drivers::{generic::uart16550::Uart16550, sifive::fu540_c000::uart::SifiveUart, CompatibleWith, EnableMode, Plic},
     sync::Mutex,
 };
 use core::cell::UnsafeCell;
@@ -88,24 +88,36 @@ pub unsafe fn set_console<T: ConsoleDevice>(device: *mut T) {
 
 pub enum ConsoleDevices {
     Uart16550,
-    SiFiveUart,
+    SifiveUart,
 }
 
 impl ConsoleDevices {
     pub fn from_compatible(ptr: *mut u8, compatible: fdt::Compatible<'_>) -> Option<Self> {
-        if compatible.all().any(|s| Uart16550::list().contains(&s)) {
+        if compatible.all().any(|s| Uart16550::compatible_with().contains(&s)) {
             Some(ConsoleDevices::Uart16550)
-        } else if compatible.all().any(|s| SiFiveUart::list().contains(&s)) {
-            Some(ConsoleDevices::SiFiveUart)
+        } else if compatible.all().any(|s| SifiveUart::compatible_with().contains(&s)) {
+            Some(ConsoleDevices::SifiveUart)
         } else {
             None
         }
     }
 
-    pub fn set_console(self, ptr: *mut u8) {
+    pub fn set_console(&self, ptr: *mut u8) {
         match self {
             ConsoleDevices::Uart16550 => unsafe { set_console(ptr as *mut Uart16550) },
-            ConsoleDevices::SiFiveUart => unsafe { set_console(ptr as *mut SiFiveUart) },
+            ConsoleDevices::SifiveUart => unsafe { set_console(ptr as *mut SifiveUart) },
+        }
+    }
+
+    pub fn register_isr(&self, interrupt_id: usize, private: usize) {
+        match self {
+            ConsoleDevices::Uart16550 => {
+                crate::interrupts::isr::register_isr::<Uart16550>(interrupt_id, private);
+                let plic = crate::interrupts::PLIC.lock();
+                plic.enable_interrupt(EnableMode::Local, interrupt_id);
+                plic.interrupt_priority(interrupt_id, 1);
+            }
+            ConsoleDevices::SifiveUart => todo!("Sifive Uart ISR register"),
         }
     }
 }

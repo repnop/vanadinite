@@ -26,6 +26,7 @@ mod asm;
 mod boot;
 mod drivers;
 mod hart_local;
+mod interrupts;
 mod io;
 mod mem;
 mod sync;
@@ -33,9 +34,10 @@ mod trap;
 mod utils;
 
 use arch::csr;
+use drivers::CompatibleWith;
 use mem::{
     kernel_patching,
-    paging::{PageSize, PhysicalAddress, Read, Sv39PageTable, VirtualAddress, Write, PAGE_TABLE_MANAGER},
+    paging::{PhysicalAddress, VirtualAddress, PAGE_TABLE_MANAGER},
     phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
 };
 
@@ -68,6 +70,28 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         None => crate::arch::exit(crate::arch::ExitStatus::Error(&"magic's fucked, my dude")),
     };
 
+    match fdt.find_node("/soc/interrupt-controller") {
+        Some(ic) => {
+            use drivers::generic::plic::Plic;
+            let compatible = ic.compatible().unwrap();
+
+            if compatible.all().find(|c| Plic::compatible_with().contains(c)).is_none() {
+                panic!("Missing driver for interrupt controller!");
+            }
+
+            let reg = ic.reg().unwrap().next().unwrap();
+            let ic_phys = PhysicalAddress::from_ptr(reg.starting_address);
+            let ic_virt = page_manager.map_mmio(ic_phys, reg.size.unwrap());
+
+            let plic = &*ic_virt.as_ptr().cast::<Plic>();
+            plic.init();
+
+            log::info!("Registering PLIC @ {:#p}", ic_virt);
+            interrupts::register_plic(plic as &'static dyn drivers::Plic);
+        }
+        None => panic!("Can't find interrupt controller!"),
+    }
+
     let stdout = fdt.chosen().and_then(|n| n.stdout());
     if let Some((node, reg, compatible)) = stdout.and_then(|n| Some((n, n.reg()?.next()?, n.compatible()?))) {
         let stdout_addr = reg.starting_address as *mut u8;
@@ -78,8 +102,16 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             let ptr = page_manager.map_mmio(stdout_phys, stdout_size);
 
             device.set_console(ptr.as_mut_ptr());
+
+            if let Some(interrupts) = node.interrupts() {
+                for interrupt in interrupts {
+                    device.register_isr(interrupt, ptr.as_usize());
+                }
+            }
         }
     }
+
+    drivers::Plic::context_threshold(&*interrupts::PLIC.lock(), drivers::EnableMode::Local, 0x00);
 
     log::info!(
         "Booted on a {} on hart {}",
@@ -97,10 +129,6 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     log::info!("Setting stvec to {:#p}", stvec_trap_shim.as_ptr());
     csr::stvec::set(core::mem::transmute(stvec_trap_shim.as_ptr()));
 
-    if let Some(node) = fdt.find_phandle(0x0B) {
-        println!("phandle 0x0B: {}", node.name);
-    }
-
     for child in fdt.find_all_nodes("/virtio_mmio") {
         use drivers::virtio::mmio::{
             block::{FeatureBits, VirtIoBlockDevice},
@@ -109,7 +137,6 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         let reg = child.reg().unwrap().next().unwrap();
 
         let virtio_mmio_phys = PhysicalAddress::from_ptr(reg.starting_address);
-        let stdout_virt = VirtualAddress::from_ptr(reg.starting_address);
         let virtio_mmio_virt = page_manager.map_mmio(virtio_mmio_phys, reg.size.unwrap());
 
         let device: &'static VirtIoHeader = &*(virtio_mmio_virt.as_ptr().cast());
@@ -125,25 +152,20 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
-    if let Some(ic) = fdt.find_node("/soc/interrupt-controller") {
-        use drivers::generic::plic::Plic;
-        println!("{:?}", ic.reg().unwrap().next());
-        let reg = ic.reg().unwrap().next().unwrap();
-        let ic_phys = PhysicalAddress::from_ptr(reg.starting_address);
-        let ic_virt = page_manager.map_mmio(ic_phys, reg.size.unwrap());
-    }
-
     // TIMEBASE-FREQUENCY!!!!!!!!!!!!!!!!!!!
 
     arch::csr::sstatus::enable_interrupts();
-    //arch::csr::sip::clear(arch::csr::InterruptKind::Software);
     arch::csr::sie::enable();
+    println!("{:#x}", arch::csr::sie::read());
 
-    println!("{:?}", sbi::base::probe_extension(sbi::timer::EXTENSION_ID));
+    //sbi::timer::set_timer(arch::csr::time::read() as u64 + 0x10_000);
 
-    println!("{:?}", fdt.find_node("/soc/interrupt-controller@c000000"));
+    println!("sstatus: {:b}, sie: {:b}", arch::csr::sstatus::read(), arch::csr::sie::read());
 
-    println!("{:?}", alloc::vec![1u32, 2, 3, 4]);
+    loop {
+        // println!("{}", drivers::Plic::is_pending(&*interrupts::PLIC.lock(), 0x0A));
+        // println!("    {:b}", arch::csr::sip::read());
+    }
 
     arch::exit(arch::ExitStatus::Ok)
 }
