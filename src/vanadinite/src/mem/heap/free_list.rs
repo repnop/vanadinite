@@ -14,7 +14,7 @@ pub struct FreeListAllocator {
 
 impl FreeListAllocator {
     pub const fn new() -> Self {
-        Self { inner: Mutex::new(FreeList { origin: None, limit: VirtualAddress::new(0) }) }
+        Self { inner: Mutex::new(FreeList { origin: None, limit: VirtualAddress::new(super::HEAP_START) }) }
     }
 }
 
@@ -24,7 +24,7 @@ unsafe impl Sync for FreeListAllocator {}
 // FIXME: fragmented as heck
 unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        let mut inner = self.inner.lock();
+        let mut this = self.inner.lock();
 
         log::info!("FreeListAllocator::alloc: allocating {:?}", layout);
         let size = align_to_usize(layout.size());
@@ -33,89 +33,71 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
             todo!("FreeListAllocator::alloc: >8 byte alignment");
         }
 
-        match inner.origin {
-            Some(ptr) => {
-                let mut ptr = ptr;
+        if this.origin.is_none() {
+            log::info!("FreeListAllocator::alloc: initializing origin");
+            this.origin = Some(NonNull::new_unchecked(this.alloc_more(size)));
+        }
 
-                loop {
-                    {
-                        let r = ptr.as_mut();
+        let head = this.origin.unwrap().as_ptr();
 
-                        // See if we can just keep going
-                        if let (Some(next), State::Occupied) = (r.next, r.state) {
-                            log::info!("FreeListAllocator::alloc: going to next entry");
-                            ptr = next;
-                            continue;
-                        }
+        let mut prev_node: Option<*mut FreeListNode> = None;
+        let mut node = head;
 
-                        // Check to see if this is a free, appropriate slot that we can't split off
-                        let enough_for_new_node = r.size - core::mem::size_of::<FreeListNode>() >= size;
-                        if r.state.is_free() && r.size >= size && !enough_for_new_node {
-                            r.state = State::Occupied;
-                            log::info!("FreeListAllocator::alloc: found available slot: node={:?}", r);
-                            break r.data();
-                        }
+        log::info!("FreeListAllocator::alloc: head={:?}", &*head);
 
-                        // If its free and enough, split it and return the ptr to the current
-                        if r.next.is_none() && r.state.is_free() && enough_for_new_node {
-                            log::info!("FreeListAllocator::alloc: splitting node: node={:?}", r);
-                            let new_node_ptr = NonNull::new(r.data().add(size).cast()).unwrap();
-                            let new_node = FreeListNode {
-                                next: None,
-                                size: r.size - (size + core::mem::size_of::<FreeListNode>()),
-                                state: State::Free,
-                            };
+        loop {
+            log::info!("FreeListAllocator::alloc: checking node, node={:?}", &*node);
+            // if the node's size is large enough to fit another header + at
+            // least 8 bytes, we can split it
+            let enough_for_split = (*node).size >= size + FreeListNode::struct_size() + 8;
 
-                            *new_node_ptr.as_ptr() = new_node;
-                            r.size = size;
-                            r.state = State::Occupied;
-                            r.next = Some(new_node_ptr);
+            if (*node).size >= size && !enough_for_split {
+                log::info!("FreeListAllocator::alloc: reusing node, but its not big enough to split");
 
-                            log::info!("FreeListAllocator::alloc: became: node={:?}", r);
-
-                            break r.data();
-                        }
-
-                        // Otherwise, looks like we need to allocate more memory
-                        // Should be last node?
-                        // assert!(
-                        //     r.next.is_none(),
-                        //     "FreeListAllocator::alloc: hit a node that wasn't last but had to alloc more? {:?}",
-                        //     r
-                        // );
-
-                        if let Some(next) = r.next {
-                            ptr = next;
-                            continue;
-                        }
-                    }
-
-                    log::info!("FreeListAllocator::alloc: requesting additional allocation, size={}", size);
-                    let (mut p, _) = inner.alloc_more(size);
-
-                    let r = p.as_mut();
-                    let new_node_ptr = NonNull::new(r.data().add(size).cast()).unwrap();
-                    let new_node = FreeListNode {
-                        next: None,
-                        size: r.size - (size + core::mem::size_of::<FreeListNode>()),
-                        state: State::Free,
-                    };
-
-                    log::info!("FreeListAllocator::alloc: splitting node: node={:?}", r);
-
-                    *new_node_ptr.as_ptr() = new_node;
-                    r.size = size;
-                    r.state = State::Occupied;
-                    r.next = Some(new_node_ptr);
-
-                    log::info!("FreeListAllocator::alloc: became: node={:?}", r);
-                    break r.data();
+                match prev_node {
+                    Some(prev_node) => (&mut *prev_node).next = (*node).next,
+                    None => this.origin = (*node).next,
                 }
-            }
-            None => {
-                inner.alloc_more(size);
 
-                inner.origin.unwrap().as_ref().data()
+                break (&*node).data();
+            }
+
+            if (*node).size >= size && enough_for_split {
+                log::info!("FreeListAllocator::alloc: reusing node and splitting");
+
+                let new_node_ptr: *mut FreeListNode = (&*node).data().add(size).cast();
+                (&mut *new_node_ptr).size = (*node).size - (size + FreeListNode::struct_size());
+                (&mut *new_node_ptr).next = (*node).next;
+                (&mut *node).size = size;
+
+                log::info!(
+                    "FreeListAllocator::alloc: created new node, current node={:?}, new node={:?}",
+                    &*node,
+                    &*new_node_ptr
+                );
+
+                let next = Some(NonNull::new_unchecked(new_node_ptr));
+
+                match prev_node {
+                    Some(prev_node) => (&mut *prev_node).next = next,
+                    None => this.origin = next,
+                }
+
+                break (&*node).data();
+            }
+
+            match (*node).next {
+                Some(next) => {
+                    prev_node = Some(node);
+                    node = next.as_ptr();
+                }
+                None => {
+                    let new_node_ptr = this.alloc_more(size);
+                    (&mut *node).next = Some(NonNull::new_unchecked(new_node_ptr));
+
+                    prev_node = Some(node);
+                    node = new_node_ptr;
+                }
             }
         }
     }
@@ -123,9 +105,10 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
     unsafe fn dealloc(&self, ptr: *mut u8, _: core::alloc::Layout) {
         assert!(!ptr.is_null());
 
-        let _inner = self.inner.lock();
+        let mut inner = self.inner.lock();
         let ptr = (ptr as usize - core::mem::size_of::<FreeListNode>()) as *mut FreeListNode;
-        (&mut *ptr).state = State::Free;
+        (&mut *ptr).next = inner.origin;
+        inner.origin = Some(NonNull::new_unchecked(ptr));
     }
 }
 
@@ -135,90 +118,26 @@ struct FreeList {
 }
 
 impl FreeList {
-    unsafe fn alloc_more(&mut self, size: usize) -> (NonNull<FreeListNode>, usize) {
+    unsafe fn alloc_more(&mut self, size: usize) -> *mut FreeListNode {
         log::info!("FreeListAllocator::alloc_more: additional allocation requested, size={}", size);
 
-        let size_with_node = size + core::mem::size_of::<FreeListNode>();
+        let size_with_node = size + FreeListNode::struct_size();
         let num_pages = size_with_node / KIB_PAGE_SIZE + 1;
 
         let new_mem_size = num_pages * KIB_PAGE_SIZE;
-        let start = match self.limit.as_usize() {
-            0 => VirtualAddress::new(super::HEAP_START),
-            _ => self.limit,
-        };
-        let end = VirtualAddress::new(start.as_usize() + new_mem_size);
+        let start = self.limit;
+        let end = start.offset(new_mem_size);
 
         log::info!("FreeListAllocator::alloc_more: allocating {} pages", num_pages);
 
-        if num_pages == 1 {
-            PAGE_TABLE_MANAGER.lock().alloc_virtual(start, Read | Write);
-            self.limit = end;
-        } else {
-            PAGE_TABLE_MANAGER.lock().alloc_virtual_range(start, new_mem_size, Read | Write);
-            self.limit = VirtualAddress::new(end.as_usize() + KIB_PAGE_SIZE);
-        }
+        PAGE_TABLE_MANAGER.lock().alloc_virtual_range(start, new_mem_size, Read | Write);
+        self.limit = end;
 
-        log::info!("FreeListAllocator::alloc_more: walking list");
-        let free_node = match self.origin {
-            Some(mut ptr) => {
-                log::info!("FreeListAllocator::alloc_more: origin already initialized, finding end");
-                while let Some(next) = ptr.as_ref().next {
-                    ptr = next;
-                }
+        let node_ptr: *mut FreeListNode = start.as_mut_ptr().cast();
+        (&mut *node_ptr).next = None;
+        (&mut *node_ptr).size = new_mem_size - FreeListNode::struct_size();
 
-                let state = ptr.as_ref().state;
-
-                log::info!("FreeListAllocator::alloc_more: state={:?}", state);
-
-                match state {
-                    State::Free => ptr.as_mut().size += new_mem_size,
-                    State::Occupied => {
-                        let bytes_to_next = ptr.as_ref().size + core::mem::size_of::<FreeListNode>();
-                        ptr = NonNull::new(ptr.as_ptr().cast::<u8>().add(bytes_to_next).cast()).unwrap();
-
-                        *ptr.as_ptr() = FreeListNode { next: None, size: new_mem_size, state: State::Free };
-                    }
-                }
-
-                ptr
-            }
-            None => {
-                log::info!("FreeListAllocator::alloc_more: initializing origin");
-
-                let ptr = NonNull::new(super::HEAP_START as *mut FreeListNode).unwrap();
-                let next_node_ptr = NonNull::new((super::HEAP_START as *mut u8).add(size_with_node).cast()).unwrap();
-
-                let first_list_node = FreeListNode { next: Some(next_node_ptr), size, state: State::Occupied };
-
-                let second_list_node =
-                    FreeListNode { next: None, size: new_mem_size - size_with_node, state: State::Free };
-
-                *ptr.as_ptr() = first_list_node;
-                *next_node_ptr.as_ptr() = second_list_node;
-
-                self.origin = Some(ptr);
-
-                ptr
-            }
-        };
-
-        (free_node, new_mem_size)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-#[repr(usize)]
-enum State {
-    Free,
-    Occupied,
-}
-
-impl State {
-    fn is_free(self) -> bool {
-        match self {
-            State::Free => true,
-            State::Occupied => false,
-        }
+        node_ptr
     }
 }
 
@@ -227,7 +146,6 @@ impl State {
 struct FreeListNode {
     next: Option<core::ptr::NonNull<FreeListNode>>,
     size: usize,
-    state: State,
 }
 
 impl FreeListNode {
