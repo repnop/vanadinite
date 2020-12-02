@@ -18,6 +18,8 @@ extern "C" {
     static __data_end: LinkerSymbol;
     static __text_start: LinkerSymbol;
     static __text_end: LinkerSymbol;
+    static __kernel_thread_local_start: LinkerSymbol;
+    static __kernel_thread_local_end: LinkerSymbol;
 }
 
 const TWO_MEBS: usize = 2 * 1024 * 1024;
@@ -156,6 +158,21 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             kernel_patching::phys2virt(addr),
             PageSize::Kilopage,
             Read | Execute,
+            &mut page_alloc,
+            |p| VirtualAddress::new(p.as_usize()),
+        );
+    }
+
+    let ktls_start = __kernel_thread_local_start.as_usize();
+    let ktls_end = __kernel_thread_local_end.as_usize();
+
+    for addr in (ktls_start..ktls_end).step_by(4096) {
+        let addr = PhysicalAddress::new(addr);
+        ptm.map_with_allocator(
+            addr,
+            kernel_patching::phys2virt(addr),
+            PageSize::Kilopage,
+            Read | Write,
             &mut page_alloc,
             |p| VirtualAddress::new(p.as_usize()),
         );

@@ -51,6 +51,16 @@ SECTIONS {
     . = ALIGN(4K);
     PROVIDE(__bss_end = .);
 
+    .kernel_thread_local : AT(ADDR(.kernel_thread_local) - __offset) {
+        . = ALIGN(4K);
+        PROVIDE(__kernel_thread_local_start = .);
+        
+        *(.kernel_thread_local .kernel_thread_local.*)
+
+        . = ALIGN(4K);
+        PROVIDE(__kernel_thread_local_end = .);
+    }
+
     . = ALIGN(2M);
     PROVIDE(KERNEL_END = .);
 

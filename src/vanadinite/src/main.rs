@@ -11,7 +11,11 @@
     alloc_error_handler,
     raw_ref_op,
     const_generics,
-    const_in_array_repeat_expressions
+    const_in_array_repeat_expressions,
+    thread_local,
+    maybe_uninit_ref,
+    const_fn_fn_ptr_basics,
+    const_fn
 )]
 #![no_std]
 #![no_main]
@@ -25,11 +29,11 @@ mod arch;
 mod asm;
 mod boot;
 mod drivers;
-mod hart_local;
 mod interrupts;
 mod io;
 mod mem;
 mod sync;
+mod thread_local;
 mod trap;
 mod utils;
 
@@ -47,8 +51,15 @@ extern "C" {
     static stvec_trap_shim: utils::LinkerSymbol;
 }
 
+thread_local! {
+    static HART_ID: core::cell::Cell<usize> = core::cell::Cell::new(0);
+}
+
 #[no_mangle]
 unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
+    crate::thread_local::init_thread_locals();
+    HART_ID.set(hart_id);
+
     let mut page_manager = PAGE_TABLE_MANAGER.lock();
     // Remove identity mapping after paging initialization
     let kernel_start = kernel_patching::kernel_start() as usize;
@@ -62,7 +73,6 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         //(&mut *mem::paging::PAGE_TABLE_ROOT.get()).unmap(patched, kernel_patching::phys2virt);
     }
 
-    crate::hart_local::init_hart_local_info(hart_id);
     crate::io::init_logging();
 
     let fdt = match fdt::Fdt::new(fdt) {
@@ -132,6 +142,11 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     log::info!("Installing trap handler at {:#p}", stvec_trap_shim.as_ptr());
     csr::stvec::set(core::mem::transmute(stvec_trap_shim.as_ptr()));
 
+    let tp: usize;
+    asm!("mv {}, tp", out(reg) tp);
+    println!("tp: {:#p}", tp as *mut u8);
+    println!("hart_id: {}", HART_ID.get());
+
     for child in fdt.find_all_nodes("/virtio_mmio") {
         use drivers::virtio::mmio::{
             block::{FeatureBits, VirtIoBlockDevice},
@@ -160,9 +175,9 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     arch::csr::sstatus::enable_interrupts();
     arch::csr::sie::enable();
 
-    loop {
-        asm!("nop");
-    }
+    println!("{:?}", alloc::boxed::Box::new(5i32));
+
+    println!("{:?}", alloc::vec![1u64; 512]);
 
     arch::exit(arch::ExitStatus::Ok)
 }
