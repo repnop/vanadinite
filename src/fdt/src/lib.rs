@@ -6,7 +6,7 @@
 
 mod node;
 
-use common::byteorder::{BigEndianU32, BigEndianU64};
+use common::byteorder::{BigEndianU32, BigEndianU64, FromBytes, IntegerStream};
 use cstr_core::CStr;
 pub use node::{Compatible, MappedArea, MemoryNode, MemoryRegion, NodeProperty};
 
@@ -54,8 +54,6 @@ impl Fdt {
         }
     }
 
-    /// # Safety
-    /// This reads from a pointer to `Self`, and if invalid can result in UB
     fn validate_magic(&self) -> bool {
         self.magic.get() == 0xd00dfeed
     }
@@ -89,10 +87,29 @@ impl Fdt {
         unsafe { core::slice::from_raw_parts(self.offset_bytes(offset).cast(), length) }
     }
 
+    pub fn root(&self) -> Root<'_> {
+        Root { node: self.find_node("/").expect("/ is a required node") }
+    }
+
+    pub fn aliases(&self) -> Aliases<'_> {
+        Aliases { node: self.find_node("/aliases").expect("/aliases is a required node"), header: self }
+    }
+
+    pub fn cpus(&self) -> impl Iterator<Item = Cpu<'_>> + '_ {
+        let parent = self.find_node("/cpus").expect("/cpus is a required node");
+
+        parent
+            .children()
+            .filter(|c| c.name.split('@').next().unwrap() == "cpu")
+            .map(move |cpu| Cpu { parent, node: cpu })
+    }
+
     /// Returns the first node that matches the node path, if you want all that
-    /// match the path, use `find_all_nodes`
+    /// match the path, use `find_all_nodes`. This will automatically attempt to
+    /// resolve aliases if `path` is not found.
     pub fn find_node(&self, path: &str) -> Option<node::FdtNode<'_>> {
-        unsafe { node::find_node(&mut self.structs_ptr().cast(), path, self, None) }
+        let node = unsafe { node::find_node(&mut self.structs_ptr().cast(), path, self, None) };
+        node.or_else(|| self.aliases().resolve_node(path))
     }
 
     pub fn find_all_nodes<'a>(&'a self, path: &'a str) -> impl Iterator<Item = node::FdtNode<'a>> {
@@ -143,7 +160,6 @@ impl Fdt {
     }
 
     pub fn find_phandle(&self, phandle: u32) -> Option<node::FdtNode<'_>> {
-        use common::byteorder::FromBytes;
         self.all_nodes().find(|n| {
             n.properties()
                 .find(|p| p.name == "phandle")
@@ -202,6 +218,7 @@ impl Fdt {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Chosen<'a> {
     node: node::FdtNode<'a>,
 }
@@ -229,6 +246,113 @@ impl<'a> Chosen<'a> {
             .and_then(|n| core::str::from_utf8(&n.value[..n.value.len() - 1]).ok())
             .and_then(|name| self.node.header.find_node(name))
             .or_else(|| self.stdout())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Root<'a> {
+    node: node::FdtNode<'a>,
+}
+
+impl<'a> Root<'a> {
+    pub fn cell_sizes(self) -> node::CellSizes {
+        self.node.cell_sizes()
+    }
+
+    pub fn model(self) -> &'a str {
+        self.node.properties().find(|p| p.name == "model").and_then(|p| core::str::from_utf8(p.value).ok()).unwrap()
+    }
+
+    pub fn compatible(self) -> Compatible<'a> {
+        self.node.compatible().unwrap()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Aliases<'a> {
+    header: &'a Fdt,
+    node: node::FdtNode<'a>,
+}
+
+impl<'a> Aliases<'a> {
+    pub fn resolve(self, alias: &str) -> Option<&'a str> {
+        self.node.properties().find(|p| p.name == alias).and_then(|p| core::str::from_utf8(p.value).ok())
+    }
+
+    pub fn resolve_node(self, alias: &str) -> Option<node::FdtNode<'a>> {
+        self.resolve(alias).and_then(|name| self.header.find_node(name))
+    }
+
+    pub fn all(self) -> impl Iterator<Item = (&'a str, &'a str)> + 'a {
+        self.node.properties().filter_map(|p| Some((p.name, core::str::from_utf8(p.value).ok()?)))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Cpu<'a> {
+    parent: node::FdtNode<'a>,
+    node: node::FdtNode<'a>,
+}
+
+impl<'a> Cpu<'a> {
+    pub fn ids(self) -> CpuIds<'a> {
+        let address_cells = self.node.cell_sizes().address_cells;
+
+        CpuIds { reg: self.node.properties().find(|p| p.name == "reg").unwrap(), address_cells }
+    }
+
+    pub fn clock_frequency(self) -> usize {
+        self.node
+            .properties()
+            .find(|p| p.name == "clock-frequency")
+            .or_else(|| self.parent.properties().find(|p| p.name == "clock-frequency"))
+            .map(|p| match p.value.len() {
+                4 => BigEndianU32::from_bytes(p.value).unwrap().get() as usize,
+                8 => BigEndianU64::from_bytes(p.value).unwrap().get() as usize,
+                _ => unreachable!(),
+            })
+            .unwrap()
+    }
+
+    pub fn timebase_frequency(self) -> usize {
+        self.node
+            .properties()
+            .find(|p| p.name == "timebase-frequency")
+            .or_else(|| self.parent.properties().find(|p| p.name == "timebase-frequency"))
+            .map(|p| match p.value.len() {
+                4 => BigEndianU32::from_bytes(p.value).unwrap().get() as usize,
+                8 => BigEndianU64::from_bytes(p.value).unwrap().get() as usize,
+                _ => unreachable!(),
+            })
+            .unwrap()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CpuIds<'a> {
+    reg: node::NodeProperty<'a>,
+    address_cells: usize,
+}
+
+impl<'a> CpuIds<'a> {
+    pub fn first(self) -> usize {
+        match self.address_cells {
+            1 => BigEndianU32::from_bytes(self.reg.value).unwrap().get() as usize,
+            2 => BigEndianU64::from_bytes(self.reg.value).unwrap().get() as usize,
+            n => panic!("address-cells of size {} is currently not supported", n),
+        }
+    }
+
+    pub fn all(self) -> impl Iterator<Item = usize> + 'a {
+        let mut vals = IntegerStream::new(self.reg.value);
+        core::iter::from_fn(move || match vals.remaining() {
+            [] => None,
+            _ => Some(match self.address_cells {
+                1 => vals.next::<BigEndianU32>()?.get() as usize,
+                2 => vals.next::<BigEndianU64>()?.get() as usize,
+                n => panic!("address-cells of size {} is currently not supported", n),
+            }),
+        })
     }
 }
 

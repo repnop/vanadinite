@@ -460,7 +460,7 @@ pub(crate) unsafe fn skip_current_node(ptr: &mut *const BigEndianU32, header: &F
     advance_ptr(ptr, 4);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct NodeProperty<'a> {
     pub name: &'a str,
     pub value: &'a [u8],
