@@ -174,6 +174,10 @@ impl<'a> IntegerStream<'a> {
     pub fn skip_n<I: FromBytes>(&mut self, n: usize) {
         self.bytes = self.bytes.get(I::SIZE * n..).unwrap_or_default();
     }
+
+    pub fn remaining(&self) -> &[u8] {
+        self.bytes
+    }
 }
 
 #[macro_export]
