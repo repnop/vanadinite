@@ -4,7 +4,7 @@ default_to_workspace = false
 [env]
 MACHINE = "virt"
 RAM = "512M"
-CPUS = "1"
+CPUS = "5"
 
 [tasks.'build-vanadinite.release']
 env = { RUSTFLAGS = "-C link-arg=-Tvanadinite/lds/${MACHINE}.lds -C code-model=medium" }
