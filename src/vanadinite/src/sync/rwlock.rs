@@ -4,7 +4,7 @@
 
 // FIXME: Fix up atomic ordering
 
-use core::sync::atomic::{spin_loop_hint, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, Ordering};
 
 const WRITE_LOCKED: u32 = 1 << 31;
 
@@ -26,7 +26,7 @@ unsafe impl lock_api::RawRwLock for SpinRwLock {
 
     fn lock_shared(&self) {
         while !self.try_lock_shared() {
-            spin_loop_hint();
+            crate::asm::pause();
         }
     }
 
@@ -47,7 +47,7 @@ unsafe impl lock_api::RawRwLock for SpinRwLock {
 
     fn lock_exclusive(&self) {
         while !self.try_lock_exclusive() {
-            spin_loop_hint();
+            crate::asm::pause();
         }
     }
 

@@ -2,7 +2,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use core::sync::atomic::{spin_loop_hint, AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 pub struct SpinMutex {
     lock: AtomicBool,
@@ -22,7 +22,7 @@ unsafe impl lock_api::RawMutex for SpinMutex {
 
     fn lock(&self) {
         while !self.try_lock() {
-            spin_loop_hint();
+            crate::asm::pause();
         }
     }
 

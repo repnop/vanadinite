@@ -92,3 +92,11 @@ pub fn ecall() {
 // pub enum MCause {}
 //
 // pub fn mcause() -> MCause {}
+
+#[cfg(feature = "sifive_u")]
+pub fn pause() {
+    unsafe { asm!(".word 0x0100000F") };
+}
+
+#[cfg(not(feature = "sifive_u"))]
+pub fn pause() {}
