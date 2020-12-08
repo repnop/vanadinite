@@ -111,14 +111,13 @@ impl ConsoleDevices {
 
     pub fn register_isr(&self, interrupt_id: usize, private: usize) {
         match self {
-            ConsoleDevices::Uart16550 => {
-                crate::interrupts::isr::register_isr::<Uart16550>(interrupt_id, private);
-                let plic = crate::interrupts::PLIC.lock();
-                plic.enable_interrupt(EnableMode::Local, interrupt_id);
-                plic.interrupt_priority(interrupt_id, 1);
-            }
-            ConsoleDevices::SifiveUart => todo!("Sifive Uart ISR register"),
+            ConsoleDevices::Uart16550 => crate::interrupts::isr::register_isr::<Uart16550>(interrupt_id, private),
+            ConsoleDevices::SifiveUart => crate::interrupts::isr::register_isr::<SifiveUart>(interrupt_id, private),
         }
+
+        let plic = crate::interrupts::PLIC.lock();
+        plic.enable_interrupt(EnableMode::Local, interrupt_id);
+        plic.interrupt_priority(interrupt_id, 1);
     }
 }
 

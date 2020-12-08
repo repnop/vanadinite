@@ -200,6 +200,15 @@ impl drivers::Plic for Plic {
 
 // FIXME: this is kind of hacky because contexts aren't currently standardized,
 // should look for a better way to do it in the future
+#[cfg(not(feature = "sifive_u"))]
 pub fn current_context() -> usize {
-    2 * crate::hart_local::hart_local_info().hart_id() + 1
+    1 + 2 * crate::HART_ID.get()
+}
+
+#[cfg(feature = "sifive_u")]
+pub fn current_context() -> usize {
+    // first context is M-mode E51 monitor core which doesn't support S-mode so
+    // we'll always be on hart >=1 which ends up working out to remove the +1
+    // from the other fn
+    2 * crate::HART_ID.get()
 }

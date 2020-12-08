@@ -1,3 +1,6 @@
+use crate::{drivers::CompatibleWith, drivers::InterruptServicable, io::ConsoleDevice};
+use core::sync::atomic::{AtomicBool, Ordering};
+
 // This Source Code Form is subject to the terms of the Mozilla Public License,
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
@@ -20,20 +23,16 @@ impl SifiveUart {
         self.rx_control.rx_enable(true);
         // Enable transmit
         self.tx_control.tx_enable(true);
+
         crate::mem::fence();
 
         self.tx_control.extra_stop_bit(false);
-        crate::mem::fence();
-
-        self.tx_control.watermark_level(1);
-
         self.rx_control.watermark_level(1);
-        crate::mem::fence();
 
         // Set interrupt enables
         self.interrupt_enable.rx_watermark_enable(true);
         crate::mem::fence();
-        self.interrupt_enable.tx_watermark_enable(true);
+        self.interrupt_enable.tx_watermark_enable(false);
 
         // Set baud rate to 31250 Hz
         self.baud_rate_divisor.divisor(16000);
@@ -41,23 +40,35 @@ impl SifiveUart {
     }
 
     pub fn read(&self) -> u8 {
-        while self.rx_data.is_empty() {}
-
-        self.rx_data.read()
+        loop {
+            match self.rx_data.try_read() {
+                Some(c) => break c,
+                None => continue,
+            }
+        }
     }
 
     pub fn write(&self, n: u8) {
+        static LAST_WROTE_NEWLINE: AtomicBool = AtomicBool::new(false);
+
         while self.tx_data.is_full() {}
 
         self.tx_data.write(n);
 
         if n == b'\n' {
+            LAST_WROTE_NEWLINE.store(true, Ordering::SeqCst);
             self.write(b'\r');
+        } else if n == b'\r' {
+            if !LAST_WROTE_NEWLINE.load(Ordering::SeqCst) {
+                self.write(b'\n');
+            }
+
+            LAST_WROTE_NEWLINE.store(false, Ordering::SeqCst);
         }
     }
 }
 
-impl crate::io::ConsoleDevice for SifiveUart {
+impl ConsoleDevice for SifiveUart {
     fn init(&mut self) {
         (&*self).init();
     }
@@ -71,9 +82,22 @@ impl crate::io::ConsoleDevice for SifiveUart {
     }
 }
 
-impl crate::drivers::CompatibleWith for SifiveUart {
+impl CompatibleWith for SifiveUart {
     fn compatible_with() -> &'static [&'static str] {
         &["sifive,uart0"]
+    }
+}
+
+impl InterruptServicable for SifiveUart {
+    fn isr(source: usize, private: usize) -> Result<(), &'static str> {
+        let value = {
+            let this: &'static Self = unsafe { &*(private as *const _) };
+            this.read()
+        };
+
+        crate::print!("{}", value as char);
+
+        Ok(())
     }
 }
 
@@ -98,12 +122,13 @@ mod registers {
     pub struct RxData(Volatile<u32>);
 
     impl RxData {
-        pub fn read(&self) -> u8 {
-            self.0.read() as u8
-        }
-
-        pub fn is_empty(&self) -> bool {
-            self.0.read() >> 31 == 1
+        pub fn try_read(&self) -> Option<u8> {
+            let read = self.0.read();
+            if read >> 31 == 0 {
+                Some(read as u8)
+            } else {
+                None
+            }
         }
     }
 
