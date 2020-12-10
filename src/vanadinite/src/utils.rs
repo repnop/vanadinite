@@ -82,7 +82,7 @@ macro_rules! impl_units {
     };
 }
 
-impl_units!(u16, u32, u64, u128, i16, i32, i64, i128);
+impl_units!(u16, u32, u64, u128, i16, i32, i64, i128, usize, isize);
 
 pub mod volatile {
     use core::cell::UnsafeCell;
