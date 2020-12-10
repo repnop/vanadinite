@@ -56,6 +56,34 @@ pub fn round_up_to_next(n: usize, size: usize) -> usize {
     }
 }
 
+pub trait Units: core::ops::Mul<Self, Output = Self> + Sized {
+    const KIB: Self;
+
+    fn kib(self) -> Self {
+        self * <Self as Units>::KIB
+    }
+
+    fn mib(self) -> Self {
+        self * Self::KIB * Self::KIB
+    }
+
+    fn gib(self) -> Self {
+        self * Self::KIB * Self::KIB * Self::KIB
+    }
+}
+
+macro_rules! impl_units {
+    ($($t:ty),+) => {
+        $(
+            impl Units for $t {
+                const KIB: Self = 1024;
+            }
+        )+
+    };
+}
+
+impl_units!(u16, u32, u64, u128, i16, i32, i64, i128);
+
 pub mod volatile {
     use core::cell::UnsafeCell;
     #[derive(Debug, Clone, Copy)]
