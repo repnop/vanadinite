@@ -7,6 +7,7 @@ use crate::{
         kernel_patching,
         paging::{Execute, PageSize, PhysicalAddress, Read, Sv39PageTable, VirtualAddress, Write, PAGE_TABLE_MANAGER},
         phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
+        phys2virt,
     },
     utils::{LinkerSymbol, StaticMut},
 };
@@ -74,7 +75,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     //let alloc_start = if fdt_usize >= kernel_end {
     //    // round up to next page size after the FDT
-    //    ((kernel_patching::phys2virt(fdt_phys).as_usize() + fdt_size as usize) & !0x1FFFFFusize) + 0x200000
+    //    ((phys2virt(fdt_phys).as_usize() + fdt_size as usize) & !0x1FFFFFusize) + 0x200000
     //} else {
     //    kernel_end
     //};
@@ -82,7 +83,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let kernel_end_phys = kernel_end as *mut u8;
 
     // Set the allocator to start allocating memory after the end of the kernel or fdt
-    //let kernel_end_phys = kernel_patching::virt2phys(VirtualAddress::new(alloc_start)).as_mut_ptr();
+    //let kernel_end_phys = mem::virt2phys(VirtualAddress::new(alloc_start)).as_mut_ptr();
 
     let mut pf_alloc = PHYSICAL_MEMORY_ALLOCATOR.lock();
     pf_alloc.init(kernel_end_phys, (start + size) as *mut u8);
@@ -96,7 +97,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     let mut page_alloc = || {
         let phys_addr = pf_alloc.alloc().unwrap().as_phys_address();
-        //let virt_addr = kernel_patching::phys2virt(phys_addr);
+        //let virt_addr = phys2virt(phys_addr);
 
         (phys_addr.as_mut_ptr() as *mut Sv39PageTable, phys_addr)
     };
@@ -123,14 +124,9 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (bss_start..bss_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        ptm.map_with_allocator(
-            addr,
-            kernel_patching::phys2virt(addr),
-            PageSize::Kilopage,
-            Read | Write,
-            &mut page_alloc,
-            |p| VirtualAddress::new(p.as_usize()),
-        );
+        ptm.map_with_allocator(addr, phys2virt(addr), PageSize::Kilopage, Read | Write, &mut page_alloc, |p| {
+            VirtualAddress::new(p.as_usize())
+        });
     }
 
     let data_start = __data_start.as_usize();
@@ -138,14 +134,9 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (data_start..data_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        ptm.map_with_allocator(
-            addr,
-            kernel_patching::phys2virt(addr),
-            PageSize::Kilopage,
-            Read | Write,
-            &mut page_alloc,
-            |p| VirtualAddress::new(p.as_usize()),
-        );
+        ptm.map_with_allocator(addr, phys2virt(addr), PageSize::Kilopage, Read | Write, &mut page_alloc, |p| {
+            VirtualAddress::new(p.as_usize())
+        });
     }
 
     let text_start = __text_start.as_usize();
@@ -153,14 +144,9 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (text_start..text_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        ptm.map_with_allocator(
-            addr,
-            kernel_patching::phys2virt(addr),
-            PageSize::Kilopage,
-            Read | Execute,
-            &mut page_alloc,
-            |p| VirtualAddress::new(p.as_usize()),
-        );
+        ptm.map_with_allocator(addr, phys2virt(addr), PageSize::Kilopage, Read | Execute, &mut page_alloc, |p| {
+            VirtualAddress::new(p.as_usize())
+        });
     }
 
     let ktls_start = __kernel_thread_local_start.as_usize();
@@ -168,21 +154,16 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (ktls_start..ktls_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        ptm.map_with_allocator(
-            addr,
-            kernel_patching::phys2virt(addr),
-            PageSize::Kilopage,
-            Read | Write,
-            &mut page_alloc,
-            |p| VirtualAddress::new(p.as_usize()),
-        );
+        ptm.map_with_allocator(addr, phys2virt(addr), PageSize::Kilopage, Read | Write, &mut page_alloc, |p| {
+            VirtualAddress::new(p.as_usize())
+        });
     }
 
     let phys = kernel_end_phys as usize;
     for addr in (phys..(phys + (start + size - phys))).step_by(4096) {
         ptm.map_with_allocator(
             PhysicalAddress::new(addr),
-            kernel_patching::phys2virt(PhysicalAddress::new(addr)),
+            phys2virt(PhysicalAddress::new(addr)),
             PageSize::Kilopage,
             Read | Write,
             &mut page_alloc,

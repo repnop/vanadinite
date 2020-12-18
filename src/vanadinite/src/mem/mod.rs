@@ -1,9 +1,12 @@
+use self::paging::{PhysicalAddress, VirtualAddress};
+
 // This Source Code Form is subject to the terms of the Mozilla Public License,
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod heap;
 pub mod phys;
+pub mod region;
 pub mod paging {
     mod manager;
     mod perms;
@@ -50,8 +53,23 @@ pub enum SatpMode {
     Sv48 = 9,
 }
 
+pub fn phys2virt(phys: PhysicalAddress) -> VirtualAddress {
+    let phys_offset = unsafe { *kernel_patching::KERNEL_PHYS_LOAD_LOCATION.0.get() };
+
+    assert!(phys_offset != 0);
+
+    VirtualAddress::new(phys.as_usize() - phys_offset + kernel_patching::page_offset())
+}
+
+pub fn virt2phys(virt: VirtualAddress) -> PhysicalAddress {
+    let phys_offset = unsafe { *kernel_patching::KERNEL_PHYS_LOAD_LOCATION.0.get() };
+
+    assert!(phys_offset != 0);
+
+    PhysicalAddress::new(virt.as_usize() - kernel_patching::page_offset() + phys_offset)
+}
+
 pub mod kernel_patching {
-    use crate::mem::paging::{PhysicalAddress, VirtualAddress};
     use crate::utils;
     use core::cell::UnsafeCell;
 
@@ -62,29 +80,13 @@ pub mod kernel_patching {
     }
 
     #[repr(transparent)]
-    struct StaticUsize(UnsafeCell<usize>);
+    pub(super) struct StaticUsize(pub UnsafeCell<usize>);
 
     unsafe impl Send for StaticUsize {}
     unsafe impl Sync for StaticUsize {}
 
     #[no_mangle]
-    static KERNEL_PHYS_LOAD_LOCATION: StaticUsize = StaticUsize(UnsafeCell::new(0));
-
-    pub fn phys2virt(phys: PhysicalAddress) -> VirtualAddress {
-        let phys_offset = unsafe { *KERNEL_PHYS_LOAD_LOCATION.0.get() };
-
-        assert!(phys_offset != 0);
-
-        VirtualAddress::new(phys.as_usize() - phys_offset + page_offset())
-    }
-
-    pub fn virt2phys(virt: VirtualAddress) -> PhysicalAddress {
-        let phys_offset = unsafe { *KERNEL_PHYS_LOAD_LOCATION.0.get() };
-
-        assert!(phys_offset != 0);
-
-        PhysicalAddress::new(virt.as_usize() - page_offset() + phys_offset)
-    }
+    pub(super) static KERNEL_PHYS_LOAD_LOCATION: StaticUsize = StaticUsize(UnsafeCell::new(0));
 
     #[inline(always)]
     pub fn page_offset() -> usize {

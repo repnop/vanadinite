@@ -41,7 +41,7 @@ pub fn alloc_page() -> PhysicalPage {
 
 pub fn zalloc_page() -> PhysicalPage {
     let page = alloc_page();
-    let ptr = crate::kernel_patching::phys2virt(page.as_phys_address()).as_mut_ptr().cast::<u64>();
+    let ptr = crate::mem::phys2virt(page.as_phys_address()).as_mut_ptr().cast::<u64>();
 
     unsafe {
         for i in 0..(4096 / 8) {
