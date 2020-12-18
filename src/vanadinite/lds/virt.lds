@@ -24,7 +24,7 @@ SECTIONS {
         *(.data .data.* .rodata .rodata.*)
         . = ALIGN(8);
         PROVIDE(__tmp_stack_bottom = .);
-        . += 1024 * 1024 * 8;
+        . += 1024 * 1024 * 4;
         PROVIDE(__tmp_stack_top = .);
         . += 4096;
         PROVIDE(__scratch_stack = .);
