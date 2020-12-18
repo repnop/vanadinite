@@ -379,6 +379,7 @@ pub(crate) unsafe fn find_node<'a>(
     None
 }
 
+// FIXME: this probably needs refactored
 pub(crate) unsafe fn all_nodes(header: &Fdt) -> impl Iterator<Item = FdtNode<'_>> {
     let mut ptr: *const BigEndianU32 = header.structs_ptr().cast();
     let mut done = false;
@@ -409,9 +410,6 @@ pub(crate) unsafe fn all_nodes(header: &Fdt) -> impl Iterator<Item = FdtNode<'_>
             _ => return None,
         }
 
-        parents[parent_index] = ptr;
-        parent_index += 1;
-
         let unit_name = cstr_core::CStr::from_ptr(ptr.cast()).to_str().ok()?;
 
         advance_ptr(&mut ptr, unit_name.as_bytes().len() + 1);
@@ -419,12 +417,26 @@ pub(crate) unsafe fn all_nodes(header: &Fdt) -> impl Iterator<Item = FdtNode<'_>
         advance_ptr(&mut ptr, offset);
 
         let node_ptr = ptr;
+
+        parent_index += 1;
+        parents[parent_index] = ptr;
+
+        log::debug!(
+            "hit node: {:?}, ptr: {:#p}, parent: {:?}",
+            unit_name,
+            ptr,
+            match parent_index {
+                1 => None,
+                _ => Some(parents[parent_index - 1]),
+            }
+        );
+
         while (*ptr).get() == FDT_PROP {
             NodeProperty::parse(&mut ptr, header);
         }
 
         Some(FdtNode {
-            name: if unit_name == "" { "/" } else { unit_name },
+            name: if unit_name.is_empty() { "/" } else { unit_name },
             header,
             parent_props: match parent_index {
                 1 => None,
