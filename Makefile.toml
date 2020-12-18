@@ -5,16 +5,17 @@ default_to_workspace = false
 MACHINE = "virt"
 RAM = "512M"
 CPUS = "5"
+ADDITIONAL_FEATURES = ""
 
 [tasks.'build-vanadinite.release']
 env = { RUSTFLAGS = "-C link-arg=-Tvanadinite/lds/${MACHINE}.lds -C code-model=medium" }
 command = "cargo"
-args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown-none-elf", "--manifest-path", "src/vanadinite/Cargo.toml", "--features", "${MACHINE}"]
+args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown-none-elf", "--manifest-path", "src/vanadinite/Cargo.toml", "--features", "${MACHINE} ${ADDITIONAL_FEATURES}"]
 
 [tasks.'build-vanadinite.debug']
 env = { RUSTFLAGS = "-C link-arg=-Tvanadinite/lds/${MACHINE}.lds -C code-model=medium" }
 command = "cargo"
-args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown-none-elf", "--manifest-path", "src/vanadinite/Cargo.toml", "--features", "${MACHINE} debug_log"]
+args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown-none-elf", "--manifest-path", "src/vanadinite/Cargo.toml", "--features", "${MACHINE} ${ADDITIONAL_FEATURES} debug_log"]
 
 
 [tasks.run]
