@@ -4,7 +4,7 @@
 
 use crate::{
     interrupts::InterruptDisabler,
-    kernel_patching::phys2virt,
+    mem::phys2virt,
     mem::{
         paging::{PageSize, PhysicalAddress, Read, Sv39PageTable, ToPermissions, VirtualAddress, Write},
         phys::PhysicalMemoryAllocator,
@@ -25,7 +25,7 @@ pub struct PageTableManager;
 
 impl PageTableManager {
     pub fn alloc_virtual_range<P: ToPermissions + Copy>(&mut self, start: VirtualAddress, size: usize, perms: P) {
-        assert_eq!(size % 4096, 0, "bad map range size");
+        assert_eq!(size % 4096, 0, "bad map range size: {}", size);
 
         for idx in 0..size / 4096 {
             self.alloc_virtual(start.offset(idx * 4096), perms);
@@ -36,7 +36,7 @@ impl PageTableManager {
         let _disabler = InterruptDisabler::new();
         let phys = Self::new_phys_page();
 
-        //log::info!("PageTableManager::map_page: mapping {:#p} to {:#p}", phys, map_to);
+        log::info!("PageTableManager::map_page: mapping {:#p} to {:#p}", phys, map_to);
         unsafe { &mut *PAGE_TABLE_ROOT.get() }.map(
             phys,
             map_to,
@@ -93,8 +93,10 @@ impl PageTableManager {
 
         let map_to = VirtualAddress::new(map_from.as_usize() + MMIO_DEVICE_OFFSET);
 
-        for idx in 0..size / 4096 {
-            self.map_direct(map_from.offset(idx * 4096), map_to.offset(idx * 4096), PageSize::Kilopage, Read | Write);
+        log::info!("Mapping MMIO device at {:#p} size={:#x}", map_to.as_ptr(), size);
+
+        for idx in (0..size).step_by(4096) {
+            self.map_direct(map_from.offset(idx), map_to.offset(idx), PageSize::Kilopage, Read | Write);
         }
 
         map_to
