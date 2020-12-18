@@ -41,7 +41,5 @@ pub unsafe extern "C" fn _boot() -> ! {
         kmain_addr_virt: .dword kmain
         .globl PAGE_OFFSET_VALUE
         PAGE_OFFSET_VALUE: .dword PAGE_OFFSET
-    ");
-
-    loop {}
+    ", options(noreturn));
 }
