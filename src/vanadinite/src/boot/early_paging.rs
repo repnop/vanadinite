@@ -184,7 +184,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             PhysicalAddress::new(addr),
             kernel_patching::phys2virt(PhysicalAddress::new(addr)),
             PageSize::Kilopage,
-            Read | Write | Execute,
+            Read | Write,
             &mut page_alloc,
             |p| VirtualAddress::new(p.as_usize()),
         );
