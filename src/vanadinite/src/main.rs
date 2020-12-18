@@ -39,17 +39,22 @@ mod utils;
 
 use arch::csr;
 use drivers::CompatibleWith;
+use log::info;
 use mem::{
     kernel_patching,
     paging::{PhysicalAddress, VirtualAddress, PAGE_TABLE_MANAGER},
     phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
 };
 
+use core::sync::atomic::{AtomicUsize, Ordering};
+
 const TWO_MEBS: usize = 2 * 1024 * 1024;
 
 extern "C" {
     static stvec_trap_shim: utils::LinkerSymbol;
 }
+
+static TIMER_FREQ: AtomicUsize = AtomicUsize::new(0);
 
 thread_local! {
     static HART_ID: core::cell::Cell<usize> = core::cell::Cell::new(0);
@@ -68,9 +73,9 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         // `kernel_start()` and `kernel_end()` now refer to virtual addresses so
         // we need to patch them back to physical "virtual" addresses to be
         // unmapped
-        let patched = VirtualAddress::new(kernel_patching::virt2phys(VirtualAddress::new(address)).as_usize());
-        page_manager.unmap_with_translation(patched, kernel_patching::phys2virt);
-        //(&mut *mem::paging::PAGE_TABLE_ROOT.get()).unmap(patched, kernel_patching::phys2virt);
+        let patched = VirtualAddress::new(mem::virt2phys(VirtualAddress::new(address)).as_usize());
+        page_manager.unmap_with_translation(patched, mem::phys2virt);
+        //(&mut *mem::paging::PAGE_TABLE_ROOT.get()).unmap(patched, mem::phys2virt);
     }
 
     crate::io::init_logging();
@@ -80,7 +85,27 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         None => crate::arch::exit(crate::arch::ExitStatus::Error(&"magic's fucked, my dude")),
     };
 
-    match fdt.find_node("/soc/interrupt-controller") {
+    let mut stdout_interrupts = None;
+    let stdout = fdt.chosen().and_then(|n| n.stdout());
+    if let Some((node, reg, compatible)) = stdout.and_then(|n| Some((n, n.reg()?.next()?, n.compatible()?))) {
+        let stdout_addr = reg.starting_address as *mut u8;
+        let stdout_size = utils::round_up_to_next(reg.size.unwrap(), 4096);
+
+        if let Some(device) = crate::io::ConsoleDevices::from_compatible(stdout_addr, compatible) {
+            let stdout_phys = PhysicalAddress::from_ptr(stdout_addr);
+            let ptr = page_manager.map_mmio(stdout_phys, stdout_size);
+
+            device.set_console(ptr.as_mut_ptr());
+
+            if let Some(interrupts) = node.interrupts() {
+                // Try to get stdout loaded ASAP, so register interrupts later
+                // on if there are any
+                stdout_interrupts = Some((device, interrupts, ptr));
+            }
+        }
+    }
+
+    match fdt.all_nodes().find(|node| node.name.starts_with("plic")) {
         Some(ic) => {
             use drivers::generic::plic::Plic;
             let compatible = ic.compatible().unwrap();
@@ -94,7 +119,6 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             let ic_virt = page_manager.map_mmio(ic_phys, reg.size.unwrap());
 
             let plic = &*ic_virt.as_ptr().cast::<Plic>();
-            // Plic::init(plic);
 
             log::info!("Registering PLIC @ {:#p}", ic_virt);
             interrupts::register_plic(plic as &'static dyn drivers::Plic);
@@ -102,29 +126,17 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         None => panic!("Can't find interrupt controller!"),
     }
 
-    drivers::Plic::context_threshold(&*interrupts::PLIC.lock(), drivers::EnableMode::Local, 0x00);
-
-    let stdout = fdt.chosen().and_then(|n| n.stdout());
-    if let Some((node, reg, compatible)) = stdout.and_then(|n| Some((n, n.reg()?.next()?, n.compatible()?))) {
-        let stdout_addr = reg.starting_address as *mut u8;
-        let stdout_size = utils::round_up_to_next(reg.size.unwrap(), 4096);
-
-        if let Some(device) = crate::io::ConsoleDevices::from_compatible(stdout_addr, compatible) {
-            let stdout_phys = PhysicalAddress::from_ptr(stdout_addr);
-            let ptr = page_manager.map_mmio(stdout_phys, stdout_size);
-
-            device.set_console(ptr.as_mut_ptr());
-
-            if let Some(interrupts) = node.interrupts() {
-                for interrupt in interrupts {
-                    log::info!("interrupt id: {}", interrupt);
-                    device.register_isr(interrupt, ptr.as_usize());
-                }
-            }
+    if let Some((device, interrupts, ptr)) = stdout_interrupts {
+        for interrupt in interrupts {
+            device.register_isr(interrupt, ptr.as_usize());
         }
     }
 
-    //drivers::Plic::context_threshold(&*interrupts::PLIC.lock(), drivers::EnableMode::Local, 0x00);
+    drivers::Plic::context_threshold(&*interrupts::PLIC.lock(), drivers::EnableMode::Local, 0x00);
+
+    let heap_start = PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(60).expect("moar memory").as_phys_address();
+    log::info!("Initing heap at {:#p} (phys {:#p})", mem::phys2virt(heap_start), heap_start);
+    mem::heap::HEAP_ALLOCATOR.init(mem::phys2virt(heap_start).as_mut_ptr(), 64 * utils::Units::kib(4));
 
     log::info!(
         "Booted on a {} on hart {}",
@@ -170,7 +182,14 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
-    // TIMEBASE-FREQUENCY!!!!!!!!!!!!!!!!!!!
+    let current_cpu = fdt.cpus().find(|cpu| cpu.ids().first() == hart_id).unwrap();
+    let timebase_frequency = current_cpu.timebase_frequency();
+    TIMER_FREQ.store(timebase_frequency, Ordering::Relaxed);
+
+    println!("timebase frequency: {}Hz", timebase_frequency);
+
+    //#[cfg(feature = "sifive_u")]
+    asm::pause();
 
     arch::csr::sstatus::enable_interrupts();
     arch::csr::sie::enable();

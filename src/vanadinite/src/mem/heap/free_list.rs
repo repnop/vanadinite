@@ -14,7 +14,16 @@ pub struct FreeListAllocator {
 
 impl FreeListAllocator {
     pub const fn new() -> Self {
-        Self { inner: Mutex::new(FreeList { origin: None, limit: VirtualAddress::new(super::HEAP_START) }) }
+        Self { inner: Mutex::new(FreeList { head: None, origin: core::ptr::null_mut(), size: 0 }) }
+    }
+
+    pub unsafe fn init(&self, origin: *mut u8, size: usize) {
+        let mut inner = self.inner.lock();
+        inner.head = Some(NonNull::new(origin.cast()).expect("bad origin passed"));
+        inner.origin = origin;
+        inner.size = size;
+
+        *inner.head.unwrap().as_ptr() = FreeListNode { next: None, size: size - FreeListNode::struct_size() };
     }
 }
 
@@ -26,51 +35,47 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         let mut this = self.inner.lock();
 
-        log::info!("FreeListAllocator::alloc: allocating {:?}", layout);
+        log::debug!("FreeListAllocator::alloc: allocating {:?}", layout);
         let size = align_to_usize(layout.size());
 
         if layout.align() > 8 {
             todo!("FreeListAllocator::alloc: >8 byte alignment");
         }
 
-        if this.origin.is_none() {
-            log::info!("FreeListAllocator::alloc: initializing origin");
-            this.origin = Some(NonNull::new_unchecked(this.alloc_more(size)));
-        }
-
-        let head = this.origin.unwrap().as_ptr();
+        let head = this.head.expect("Heap allocator wasn't initialized!").as_ptr();
 
         let mut prev_node: Option<*mut FreeListNode> = None;
         let mut node = head;
 
-        log::info!("FreeListAllocator::alloc: head={:?}", &*head);
+        log::debug!("FreeListAllocator::alloc: head={:?}", &*head);
 
         loop {
-            log::info!("FreeListAllocator::alloc: checking node, node={:?}", &*node);
+            log::debug!("FreeListAllocator::alloc: checking node, node={:?}", &*node);
             // if the node's size is large enough to fit another header + at
             // least 8 bytes, we can split it
             let enough_for_split = (*node).size >= size + FreeListNode::struct_size() + 8;
 
             if (*node).size >= size && !enough_for_split {
-                log::info!("FreeListAllocator::alloc: reusing node, but its not big enough to split");
+                log::debug!("FreeListAllocator::alloc: reusing node, but its not big enough to split");
 
                 match prev_node {
                     Some(prev_node) => (&mut *prev_node).next = (*node).next,
-                    None => this.origin = (*node).next,
+                    None => this.origin = (*node).next.expect("valid next").as_ptr().cast(),
                 }
 
                 break (&*node).data();
             }
 
             if (*node).size >= size && enough_for_split {
-                log::info!("FreeListAllocator::alloc: reusing node and splitting");
+                log::debug!("FreeListAllocator::alloc: reusing node and splitting");
 
                 let new_node_ptr: *mut FreeListNode = (&*node).data().add(size).cast();
                 (&mut *new_node_ptr).size = (*node).size - (size + FreeListNode::struct_size());
                 (&mut *new_node_ptr).next = (*node).next;
                 (&mut *node).size = size;
+                (&mut *node).next = None;
 
-                log::info!(
+                log::debug!(
                     "FreeListAllocator::alloc: created new node, current node={:?}, new node={:?}",
                     &*node,
                     &*new_node_ptr
@@ -80,7 +85,10 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
 
                 match prev_node {
                     Some(prev_node) => (&mut *prev_node).next = next,
-                    None => this.origin = next,
+                    None => {
+                        log::debug!("Setting head to {:?}", &*new_node_ptr);
+                        this.head = next;
+                    }
                 }
 
                 break (&*node).data();
@@ -91,13 +99,7 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
                     prev_node = Some(node);
                     node = next.as_ptr();
                 }
-                None => {
-                    let new_node_ptr = this.alloc_more(size);
-                    (&mut *node).next = Some(NonNull::new_unchecked(new_node_ptr));
-
-                    prev_node = Some(node);
-                    node = new_node_ptr;
-                }
+                None => return core::ptr::null_mut(),
             }
         }
     }
@@ -107,38 +109,17 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
 
         let mut inner = self.inner.lock();
         let ptr = (ptr as usize - core::mem::size_of::<FreeListNode>()) as *mut FreeListNode;
-        (&mut *ptr).next = inner.origin;
-        inner.origin = Some(NonNull::new_unchecked(ptr));
+
+        log::debug!("Freeing {:?}, head={:?}", &*ptr, &*inner.head.unwrap().as_ptr());
+        (&mut *ptr).next = inner.head;
+        inner.head = Some(NonNull::new_unchecked(ptr));
     }
 }
 
 struct FreeList {
-    origin: Option<core::ptr::NonNull<FreeListNode>>,
-    limit: VirtualAddress,
-}
-
-impl FreeList {
-    unsafe fn alloc_more(&mut self, size: usize) -> *mut FreeListNode {
-        log::info!("FreeListAllocator::alloc_more: additional allocation requested, size={}", size);
-
-        let size_with_node = size + FreeListNode::struct_size();
-        let num_pages = size_with_node / KIB_PAGE_SIZE + 1;
-
-        let new_mem_size = num_pages * KIB_PAGE_SIZE;
-        let start = self.limit;
-        let end = start.offset(new_mem_size);
-
-        log::info!("FreeListAllocator::alloc_more: allocating {} pages", num_pages);
-
-        PAGE_TABLE_MANAGER.lock().alloc_virtual_range(start, new_mem_size, Read | Write);
-        self.limit = end;
-
-        let node_ptr: *mut FreeListNode = start.as_mut_ptr().cast();
-        (&mut *node_ptr).next = None;
-        (&mut *node_ptr).size = new_mem_size - FreeListNode::struct_size();
-
-        node_ptr
-    }
+    head: Option<NonNull<FreeListNode>>,
+    origin: *mut u8,
+    size: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
