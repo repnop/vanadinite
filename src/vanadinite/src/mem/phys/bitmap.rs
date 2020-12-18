@@ -49,7 +49,6 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
     // FIXME: this should look for inter-u64 regions
     unsafe fn alloc_contiguous(&mut self, n: usize) -> Option<PhysicalPage> {
         assert!(n <= 64, "> 64 page allocations are currently not supported");
-        let mut page = None;
         let mask = u64::max_value() << n;
         for (index, entry) in self.bitmap.iter_mut().enumerate().filter(|(_, e)| e.count_zeros() as usize >= n) {
             let mut bit_index = None;
@@ -71,13 +70,17 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
             let page_ptr = (self.mem_start as usize + index * SINGLE_ENTRY_SIZE_BYTES) + (bit_index * 4096);
             let page_ptr = page_ptr as *mut u8;
 
-            if page_ptr <= self.mem_end {
-                page = Some(PhysicalPage(page_ptr));
-                *entry |= (!mask).rotate_left(bit_index as u32);
+            if page_ptr >= self.mem_end {
+                return None;
             }
+
+            let page = Some(PhysicalPage(page_ptr));
+            *entry |= (!mask).rotate_left(bit_index as u32);
+
+            return page;
         }
 
-        page
+        None
     }
 
     #[track_caller]
