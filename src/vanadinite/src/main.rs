@@ -38,13 +38,16 @@ mod trap;
 mod utils;
 
 use arch::csr;
-use drivers::CompatibleWith;
-use log::info;
+use drivers::{CompatibleWith, EnableMode};
+use interrupts::PLIC;
 use mem::{
     kernel_patching,
     paging::{PhysicalAddress, VirtualAddress, PAGE_TABLE_MANAGER},
     phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
+    virt2phys,
 };
+use sync::Mutex;
+use utils::Units;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
@@ -59,6 +62,8 @@ static TIMER_FREQ: AtomicUsize = AtomicUsize::new(0);
 thread_local! {
     static HART_ID: core::cell::Cell<usize> = core::cell::Cell::new(0);
 }
+
+static BLOCK_DEV: Mutex<Option<drivers::virtio::block::BlockDevice>> = Mutex::new(None);
 
 #[no_mangle]
 unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
@@ -105,6 +110,42 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
+    let model = fdt
+        .find_node("/")
+        .unwrap()
+        .properties()
+        .find(|p| p.name == "model")
+        .map(|p| core::str::from_utf8(&p.value[..p.value.len() - 1]).unwrap())
+        .unwrap();
+
+    let (mem_size, mem_start) = {
+        let memory = fdt
+            .memory()
+            .regions()
+            .find(|region| {
+                let start = region.starting_address as usize;
+                let end = region.starting_address as usize + region.size.unwrap();
+                let kstart_phys = mem::virt2phys(VirtualAddress::from_ptr(kernel_patching::kernel_start())).as_usize();
+                start <= kstart_phys && kstart_phys <= end
+            })
+            .unwrap();
+
+        (memory.size.unwrap() / 1024 / 1024, memory.starting_address)
+    };
+
+    let current_cpu = fdt.cpus().find(|cpu| cpu.ids().first() == hart_id).unwrap();
+    let timebase_frequency = current_cpu.timebase_frequency();
+    TIMER_FREQ.store(timebase_frequency, Ordering::Relaxed);
+
+    log::info!("Booted on a {} on hart {}", model, hart_id);
+    log::info!("{} MiB of memory starting at {:#p}", mem_size, mem_start);
+    log::info!("Timer clock running @ {}Hz", timebase_frequency);
+    log::info!("SBI spec version: {:?}", sbi::base::spec_version());
+    log::info!("SBI implementor: {:?}", sbi::base::impl_id());
+    log::info!("marchid: {:#x}", sbi::base::marchid());
+    log::info!("Installing trap handler at {:#p}", stvec_trap_shim.as_ptr());
+    csr::stvec::set(core::mem::transmute(stvec_trap_shim.as_ptr()));
+
     match fdt.all_nodes().find(|node| node.name.starts_with("plic")) {
         Some(ic) => {
             use drivers::generic::plic::Plic;
@@ -132,36 +173,15 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
-    drivers::Plic::context_threshold(&*interrupts::PLIC.lock(), drivers::EnableMode::Local, 0x00);
+    drivers::Plic::context_threshold(&*PLIC.lock(), drivers::EnableMode::Local, 0x00);
 
-    let heap_start = PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(60).expect("moar memory").as_phys_address();
+    let heap_start = PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(64).expect("moar memory").as_phys_address();
     log::info!("Initing heap at {:#p} (phys {:#p})", mem::phys2virt(heap_start), heap_start);
-    mem::heap::HEAP_ALLOCATOR.init(mem::phys2virt(heap_start).as_mut_ptr(), 64 * utils::Units::kib(4));
+    mem::heap::HEAP_ALLOCATOR.init(mem::phys2virt(heap_start).as_mut_ptr(), 64 * 4.kib());
 
-    log::info!(
-        "Booted on a {} on hart {}",
-        fdt.find_node("/")
-            .unwrap()
-            .properties()
-            .find(|p| p.name == "model")
-            .map(|p| core::str::from_utf8(&p.value[..p.value.len() - 1]).unwrap())
-            .unwrap(),
-        hart_id
-    );
-    log::info!("SBI spec version: {:?}", sbi::base::spec_version());
-    log::info!("SBI implementor: {:?}", sbi::base::impl_id());
-    log::info!("marchid: {:#x}", sbi::base::marchid());
-    log::info!("Installing trap handler at {:#p}", stvec_trap_shim.as_ptr());
-    csr::stvec::set(core::mem::transmute(stvec_trap_shim.as_ptr()));
-
-    let tp: usize;
-    asm!("mv {}, tp", out(reg) tp);
-    println!("tp: {:#p}", tp as *mut u8);
-    println!("hart_id: {}", HART_ID.get());
-
-    for child in fdt.find_all_nodes("/virtio_mmio") {
+    for child in fdt.find_all_nodes("/soc/virtio_mmio") {
         use drivers::virtio::mmio::{
-            block::{FeatureBits, VirtIoBlockDevice},
+            block::VirtIoBlockDevice,
             common::{DeviceType, VirtIoHeader},
         };
         let reg = child.reg().unwrap().next().unwrap();
@@ -174,30 +194,31 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         if let Some(DeviceType::BlockDevice) = device.device_type() {
             let block_device: &'static VirtIoBlockDevice = &*(device as *const _ as *const VirtIoBlockDevice);
 
-            println!("{:?}: {:?}", FeatureBits::SizeMax, block_device.features() & FeatureBits::SizeMax);
-            println!("{:?}: {:?}", FeatureBits::Geometry, block_device.features() & FeatureBits::Geometry);
-            println!("{:?}: {:?}", FeatureBits::ReadOnly, block_device.features() & FeatureBits::ReadOnly);
-            println!("{:?}: {:?}", FeatureBits::BlockSize, block_device.features() & FeatureBits::BlockSize);
-            println!("{:?}: {:?}", FeatureBits::WriteZeroes, block_device.features() & FeatureBits::WriteZeroes);
+            *BLOCK_DEV.lock() = Some(drivers::virtio::block::BlockDevice::new(block_device).unwrap());
+
+            let plic = &*PLIC.lock();
+            for interrupt in child.interrupts().unwrap() {
+                drivers::Plic::enable_interrupt(plic, EnableMode::Local, interrupt);
+                drivers::Plic::interrupt_priority(plic, interrupt, 1);
+                interrupts::isr::register_isr::<drivers::virtio::block::BlockDevice>(interrupt, 0);
+            }
         }
     }
 
-    let current_cpu = fdt.cpus().find(|cpu| cpu.ids().first() == hart_id).unwrap();
-    let timebase_frequency = current_cpu.timebase_frequency();
-    TIMER_FREQ.store(timebase_frequency, Ordering::Relaxed);
-
-    println!("timebase frequency: {}Hz", timebase_frequency);
-
-    //#[cfg(feature = "sifive_u")]
-    asm::pause();
-
     arch::csr::sstatus::enable_interrupts();
     arch::csr::sie::enable();
+    let data = alloc::boxed::Box::into_raw(alloc::boxed::Box::new([0u8; 512]));
 
-    println!("{:?}", alloc::boxed::Box::new(5i32));
+    log::info!("data ptr={:#p}", data);
 
-    println!("{:?}", alloc::vec![1u64; 512]);
+    BLOCK_DEV.lock().as_mut().unwrap().queue_read(0, virt2phys(VirtualAddress::from_ptr(data)));
 
+    loop {
+        //log::info!("data={:?}", core::slice::from_raw_parts(data as *const u8, 512));
+        for _ in 0..100000000 {
+            asm::pause();
+        }
+    }
     arch::exit(arch::ExitStatus::Ok)
 }
 
