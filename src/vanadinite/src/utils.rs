@@ -42,7 +42,9 @@ unsafe impl<T> Send for StaticMut<T> {}
 #[inline(always)]
 pub fn manual_debug_point() {
     unsafe {
-        asm!("1: j 1b");
+        loop {
+            asm!("nop");
+        }
     }
 }
 
