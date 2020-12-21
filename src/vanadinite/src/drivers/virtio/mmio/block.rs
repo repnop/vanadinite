@@ -2,16 +2,19 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::common::{DeviceType, StatusFlag, VirtIoHeader};
 use crate::{
-    drivers::virtio::queue::SplitVirtqueue,
+    drivers::virtio::{
+        mmio::common::{StatusFlag, VirtIoHeader},
+        queue::SplitVirtqueue,
+        VirtIoDeviceError,
+    },
     mem::fence,
     utils::volatile::{Read, ReadWrite, Volatile},
 };
 
 #[repr(C)]
 pub struct VirtIoBlockDevice {
-    header: VirtIoHeader,
+    pub header: VirtIoHeader,
     capacity: Volatile<u64, Read>,
     size_max: Volatile<u32, Read>,
     segment_max: Volatile<u32, Read>,
@@ -30,19 +33,36 @@ pub struct VirtIoBlockDevice {
 }
 
 impl VirtIoBlockDevice {
-    pub fn init(&self, queue: &SplitVirtqueue, queue_select: u32) -> Result<(), &'static str> {
+    pub fn init(&self, queue: &SplitVirtqueue, queue_select: u32) -> Result<(), VirtIoDeviceError> {
         // TODO: memory barriers??
         self.header.status.reset();
+        fence();
+
         self.header.status.set_flag(StatusFlag::Acknowledge);
         self.header.status.set_flag(StatusFlag::Driver);
+
         // TODO: maybe use feature bits at some point
         let _ = self.features();
-        // No features
+        fence();
+
         self.header.driver_features_select.write(0);
+        self.header.device_features_select.write(0);
+        fence();
+
+        self.header.driver_features.write(0);
+        fence();
+
         self.header.status.set_flag(StatusFlag::FeaturesOk);
+        fence();
 
         if !self.header.status.is_set(StatusFlag::FeaturesOk) {
-            return Err("some set of features not understood");
+            return Err(VirtIoDeviceError::FeaturesNotRecognized);
+        }
+
+        self.header.status.set_flag(StatusFlag::DriverOk);
+
+        if self.header.status.failed() {
+            return Err(VirtIoDeviceError::DeviceError);
         }
 
         self.header.queue_select.write(queue_select);
@@ -50,16 +70,14 @@ impl VirtIoBlockDevice {
         self.header.queue_descriptor.set(queue.descriptor_physical_address());
         self.header.queue_available.set(queue.available_physical_address());
         self.header.queue_used.set(queue.used_physical_address());
+        fence();
+
         self.header.queue_ready.ready();
 
         fence();
 
-        self.header.status.set_flag(StatusFlag::DriverOk);
-
         Ok(())
     }
-
-    //pub fn read(&mut self, queue: &mut SplitVirtqueue, command: Command, data: &mut [u8; 512]) -> Result<(), ()> {}
 
     pub fn features(&self) -> u32 {
         self.header.features()
@@ -112,14 +130,16 @@ impl core::ops::BitAnd<u32> for FeatureBits {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
 pub struct Command {
-    kind: CommandKind,
-    _reserved: u32,
-    sector: u64,
-    status: u8,
+    pub kind: CommandKind,
+    pub _reserved: u32,
+    pub sector: u64,
+    pub status: u8,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 #[repr(u32)]
 pub enum CommandKind {
     Read = 0,

@@ -15,27 +15,28 @@ pub struct VirtIoHeader {
     pub device_features: registers::DeviceFeatures,
     pub device_features_select: Volatile<u32, Write>,
     _reserved1: [u32; 2],
-    pub driver_features: Volatile<u32, Read>,
+    pub driver_features: Volatile<u32, Write>,
     pub driver_features_select: Volatile<u32, Write>,
     _reserved2: [u32; 2],
     pub queue_select: Volatile<u32, Write>,
     pub queue_size_max: Volatile<u32, Read>,
     pub queue_size: Volatile<u32, Write>,
-    pub queue_ready: registers::QueueReady,
     _reserved3: [u32; 2],
-    pub queue_notify: Volatile<u32, Write>,
-    _reserved4: [u32; 3],
+    pub queue_ready: registers::QueueReady,
+    _reserved4: [u32; 2],
+    pub queue_notify: registers::QueueNotify,
+    _reserved5: [u32; 3],
     pub interrupt_status: registers::InterruptStatus,
     pub interrupt_ack: registers::InterruptAck,
-    _reserved5: [u32; 2],
+    _reserved6: [u32; 2],
     pub status: registers::Status,
-    _reserved6: [u32; 3],
+    _reserved7: [u32; 3],
     pub queue_descriptor: registers::QueueDescriptor,
-    _reserved7: [u32; 2],
-    pub queue_available: registers::QueueAvailable,
     _reserved8: [u32; 2],
+    pub queue_available: registers::QueueAvailable,
+    _reserved9: [u32; 2],
     pub queue_used: registers::QueueUsed,
-    _reserved9: [u32; 21],
+    _reserved10: [u32; 21],
     pub config_generation: Volatile<u32, Read>,
 }
 
@@ -165,6 +166,16 @@ mod registers {
 
         pub fn acknowledge_config_change(&self) {
             self.0.write(2);
+        }
+    }
+
+    #[derive(Debug)]
+    #[repr(transparent)]
+    pub struct QueueNotify(Volatile<u32, Write>);
+
+    impl QueueNotify {
+        pub fn notify(&self) {
+            self.0.write(0);
         }
     }
 

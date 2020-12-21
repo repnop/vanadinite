@@ -21,7 +21,14 @@ pub mod virtio {
         pub mod common;
     }
 
+    pub mod block;
     pub mod queue;
+
+    #[derive(Debug)]
+    pub enum VirtIoDeviceError {
+        FeaturesNotRecognized,
+        DeviceError,
+    }
 }
 
 pub trait CompatibleWith {
