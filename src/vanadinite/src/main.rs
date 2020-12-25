@@ -44,7 +44,7 @@ use mem::{
     kernel_patching,
     paging::{PhysicalAddress, VirtualAddress, PAGE_TABLE_MANAGER},
     phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
-    virt2phys,
+    phys2virt, virt2phys,
 };
 use sync::Mutex;
 use utils::Units;
@@ -67,9 +67,6 @@ static BLOCK_DEV: Mutex<Option<drivers::virtio::block::BlockDevice>> = Mutex::ne
 
 #[no_mangle]
 unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
-    crate::thread_local::init_thread_locals();
-    HART_ID.set(hart_id);
-
     let mut page_manager = PAGE_TABLE_MANAGER.lock();
     // Remove identity mapping after paging initialization
     let kernel_start = kernel_patching::kernel_start() as usize;
@@ -94,11 +91,10 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     let stdout = fdt.chosen().and_then(|n| n.stdout());
     if let Some((node, reg, compatible)) = stdout.and_then(|n| Some((n, n.reg()?.next()?, n.compatible()?))) {
         let stdout_addr = reg.starting_address as *mut u8;
-        let stdout_size = utils::round_up_to_next(reg.size.unwrap(), 4096);
 
         if let Some(device) = crate::io::ConsoleDevices::from_compatible(stdout_addr, compatible) {
             let stdout_phys = PhysicalAddress::from_ptr(stdout_addr);
-            let ptr = page_manager.map_mmio(stdout_phys, stdout_size);
+            let ptr = phys2virt(stdout_phys); //page_manager.map_mmio(stdout_phys, stdout_size);
 
             device.set_console(ptr.as_mut_ptr());
 
@@ -109,6 +105,13 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             }
         }
     }
+
+    let heap_start = PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(64).expect("moar memory").as_phys_address();
+    log::debug!("Initing heap at {:#p} (phys {:#p})", mem::phys2virt(heap_start), heap_start);
+    mem::heap::HEAP_ALLOCATOR.init(mem::phys2virt(heap_start).as_mut_ptr(), 64 * 4.kib());
+
+    crate::thread_local::init_thread_locals();
+    HART_ID.set(hart_id);
 
     let model = fdt
         .find_node("/")
@@ -157,7 +160,7 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
             let reg = ic.reg().unwrap().next().unwrap();
             let ic_phys = PhysicalAddress::from_ptr(reg.starting_address);
-            let ic_virt = page_manager.map_mmio(ic_phys, reg.size.unwrap());
+            let ic_virt = phys2virt(ic_phys); //page_manager.map_mmio(ic_phys, reg.size.unwrap());
 
             let plic = &*ic_virt.as_ptr().cast::<Plic>();
 
@@ -175,10 +178,6 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     drivers::Plic::context_threshold(&*PLIC.lock(), drivers::EnableMode::Local, 0x00);
 
-    let heap_start = PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(64).expect("moar memory").as_phys_address();
-    log::info!("Initing heap at {:#p} (phys {:#p})", mem::phys2virt(heap_start), heap_start);
-    mem::heap::HEAP_ALLOCATOR.init(mem::phys2virt(heap_start).as_mut_ptr(), 64 * 4.kib());
-
     for child in fdt.find_all_nodes("/soc/virtio_mmio") {
         use drivers::virtio::mmio::{
             block::VirtIoBlockDevice,
@@ -187,7 +186,7 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         let reg = child.reg().unwrap().next().unwrap();
 
         let virtio_mmio_phys = PhysicalAddress::from_ptr(reg.starting_address);
-        let virtio_mmio_virt = page_manager.map_mmio(virtio_mmio_phys, reg.size.unwrap());
+        let virtio_mmio_virt = phys2virt(virtio_mmio_phys); //page_manager.map_mmio(virtio_mmio_phys, reg.size.unwrap());
 
         let device: &'static VirtIoHeader = &*(virtio_mmio_virt.as_ptr().cast());
 
@@ -214,10 +213,8 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     BLOCK_DEV.lock().as_mut().unwrap().queue_read(0, virt2phys(VirtualAddress::from_ptr(data)));
 
     loop {
-        //log::info!("data={:?}", core::slice::from_raw_parts(data as *const u8, 512));
-        for _ in 0..100000000 {
-            asm::pause();
-        }
+        asm!("wfi");
+        println!("{:?}", core::slice::from_raw_parts(data as *const u8, 512));
     }
     arch::exit(arch::ExitStatus::Ok)
 }

@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License,
+// v. 2.0. If a copy of the MPL was not distributed with this file, You can
+// obtain one at https://mozilla.org/MPL/2.0/.
+
 use crate::{
     drivers::{
         virtio::{
@@ -12,12 +16,13 @@ use crate::{
         phys2virt, virt2phys,
     },
 };
-use alloc::boxed::Box;
+use alloc::{boxed::Box, collections::BTreeMap};
 
 pub struct BlockDevice {
     device: &'static VirtIoBlockDevice,
     // TODO: allow for multiple queues
     queue: SplitVirtqueue,
+    issued_commands: BTreeMap<usize, Box<Command>>,
 }
 
 impl BlockDevice {
@@ -26,7 +31,7 @@ impl BlockDevice {
 
         device.init(&queue, 0)?;
 
-        Ok(Self { device, queue })
+        Ok(Self { device, queue, issued_commands: BTreeMap::new() })
     }
 
     pub fn queue_read(&mut self, sector: u64, read_to: PhysicalAddress) {
@@ -59,6 +64,8 @@ impl BlockDevice {
         // FIXME: check for queue size overflow
         avail.index += 1;
 
+        self.issued_commands.insert(desc1, unsafe { Box::from_raw(request) });
+
         self.device.header.queue_notify.notify();
     }
 }
@@ -72,22 +79,15 @@ impl InterruptServicable for BlockDevice {
         let this = this.as_mut().unwrap();
         this.device.header.interrupt_ack.acknowledge_buffer_used();
 
-        let desc1 = this.queue.used.ring[0].start_index as usize;
+        let desc1 = this.queue.used.ring[this.queue.used.index as usize].start_index as usize;
         let desc2 = this.queue.descriptors[desc1].next as usize;
         let desc3 = this.queue.descriptors[desc2].next as usize;
 
-        let cmd_addr = phys2virt(this.queue.descriptors[desc1].address).as_mut_ptr().cast();
-        let cmd: Box<Command> = unsafe { Box::from_raw(cmd_addr) };
+        let cmd: Box<Command> = this.issued_commands.remove(&desc1).unwrap();
 
         assert_eq!(cmd.status, 0);
 
-        let schweet_data = phys2virt(this.queue.descriptors[desc2].address);
-        let schweet_data = unsafe { core::slice::from_raw_parts(schweet_data.as_ptr(), 512) };
-        log::info!(
-            "yay we read something @ {:#p}: {}",
-            phys2virt(this.queue.descriptors[desc2].address),
-            alloc::string::String::from_utf8_lossy(schweet_data),
-        );
+        log::debug!("Successfully processed block device command");
 
         this.queue.free_descriptor(desc1);
         this.queue.free_descriptor(desc2);

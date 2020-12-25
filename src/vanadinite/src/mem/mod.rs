@@ -1,3 +1,5 @@
+use paging::PAGE_TABLE_MANAGER;
+
 use self::paging::{PhysicalAddress, VirtualAddress};
 
 // This Source Code Form is subject to the terms of the Mozilla Public License,
@@ -54,24 +56,28 @@ pub enum SatpMode {
 }
 
 pub fn phys2virt(phys: PhysicalAddress) -> VirtualAddress {
-    let phys_offset = unsafe { *kernel_patching::KERNEL_PHYS_LOAD_LOCATION.0.get() };
+    // let phys_offset = unsafe { *kernel_patching::KERNEL_PHYS_LOAD_LOCATION.0.get() };
+    //
+    // assert!(phys_offset != 0);
 
-    assert!(phys_offset != 0);
-
-    VirtualAddress::new(phys.as_usize() - phys_offset + kernel_patching::page_offset())
+    VirtualAddress::new(phys.as_usize() + 0xFFFFFFC000000000)
 }
 
 pub fn virt2phys(virt: VirtualAddress) -> PhysicalAddress {
-    let phys_offset = unsafe { *kernel_patching::KERNEL_PHYS_LOAD_LOCATION.0.get() };
+    //let phys_offset = unsafe { *kernel_patching::KERNEL_PHYS_LOAD_LOCATION.0.get() };
+    //
+    //assert!(phys_offset != 0);
+    //
+    //PhysicalAddress::new(virt.as_usize() - kernel_patching::page_offset() + phys_offset)
 
-    assert!(phys_offset != 0);
-
-    PhysicalAddress::new(virt.as_usize() - kernel_patching::page_offset() + phys_offset)
+    PAGE_TABLE_MANAGER.lock().resolve(virt).expect("no mapping found")
 }
 
 pub mod kernel_patching {
     use crate::utils;
     use core::cell::UnsafeCell;
+
+    use super::paging::{PhysicalAddress, VirtualAddress};
 
     extern "C" {
         static KERNEL_START: utils::LinkerSymbol;
@@ -99,5 +105,11 @@ pub mod kernel_patching {
 
     pub fn kernel_end() -> *const u8 {
         unsafe { KERNEL_END.as_ptr() }
+    }
+
+    pub unsafe fn kernel_section_p2v(phys: PhysicalAddress) -> VirtualAddress {
+        let phys_offset = *KERNEL_PHYS_LOAD_LOCATION.0.get();
+        assert!(phys_offset != 0);
+        VirtualAddress::new(phys.as_usize() - phys_offset + page_offset())
     }
 }

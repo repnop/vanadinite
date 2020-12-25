@@ -95,13 +95,19 @@ impl Sv39PageTable {
         F: Fn(PhysicalAddress) -> VirtualAddress,
     {
         let mut page_table = self;
+        let mut page_size = PageSize::Gigapage;
 
         for vpn in virt.vpns().iter().copied().rev() {
             let pte = &page_table.entries[vpn];
             if pte.is_branch() {
                 page_table = unsafe { &*address_conversion(pte.subtable().unwrap()).as_ptr().cast() };
+
+                page_size = match page_size {
+                    PageSize::Gigapage => PageSize::Megapage,
+                    _ => PageSize::Kilopage,
+                };
             } else if pte.valid() {
-                return pte.ppn();
+                return pte.ppn().map(|p| p.offset(virt.offset_into_page(page_size)));
             }
         }
 
@@ -201,6 +207,14 @@ impl VirtualAddress {
 
         [(self.0 >> 12) & VPN_BITMASK, (self.0 >> 21) & VPN_BITMASK, (self.0 >> 30) & VPN_BITMASK]
     }
+
+    pub fn offset_into_page(self, page_size: PageSize) -> usize {
+        match page_size {
+            PageSize::Gigapage => self.0 & 0x3FFFFFFF,
+            PageSize::Megapage => self.0 & 0x1FFFFF,
+            PageSize::Kilopage => self.0 & 0xFFF,
+        }
+    }
 }
 
 impl core::fmt::Pointer for VirtualAddress {
@@ -251,7 +265,7 @@ impl PhysicalAddress {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum PageSize {
     Kilopage,
     Megapage,

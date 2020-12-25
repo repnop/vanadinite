@@ -15,8 +15,6 @@ use crate::{
     PHYSICAL_MEMORY_ALLOCATOR,
 };
 
-const MMIO_DEVICE_OFFSET: usize = 0xFFFFFFE000000000;
-
 pub static PAGE_TABLE_MANAGER: Mutex<PageTableManager> = Mutex::new(PageTableManager);
 
 static PAGE_TABLE_ROOT: StaticMut<Sv39PageTable> = StaticMut::new(Sv39PageTable::new());
@@ -88,18 +86,10 @@ impl PageTableManager {
         sfence(Some(map_to), None);
     }
 
-    pub fn map_mmio(&mut self, map_from: PhysicalAddress, size: usize) -> VirtualAddress {
-        assert_eq!(size % 4096, 0, "bad mmio device size");
+    pub fn resolve(&self, virt: VirtualAddress) -> Option<PhysicalAddress> {
+        let _disabler = InterruptDisabler::new();
 
-        let map_to = VirtualAddress::new(map_from.as_usize() + MMIO_DEVICE_OFFSET);
-
-        log::info!("Mapping MMIO device at {:#p} size={:#x}", map_to.as_ptr(), size);
-
-        for idx in (0..size).step_by(4096) {
-            self.map_direct(map_from.offset(idx), map_to.offset(idx), PageSize::Kilopage, Read | Write);
-        }
-
-        map_to
+        unsafe { &*PAGE_TABLE_ROOT.get() }.translate(virt, phys2virt)
     }
 
     pub unsafe fn set_satp(&mut self) {

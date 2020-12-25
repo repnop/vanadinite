@@ -9,7 +9,7 @@ use crate::{
         phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
         phys2virt,
     },
-    utils::{LinkerSymbol, StaticMut},
+    utils::{LinkerSymbol, StaticMut, Units},
 };
 
 extern "C" {
@@ -124,9 +124,14 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (bss_start..bss_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        ptm.map_with_allocator(addr, phys2virt(addr), PageSize::Kilopage, Read | Write, &mut page_alloc, |p| {
-            VirtualAddress::new(p.as_usize())
-        });
+        ptm.map_with_allocator(
+            addr,
+            crate::kernel_patching::kernel_section_p2v(addr),
+            PageSize::Kilopage,
+            Read | Write,
+            &mut page_alloc,
+            |p| VirtualAddress::new(p.as_usize()),
+        );
     }
 
     let data_start = __data_start.as_usize();
@@ -134,9 +139,14 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (data_start..data_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        ptm.map_with_allocator(addr, phys2virt(addr), PageSize::Kilopage, Read | Write, &mut page_alloc, |p| {
-            VirtualAddress::new(p.as_usize())
-        });
+        ptm.map_with_allocator(
+            addr,
+            crate::kernel_patching::kernel_section_p2v(addr),
+            PageSize::Kilopage,
+            Read | Write,
+            &mut page_alloc,
+            |p| VirtualAddress::new(p.as_usize()),
+        );
     }
 
     let text_start = __text_start.as_usize();
@@ -144,9 +154,14 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (text_start..text_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        ptm.map_with_allocator(addr, phys2virt(addr), PageSize::Kilopage, Read | Execute, &mut page_alloc, |p| {
-            VirtualAddress::new(p.as_usize())
-        });
+        ptm.map_with_allocator(
+            addr,
+            crate::kernel_patching::kernel_section_p2v(addr),
+            PageSize::Kilopage,
+            Read | Execute,
+            &mut page_alloc,
+            |p| VirtualAddress::new(p.as_usize()),
+        );
     }
 
     let ktls_start = __kernel_thread_local_start.as_usize();
@@ -154,17 +169,33 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (ktls_start..ktls_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        ptm.map_with_allocator(addr, phys2virt(addr), PageSize::Kilopage, Read | Write, &mut page_alloc, |p| {
-            VirtualAddress::new(p.as_usize())
-        });
+        ptm.map_with_allocator(
+            addr,
+            crate::kernel_patching::kernel_section_p2v(addr),
+            PageSize::Kilopage,
+            Read | Write,
+            &mut page_alloc,
+            |p| VirtualAddress::new(p.as_usize()),
+        );
     }
 
-    let phys = kernel_end_phys as usize;
-    for addr in (phys..(phys + (start + size - phys))).step_by(4096) {
+    //let phys = kernel_end_phys as usize;
+    //for addr in (phys..(phys + (start + size - phys))).step_by(4096) {
+    //    ptm.map_with_allocator(
+    //        PhysicalAddress::new(addr),
+    //        phys2virt(PhysicalAddress::new(addr)),
+    //        PageSize::Kilopage,
+    //        Read | Write,
+    //        &mut page_alloc,
+    //        |p| VirtualAddress::new(p.as_usize()),
+    //    );
+    //}
+
+    for addr in 0..64 {
         ptm.map_with_allocator(
-            PhysicalAddress::new(addr),
-            phys2virt(PhysicalAddress::new(addr)),
-            PageSize::Kilopage,
+            PhysicalAddress::new(addr * 1.gib()),
+            VirtualAddress::new(0xFFFFFFC000000000 + addr * 1.gib()),
+            PageSize::Gigapage,
             Read | Write,
             &mut page_alloc,
             |p| VirtualAddress::new(p.as_usize()),

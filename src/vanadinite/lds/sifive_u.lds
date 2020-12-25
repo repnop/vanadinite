@@ -5,7 +5,7 @@ ENTRY(_boot);
 
 SECTIONS {
     /* . = 0x80000000; */
-    . = 0xFFFFFFC000000000;
+    . = 0xFFFFFFD000000000;
     PROVIDE(PAGE_OFFSET = .);
 
     __offset = . - 0x80200000;
@@ -64,5 +64,3 @@ SECTIONS {
 
     /DISCARD/ : { *(.eh_frame_hdr .eh_frame) }
 }
-
-PROVIDE(HEAP_START = 0xFFFFFFD000000000);

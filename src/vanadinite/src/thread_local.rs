@@ -2,7 +2,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use core::sync::atomic::{spin_loop_hint, AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 #[macro_export]
 macro_rules! thread_local {
@@ -10,7 +10,8 @@ macro_rules! thread_local {
         $(
             #[link_section = ".kernel_thread_local"]
             #[thread_local]
-            $v static $name: crate::thread_local::ThreadLocal<$ty> = unsafe { crate::thread_local::ThreadLocal::new(|| $val) };
+            // FIXME: temporarily assert that alignment is 8 or lower, until we have a better heap allocator
+            $v static $name: crate::thread_local::ThreadLocal<$ty> = unsafe { const _: () = [()][!(core::mem::align_of::<$ty>() <= 8) as usize]; crate::thread_local::ThreadLocal::new(|| $val) };
         )+
     };
 }
@@ -55,11 +56,7 @@ impl<T: Send + 'static> core::ops::Deref for ThreadLocal<T> {
 }
 
 pub unsafe fn init_thread_locals() {
-    use crate::{
-        kernel_patching,
-        mem::paging::{Read, VirtualAddress, Write},
-        utils::LinkerSymbol,
-    };
+    use crate::utils::LinkerSymbol;
 
     extern "C" {
         static __kernel_thread_local_start: LinkerSymbol;
@@ -68,17 +65,10 @@ pub unsafe fn init_thread_locals() {
 
     let size = __kernel_thread_local_end.as_usize() - __kernel_thread_local_start.as_usize();
 
-    let pages = crate::PAGE_TABLE_MANAGER.lock().alloc_virtual_range(
-        VirtualAddress::new(0xFFFFFFF000000000),
-        size,
-        Read | Write,
-    );
-    let start_virt = VirtualAddress::new(0xFFFFFFF000000000).as_mut_ptr();
-
     let original_thread_locals = core::slice::from_raw_parts(__kernel_thread_local_start.as_ptr(), size);
-    let new_thread_locals = core::slice::from_raw_parts_mut(start_virt, size);
+    let new_thread_locals = alloc::alloc::alloc_zeroed(alloc::alloc::Layout::from_size_align(size, 8).unwrap());
 
-    new_thread_locals[..].copy_from_slice(original_thread_locals);
+    core::slice::from_raw_parts_mut(new_thread_locals, size)[..].copy_from_slice(original_thread_locals);
 
-    asm!("mv tp, {}", in(reg) start_virt);
+    asm!("mv tp, {}", in(reg) new_thread_locals);
 }
