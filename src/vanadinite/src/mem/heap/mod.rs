@@ -3,7 +3,6 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod free_list;
-pub mod slab;
 
 use free_list::FreeListAllocator;
 

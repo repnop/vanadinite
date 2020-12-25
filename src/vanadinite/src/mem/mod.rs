@@ -8,7 +8,6 @@ use self::paging::{PhysicalAddress, VirtualAddress};
 
 pub mod heap;
 pub mod phys;
-pub mod region;
 pub mod paging {
     mod manager;
     mod perms;
