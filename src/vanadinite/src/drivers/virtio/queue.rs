@@ -74,7 +74,6 @@ impl SplitVirtqueue {
 
         let descriptor_index = index * 64 + bit_index;
 
-        log::info!("index: {}, bit_index: {}, descriptor_index: {}", index, bit_index, descriptor_index);
         if descriptor_index > self.queue_size {
             return None;
         }
