@@ -32,26 +32,27 @@ mod drivers;
 mod interrupts;
 mod io;
 mod mem;
+mod process;
+mod schedule;
 mod sync;
 mod thread_local;
 mod trap;
 mod utils;
 
-use arch::csr;
-use drivers::{CompatibleWith, EnableMode};
-use interrupts::PLIC;
-use mem::{
-    kernel_patching,
-    paging::{PhysicalAddress, VirtualAddress, PAGE_TABLE_MANAGER},
-    phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
-    phys2virt, virt2phys,
+use {
+    arch::csr,
+    core::sync::atomic::{AtomicUsize, Ordering},
+    drivers::{CompatibleWith, EnableMode},
+    interrupts::PLIC,
+    mem::{
+        kernel_patching,
+        paging::{PhysicalAddress, VirtualAddress, PAGE_TABLE_MANAGER},
+        phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
+        phys2virt, virt2phys,
+    },
+    sync::Mutex,
+    utils::Units,
 };
-use sync::Mutex;
-use utils::Units;
-
-use core::sync::atomic::{AtomicUsize, Ordering};
-
-const TWO_MEBS: usize = 2 * 1024 * 1024;
 
 extern "C" {
     static stvec_trap_shim: utils::LinkerSymbol;
@@ -71,7 +72,7 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     // Remove identity mapping after paging initialization
     let kernel_start = kernel_patching::kernel_start() as usize;
     let kernel_end = kernel_patching::kernel_end() as usize;
-    for address in (kernel_start..kernel_end).step_by(TWO_MEBS) {
+    for address in (kernel_start..kernel_end).step_by(2.mib()) {
         // `kernel_start()` and `kernel_end()` now refer to virtual addresses so
         // we need to patch them back to physical "virtual" addresses to be
         // unmapped
@@ -204,6 +205,17 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
+    *process::THREAD_CONTROL_BLOCK.get() = process::ThreadControlBlock {
+        kernel_stack: mem::alloc_kernel_stack(8.kib()),
+        kernel_thread_local: thread_local::tp(),
+        scratch_space: [0; 8],
+        kernel_stack_size: 8.kib(),
+        current_process: None,
+    };
+
+    arch::csr::sscratch::write(process::THREAD_CONTROL_BLOCK.get() as usize);
+
+    arch::csr::sstatus::set_fs(arch::csr::sstatus::FloatingPointStatus::Initial);
     arch::csr::sstatus::enable_interrupts();
     arch::csr::sie::enable();
     let data = alloc::boxed::Box::into_raw(alloc::boxed::Box::new([0u8; 512]));

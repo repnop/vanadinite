@@ -7,40 +7,40 @@ use crate::{
     interrupts::{isr::isr_entry, PLIC},
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
 pub struct Registers {
-    ra: usize,
-    sp: usize,
-    gp: usize,
-    tp: usize,
-    t0: usize,
-    t1: usize,
-    t2: usize,
-    s0: usize,
-    s1: usize,
-    a0: usize,
-    a1: usize,
-    a2: usize,
-    a3: usize,
-    a4: usize,
-    a5: usize,
-    a6: usize,
-    a7: usize,
-    s2: usize,
-    s3: usize,
-    s4: usize,
-    s5: usize,
-    s6: usize,
-    s7: usize,
-    s8: usize,
-    s9: usize,
-    s10: usize,
-    s11: usize,
-    t3: usize,
-    t4: usize,
-    t5: usize,
-    t6: usize,
+    pub ra: usize,
+    pub sp: usize,
+    pub gp: usize,
+    pub tp: usize,
+    pub t0: usize,
+    pub t1: usize,
+    pub t2: usize,
+    pub s0: usize,
+    pub s1: usize,
+    pub a0: usize,
+    pub a1: usize,
+    pub a2: usize,
+    pub a3: usize,
+    pub a4: usize,
+    pub a5: usize,
+    pub a6: usize,
+    pub a7: usize,
+    pub s2: usize,
+    pub s3: usize,
+    pub s4: usize,
+    pub s5: usize,
+    pub s6: usize,
+    pub s7: usize,
+    pub s8: usize,
+    pub s9: usize,
+    pub s10: usize,
+    pub s11: usize,
+    pub t3: usize,
+    pub t4: usize,
+    pub t5: usize,
+    pub t6: usize,
 }
 
 impl Registers {
@@ -49,12 +49,49 @@ impl Registers {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
+pub struct FloatingPointRegisters {
+    pub f0: usize,
+    pub f1: usize,
+    pub f2: usize,
+    pub f3: usize,
+    pub f4: usize,
+    pub f5: usize,
+    pub f6: usize,
+    pub f7: usize,
+    pub f8: usize,
+    pub f9: usize,
+    pub f10: usize,
+    pub f11: usize,
+    pub f12: usize,
+    pub f13: usize,
+    pub f14: usize,
+    pub f15: usize,
+    pub f16: usize,
+    pub f17: usize,
+    pub f18: usize,
+    pub f19: usize,
+    pub f20: usize,
+    pub f21: usize,
+    pub f22: usize,
+    pub f23: usize,
+    pub f24: usize,
+    pub f25: usize,
+    pub f26: usize,
+    pub f27: usize,
+    pub f28: usize,
+    pub f29: usize,
+    pub f30: usize,
+    pub f31: usize,
+    pub fscr: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 pub struct TrapFrame {
-    registers: Registers,
-    //satp: usize,
-    //hart_id: usize,
+    pub registers: Registers,
+    pub fp_registers: FloatingPointRegisters,
 }
 
 const INTERRUPT_BIT: usize = 1 << 63;
@@ -137,7 +174,8 @@ impl Trap {
 
 #[no_mangle]
 pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stval: usize) -> usize {
-    log::debug!("we trappin': {:x?}", regs);
+    log::debug!("we trappin' on hart {}: {:x?}", crate::HART_ID.get(), regs);
+    log::debug!("TCB: {:?}", unsafe { &*crate::process::THREAD_CONTROL_BLOCK.get() });
     log::debug!("scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
 
     if let Trap::LoadPageFault = Trap::from_cause(scause) {
@@ -164,27 +202,44 @@ global_asm!("
     .globl stvec_trap_shim
     stvec_trap_shim:
         .align 4
-        csrw sscratch, sp
+        csrrw s0, sscratch, s0
 
-        la sp, __scratch_stack
+        sd sp, 16(s0)
+        sd tp, 24(s0)
+        sd t2, 32(s0)
 
-        addi sp, sp, -248
+        ld sp, 0(s0)
+        ld tp, 8(s0)
+
+        addi sp, sp, -512
 
         sd x1, 0(sp)
 
         # push original sp
-        csrr x1, sscratch
+        ld x1, 16(s0)
         sd x1, 8(sp)
+
+        sd x3, 16(sp)
+
+        # store original tp
+        csrr x1, sscratch
+        sd x1, 24(sp)
+
+        sd x5, 32(sp)
+    
+        sd x6, 40(sp)
+        sd x7, 48(sp)
+        
+        # store original s0
+        csrr x1, sscratch
+        sd x1, 56(sp)
 
         # restore x1's value
         ld x1, 0(sp)
 
-        sd x3, 16(sp)
-        sd x4, 24(sp)
-        sd x5, 32(sp)
-        sd x6, 40(sp)
-        sd x7, 48(sp)
-        sd x8, 56(sp)
+        # now we can restore sscratch to its original
+        csrw sscratch, s0
+
         sd x9, 64(sp)
         sd x10, 72(sp)
         sd x11, 80(sp)
@@ -208,8 +263,44 @@ global_asm!("
         sd x29, 224(sp)
         sd x30, 232(sp)
         sd x31, 240(sp)
+        fsd f0, 248(sp)
+        fsd f1, 256(sp)
+        fsd f2, 264(sp)
+        fsd f3, 272(sp)
+        fsd f4, 280(sp)
+        fsd f5, 288(sp)
+        fsd f6, 296(sp)
+        fsd f7, 304(sp)
+        fsd f8, 312(sp)
+        fsd f9, 320(sp)
+        fsd f10, 328(sp)
+        fsd f11, 336(sp)
+        fsd f12, 344(sp)
+        fsd f13, 352(sp)
+        fsd f14, 360(sp)
+        fsd f15, 368(sp)
+        fsd f16, 376(sp)
+        fsd f17, 384(sp)
+        fsd f18, 392(sp)
+        fsd f19, 400(sp)
+        fsd f20, 408(sp)
+        fsd f21, 416(sp)
+        fsd f22, 424(sp)
+        fsd f23, 432(sp)
+        fsd f24, 440(sp)
+        fsd f25, 448(sp)
+        fsd f26, 456(sp)
+        fsd f27, 464(sp)
+        fsd f28, 472(sp)
+        fsd f29, 480(sp)
+        fsd f30, 488(sp)
+        fsd f31, 496(sp)
+
+        frcsr t0
+        sd t0, 504(sp)
 
         mv a0, sp
+
         csrr a1, sepc
         csrr a2, scause
         csrr a3, stval
@@ -249,10 +340,11 @@ global_asm!("
         ld x29, 224(sp)
         ld x30, 232(sp)
         ld x31, 240(sp)
-        
-        csrr sp, sscratch
-        
+
         sc.d zero, zero, 0(sp)
+        csrr sp, sscratch
+        ld sp, 16(sp)
+        
         # gtfo
         sret
 ");

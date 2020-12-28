@@ -1,4 +1,5 @@
 use paging::PAGE_TABLE_MANAGER;
+use phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR};
 
 use self::paging::{PhysicalAddress, VirtualAddress};
 
@@ -54,21 +55,23 @@ pub enum SatpMode {
     Sv48 = 9,
 }
 
-pub fn phys2virt(phys: PhysicalAddress) -> VirtualAddress {
-    // let phys_offset = unsafe { *kernel_patching::KERNEL_PHYS_LOAD_LOCATION.0.get() };
-    //
-    // assert!(phys_offset != 0);
+pub fn alloc_kernel_stack(size: usize) -> *mut u8 {
+    assert!(size.is_power_of_two());
+    assert_eq!(size % 4096, 0);
 
+    let total_pages = size / 4096;
+    let phys_start = unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(total_pages) }.expect("oom :(");
+
+    // FIXME: Eventually make these proper virtual address ranges so we can add
+    // guard pages which will detect stack overflowing
+    phys2virt(phys_start.as_phys_address().offset(total_pages * 4096)).as_mut_ptr()
+}
+
+pub fn phys2virt(phys: PhysicalAddress) -> VirtualAddress {
     VirtualAddress::new(phys.as_usize() + 0xFFFFFFC000000000)
 }
 
 pub fn virt2phys(virt: VirtualAddress) -> PhysicalAddress {
-    //let phys_offset = unsafe { *kernel_patching::KERNEL_PHYS_LOAD_LOCATION.0.get() };
-    //
-    //assert!(phys_offset != 0);
-    //
-    //PhysicalAddress::new(virt.as_usize() - kernel_patching::page_offset() + phys_offset)
-
     PAGE_TABLE_MANAGER.lock().resolve(virt).expect("no mapping found")
 }
 

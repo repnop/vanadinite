@@ -6,18 +6,15 @@ use crate::{
     interrupts::InterruptDisabler,
     mem::phys2virt,
     mem::{
-        paging::{PageSize, PhysicalAddress, Read, Sv39PageTable, ToPermissions, VirtualAddress, Write},
+        paging::{PageSize, PhysicalAddress, Sv39PageTable, ToPermissions, VirtualAddress},
         phys::PhysicalMemoryAllocator,
         sfence,
     },
     sync::Mutex,
-    utils::StaticMut,
     PHYSICAL_MEMORY_ALLOCATOR,
 };
 
 pub static PAGE_TABLE_MANAGER: Mutex<PageTableManager> = Mutex::new(PageTableManager);
-
-static PAGE_TABLE_ROOT: StaticMut<Sv39PageTable> = StaticMut::new(Sv39PageTable::new());
 
 pub struct PageTableManager;
 
@@ -35,7 +32,7 @@ impl PageTableManager {
         let phys = Self::new_phys_page();
 
         log::info!("PageTableManager::map_page: mapping {:#p} to {:#p}", phys, map_to);
-        unsafe { &mut *PAGE_TABLE_ROOT.get() }.map(
+        unsafe { &mut *self.current_pagetable() }.map(
             phys,
             map_to,
             PageSize::Kilopage,
@@ -64,8 +61,7 @@ impl PageTableManager {
         perms: P,
     ) {
         let _disabler = InterruptDisabler::new();
-        //log::info!("PageTableManager::map_page: mapping {:#p} to {:#p}", map_from, map_to);
-        unsafe { &mut *PAGE_TABLE_ROOT.get() }.map(
+        unsafe { &mut *self.current_pagetable() }.map(
             map_from,
             map_to,
             size,
@@ -89,11 +85,14 @@ impl PageTableManager {
     pub fn resolve(&self, virt: VirtualAddress) -> Option<PhysicalAddress> {
         let _disabler = InterruptDisabler::new();
 
-        unsafe { &*PAGE_TABLE_ROOT.get() }.translate(virt, phys2virt)
+        unsafe { &*self.current_pagetable() }.translate(virt, phys2virt)
     }
 
-    pub unsafe fn set_satp(&mut self) {
-        crate::mem::satp(crate::mem::SatpMode::Sv39, 0, PhysicalAddress::from_ptr(PAGE_TABLE_ROOT.get()));
+    pub unsafe fn current_pagetable(&self) -> *mut Sv39PageTable {
+        let satp: usize;
+        asm!("csrr {}, satp", out(reg) satp);
+
+        phys2virt(PhysicalAddress::new((satp & 0x0FFF_FFFF_FFFF) << 12)).as_mut_ptr().cast()
     }
 
     pub unsafe fn map_with_allocator<F, A, P>(
@@ -111,7 +110,7 @@ impl PageTableManager {
     {
         let _disabler = InterruptDisabler::new();
 
-        { &mut *PAGE_TABLE_ROOT.get() }.map(map_from, map_to, page_size, perms, f, translation);
+        { &mut *self.current_pagetable() }.map(map_from, map_to, page_size, perms, f, translation);
     }
 
     /// Memory from this function is never freed since it could be invalid to free it with normal means
@@ -121,7 +120,7 @@ impl PageTableManager {
     {
         let _disabler = InterruptDisabler::new();
 
-        { &mut *PAGE_TABLE_ROOT.get() }.unmap(map_to, translation);
+        { &mut *self.current_pagetable() }.unmap(map_to, translation);
     }
 
     pub unsafe fn is_mapped_with_translation<A>(&mut self, addr: VirtualAddress, translation: A) -> bool
@@ -129,7 +128,7 @@ impl PageTableManager {
         A: Fn(PhysicalAddress) -> VirtualAddress,
     {
         let _disabler = InterruptDisabler::new();
-        { &mut *PAGE_TABLE_ROOT.get() }.is_mapped(addr, translation)
+        { &mut *self.current_pagetable() }.is_mapped(addr, translation)
     }
 
     fn new_phys_page() -> PhysicalAddress {

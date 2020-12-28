@@ -2,10 +2,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{
-    mem::paging::{Read, VirtualAddress, Write, KIB_PAGE_SIZE, PAGE_TABLE_MANAGER},
-    sync::Mutex,
-};
+use crate::sync::Mutex;
 use core::ptr::NonNull;
 
 pub struct FreeListAllocator {

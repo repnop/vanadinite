@@ -72,3 +72,10 @@ pub unsafe fn init_thread_locals() {
 
     asm!("mv tp, {}", in(reg) new_thread_locals);
 }
+
+pub fn tp() -> *mut u8 {
+    let val: usize;
+    unsafe { asm!("mv {}, tp", out(reg) val) };
+
+    val as *mut u8
+}

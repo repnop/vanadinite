@@ -121,6 +121,12 @@ impl Default for Sv39PageTable {
     }
 }
 
+impl core::fmt::Debug for Sv39PageTable {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Sv39PageTable {{ ... }}")
+    }
+}
+
 #[derive(Default, Clone, Copy)]
 #[repr(transparent)]
 pub struct PageTableEntry(usize);

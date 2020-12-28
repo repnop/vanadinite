@@ -54,15 +54,6 @@ pub mod sstatus {
         }
     }
 
-    #[inline(always)]
-    pub fn read() -> usize {
-        let val: usize;
-
-        unsafe { asm!("csrr {}, sstatus", out(reg) val) };
-
-        val
-    }
-
     pub fn disable_interrupts() {
         unsafe {
             asm!(
@@ -76,15 +67,46 @@ pub mod sstatus {
             );
         }
     }
+
+    #[derive(Debug, Clone, Copy)]
+    #[repr(usize)]
+    pub enum FloatingPointStatus {
+        Off = 0,
+        Initial = 1,
+        Clean = 2,
+        Dirty = 3,
+    }
+
+    pub fn fs() -> FloatingPointStatus {
+        match (read() >> 13) & 3 {
+            0 => FloatingPointStatus::Off,
+            1 => FloatingPointStatus::Initial,
+            2 => FloatingPointStatus::Clean,
+            3 => FloatingPointStatus::Dirty,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_fs(status: FloatingPointStatus) {
+        let val = (read() & !(3 << 13)) | ((status as usize) << 13);
+        unsafe { asm!("csrw sstatus, {}", in(reg) val) };
+    }
+
+    #[inline(always)]
+    pub fn read() -> usize {
+        let val: usize;
+
+        unsafe { asm!("csrr {}, sstatus", out(reg) val) };
+
+        val
+    }
 }
 
 pub mod time {
     pub fn read() -> usize {
         let value: usize;
 
-        unsafe {
-            asm!("csrr {}, time", out(reg) value);
-        }
+        unsafe { asm!("csrr {}, time", out(reg) value) };
 
         value
     }
@@ -94,10 +116,22 @@ pub mod cycle {
     pub fn read() -> usize {
         let value: usize;
 
-        unsafe {
-            asm!("csrr {}, cycle", out(reg) value);
-        }
+        unsafe { asm!("csrr {}, cycle", out(reg) value) };
 
         value
+    }
+}
+
+pub mod sscratch {
+    pub fn read() -> usize {
+        let value: usize;
+
+        unsafe { asm!("csrr {}, sscratch", out(reg) value) };
+
+        value
+    }
+
+    pub fn write(value: usize) {
+        unsafe { asm!("csrw sscratch, {}", in(reg) value) };
     }
 }
