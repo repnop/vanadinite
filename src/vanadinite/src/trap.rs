@@ -178,8 +178,8 @@ pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stv
     log::debug!("TCB: {:?}", unsafe { &*crate::process::THREAD_CONTROL_BLOCK.get() });
     log::debug!("scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
 
-    if let Trap::LoadPageFault = Trap::from_cause(scause) {
-        panic!("Load access fault accessing {:#p}", stval as *mut u8);
+    if let t @ Trap::LoadPageFault | t @ Trap::StorePageFault = Trap::from_cause(scause) {
+        panic!("{:?} accessing {:#p}", t, stval as *mut u8);
     }
 
     if let Trap::SupervisorExternalInterrupt = Trap::from_cause(scause) {
@@ -206,7 +206,6 @@ global_asm!("
 
         sd sp, 16(s0)
         sd tp, 24(s0)
-        sd t2, 32(s0)
 
         ld sp, 0(s0)
         ld tp, 8(s0)
@@ -222,11 +221,10 @@ global_asm!("
         sd x3, 16(sp)
 
         # store original tp
-        csrr x1, sscratch
+        ld x1, 24(s0)
         sd x1, 24(sp)
 
         sd x5, 32(sp)
-    
         sd x6, 40(sp)
         sd x7, 48(sp)
         

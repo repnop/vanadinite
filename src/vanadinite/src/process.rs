@@ -1,6 +1,5 @@
 use crate::{mem::paging::Sv39PageTable, thread_local, trap::TrapFrame, utils::StaticMut};
 use alloc::boxed::Box;
-use core::cell::RefCell;
 
 thread_local! {
     pub static THREAD_CONTROL_BLOCK: StaticMut<ThreadControlBlock> = StaticMut::new(ThreadControlBlock::new());
@@ -11,7 +10,8 @@ thread_local! {
 pub struct ThreadControlBlock {
     pub kernel_stack: *mut u8,
     pub kernel_thread_local: *mut u8,
-    pub scratch_space: [usize; 8],
+    pub saved_sp: usize,
+    pub saved_tp: usize,
     pub kernel_stack_size: usize,
     pub current_process: Option<Process>,
 }
@@ -21,7 +21,8 @@ impl ThreadControlBlock {
         Self {
             kernel_stack: core::ptr::null_mut(),
             kernel_thread_local: core::ptr::null_mut(),
-            scratch_space: [0; 8],
+            saved_sp: 0,
+            saved_tp: 0,
             kernel_stack_size: 0,
             current_process: None,
         }

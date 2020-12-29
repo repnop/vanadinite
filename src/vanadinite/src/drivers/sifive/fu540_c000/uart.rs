@@ -24,19 +24,15 @@ impl SifiveUart {
         // Enable transmit
         self.tx_control.tx_enable(true);
 
-        crate::mem::fence();
-
         self.tx_control.extra_stop_bit(false);
         self.rx_control.watermark_level(1);
 
         // Set interrupt enables
         self.interrupt_enable.rx_watermark_enable(true);
-        crate::mem::fence();
         self.interrupt_enable.tx_watermark_enable(false);
 
         // Set baud rate to 31250 Hz
         self.baud_rate_divisor.divisor(16000);
-        crate::mem::fence();
     }
 
     pub fn read(&self) -> u8 {

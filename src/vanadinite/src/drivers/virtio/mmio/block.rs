@@ -8,7 +8,6 @@ use crate::{
         queue::SplitVirtqueue,
         VirtIoDeviceError,
     },
-    mem::fence,
     utils::volatile::{Read, ReadWrite, Volatile},
 };
 
@@ -36,24 +35,19 @@ impl VirtIoBlockDevice {
     pub fn init(&self, queue: &SplitVirtqueue, queue_select: u32) -> Result<(), VirtIoDeviceError> {
         // TODO: memory barriers??
         self.header.status.reset();
-        fence();
 
         self.header.status.set_flag(StatusFlag::Acknowledge);
         self.header.status.set_flag(StatusFlag::Driver);
 
         // TODO: maybe use feature bits at some point
         let _ = self.features();
-        fence();
 
         self.header.driver_features_select.write(0);
         self.header.device_features_select.write(0);
-        fence();
 
         self.header.driver_features.write(0);
-        fence();
 
         self.header.status.set_flag(StatusFlag::FeaturesOk);
-        fence();
 
         if !self.header.status.is_set(StatusFlag::FeaturesOk) {
             return Err(VirtIoDeviceError::FeaturesNotRecognized);
@@ -70,11 +64,8 @@ impl VirtIoBlockDevice {
         self.header.queue_descriptor.set(queue.descriptor_physical_address());
         self.header.queue_available.set(queue.available_physical_address());
         self.header.queue_used.set(queue.used_physical_address());
-        fence();
 
         self.header.queue_ready.ready();
-
-        fence();
 
         Ok(())
     }

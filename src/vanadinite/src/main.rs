@@ -208,7 +208,8 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     *process::THREAD_CONTROL_BLOCK.get() = process::ThreadControlBlock {
         kernel_stack: mem::alloc_kernel_stack(8.kib()),
         kernel_thread_local: thread_local::tp(),
-        scratch_space: [0; 8],
+        saved_sp: 0,
+        saved_tp: 0,
         kernel_stack_size: 8.kib(),
         current_process: None,
     };

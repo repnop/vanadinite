@@ -37,9 +37,19 @@ pub fn sfence(vaddr: Option<paging::VirtualAddress>, asid: Option<u16>) {
     }
 }
 
+pub enum FenceMode {
+    Full,
+    Read,
+    Write,
+}
+
 #[inline(always)]
-pub fn fence() {
-    unsafe { asm!("fence") };
+pub fn fence(mode: FenceMode) {
+    match mode {
+        FenceMode::Full => unsafe { asm!("fence iorw, iorw") },
+        FenceMode::Read => unsafe { asm!("fence ri, ri") },
+        FenceMode::Write => unsafe { asm!("fence wo, wo") },
+    }
 }
 
 #[inline(always)]

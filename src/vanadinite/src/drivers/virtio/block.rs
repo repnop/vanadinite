@@ -12,8 +12,9 @@ use crate::{
         InterruptServicable,
     },
     mem::{
+        fence,
         paging::{PhysicalAddress, VirtualAddress},
-        phys2virt, virt2phys,
+        virt2phys, FenceMode,
     },
 };
 use alloc::{boxed::Box, collections::BTreeMap};
@@ -65,6 +66,10 @@ impl BlockDevice {
         avail.index += 1;
 
         self.issued_commands.insert(desc1, unsafe { Box::from_raw(request) });
+
+        // Fence the MMIO register write since its not guaranteed to be in the
+        // same order relative to RAM read/writes
+        fence(FenceMode::Full);
 
         self.device.header.queue_notify.notify();
     }

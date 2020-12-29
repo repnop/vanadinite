@@ -190,7 +190,7 @@ mod registers {
 
         pub fn set_flag(&self, flag: StatusFlag) {
             self.0.write(self.0.read() | flag as u32);
-            crate::mem::fence();
+            crate::mem::fence(crate::mem::FenceMode::Write);
         }
 
         pub fn failed(&self) -> bool {
