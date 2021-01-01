@@ -52,7 +52,7 @@ pub fn hart_start(hart_id: usize, start_addr: usize, private: usize) -> SbiResul
 /// ## Possible errors
 ///
 /// `Failed`: The request failed for an unknown reason
-pub fn hart_stop() -> SbiResult<()> {
+pub fn hart_stop() -> SbiResult<!> {
     let error: isize;
 
     unsafe {
@@ -65,7 +65,7 @@ pub fn hart_stop() -> SbiResult<()> {
     }
 
     match error {
-        0 => SbiResult::Ok(()),
+        0 => unreachable!("this should never occur on a success"),
         e => SbiResult::Err(SbiError::new(e)),
     }
 }

@@ -22,9 +22,27 @@ pub fn exit(status: ExitStatus) -> ! {
 }
 
 #[cfg(not(feature = "virt"))]
-pub fn exit(_: ExitStatus) -> ! {
-    // FIXME: do print here
-    loop {
-        unsafe { asm!("nop") };
+pub fn exit(status: ExitStatus) -> ! {
+    use sbi::{
+        probe_extension,
+        system_reset::{system_reset, ResetReason, ResetType, EXTENSION_ID},
+        ExtensionAvailability,
+    };
+
+    match probe_extension(EXTENSION_ID) {
+        ExtensionAvailability::Available(_) => system_reset(
+            ResetType::Shutdown,
+            match status {
+                ExitStatus::Ok => ResetReason::NoReason,
+                ExitStatus::Error(_) => ResetReason::SystemFailure,
+            },
+        )
+        .unwrap(),
+        ExtensionAvailability::Unavailable => {
+            crate::arch::csr::sstatus::disable_interrupts();
+            loop {
+                unsafe { asm!("nop") };
+            }
+        }
     }
 }

@@ -8,7 +8,7 @@
 //! implementation that resides in M-mode
 
 #![warn(missing_docs)]
-#![feature(asm)]
+#![feature(asm, never_type)]
 #![no_std]
 
 /// Required base SBI functionality
@@ -19,10 +19,14 @@ pub mod hart_state_management;
 pub mod ipi;
 /// RFENCE extension
 pub mod rfence;
+/// System Reset extension
+pub mod system_reset;
 /// Timer extension
 pub mod timer;
 
-pub use base::{impl_id, impl_version, marchid, mimpid, mvendorid, probe_extension, spec_version};
+pub use base::{
+    impl_id, impl_version, marchid, mimpid, mvendorid, probe_extension, spec_version, ExtensionAvailability,
+};
 
 /// Error codes returned by SBI calls
 ///
