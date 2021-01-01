@@ -47,8 +47,8 @@ pub enum FenceMode {
 pub fn fence(mode: FenceMode) {
     match mode {
         FenceMode::Full => unsafe { asm!("fence iorw, iorw") },
-        FenceMode::Read => unsafe { asm!("fence ri, ri") },
-        FenceMode::Write => unsafe { asm!("fence wo, wo") },
+        FenceMode::Read => unsafe { asm!("fence ir, ir") },
+        FenceMode::Write => unsafe { asm!("fence ow, ow") },
     }
 }
 
