@@ -158,6 +158,16 @@ impl PageTableManager {
         }
     }
 
+    pub fn is_valid_readable(&self, virt: VirtualAddress) -> bool {
+        match self.0.entry(virt, phys2virt) {
+            Some(entry) => {
+                log::info!("valid entry, is_readable()={}", entry.is_readable());
+                entry.is_readable()
+            }
+            None => false,
+        }
+    }
+
     fn new_phys_page() -> PhysicalAddress {
         unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc().expect("we oom, rip") }.as_phys_address()
     }

@@ -6,6 +6,9 @@ use crate::{
     drivers::Plic,
     interrupts::{isr::isr_entry, PLIC},
     mem::paging::VirtualAddress,
+    scheduler::Scheduler,
+    scheduler::SCHEDULER,
+    syscall,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -175,31 +178,43 @@ impl Trap {
 
 #[no_mangle]
 pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stval: usize) -> usize {
+    let _disabler = crate::interrupts::InterruptDisabler::new();
     log::debug!("we trappin' on hart {}: {:x?}", crate::HART_ID.get(), regs);
     log::debug!("TCB: {:?}", unsafe { &*crate::process::THREAD_CONTROL_BLOCK.get() });
     log::debug!("scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
 
-    if let t @ Trap::LoadPageFault | t @ Trap::StorePageFault = Trap::from_cause(scause) {
-        //crate::utils::manual_debug_point();
-        panic!("{:?} accessing {:#p}", t, stval as *mut u8);
-    }
-
-    if let Trap::UserModeEnvironmentCall = Trap::from_cause(scause) {
-        panic!("ecall: a0: {:#x}, sepc: {:#p}", regs.registers.a0, VirtualAddress::new(sepc));
-    }
-
-    if let Trap::SupervisorExternalInterrupt = Trap::from_cause(scause) {
-        let plic = PLIC.lock();
-        if let Some(claimed) = plic.claim() {
-            if let Some((callback, private)) = isr_entry(claimed) {
-                callback(claimed, private).unwrap();
+    let trap_kind = Trap::from_cause(scause);
+    match trap_kind {
+        Trap::LoadPageFault | Trap::StorePageFault => panic!("{:?} accessing {:#p}", trap_kind, stval as *mut u8),
+        Trap::SupervisorTimerInterrupt => {
+            Scheduler::update_active_registers(&*SCHEDULER, *regs, sepc);
+            Scheduler::schedule(&*SCHEDULER);
+        }
+        Trap::UserModeEnvironmentCall => {
+            match regs.registers.a0 {
+                0 => syscall::exit::exit(),
+                1 => syscall::print::print(VirtualAddress::new(regs.registers.a1), regs.registers.a2),
+                n => {
+                    log::error!("Unknown syscall number: {}", n);
+                    Scheduler::mark_active_dead(&*SCHEDULER);
+                }
             }
 
-            plic.complete(claimed);
+            Scheduler::update_active_registers(&*SCHEDULER, *regs, sepc + 4);
+            Scheduler::schedule(&*SCHEDULER);
         }
-    }
+        Trap::SupervisorExternalInterrupt => {
+            let plic = PLIC.lock();
+            if let Some(claimed) = plic.claim() {
+                if let Some((callback, private)) = isr_entry(claimed) {
+                    callback(claimed, private).unwrap();
+                }
 
-    panic!();
+                plic.complete(claimed);
+            }
+        }
+        trap => log::info!("Ignoring trap: {:?}, sepc: {:#x}, stval: {:#x}", trap, sepc, stval),
+    }
 
     sepc
 }

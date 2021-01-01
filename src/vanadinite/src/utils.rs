@@ -38,6 +38,25 @@ impl<T> StaticMut<T> {
 unsafe impl<T> Sync for StaticMut<T> {}
 unsafe impl<T> Send for StaticMut<T> {}
 
+pub fn micros(ticks: usize, hz: usize) -> usize {
+    // ticks / hz -> second
+    // ticks / (hz / 1000) -> millisecond
+    // ticks / (hz / 1000 / 1000) -> microsecond
+    ticks / (hz / 1000 / 1000)
+}
+
+pub fn time_parts(micros: usize) -> (usize, usize, usize) {
+    let seconds = micros / (1000 * 1000);
+    let micros_left = micros % (1000 * 1000);
+    let millis = micros_left / 1000;
+    let micros = micros_left % 1000;
+    (seconds, millis, micros)
+}
+
+pub fn ticks_per_us(target_us: usize, hz: usize) -> usize {
+    (hz / 1000 / 1000) * target_us
+}
+
 #[allow(dead_code)]
 #[inline(always)]
 pub fn manual_debug_point() {

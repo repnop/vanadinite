@@ -6,6 +6,7 @@ pub mod block_device;
 pub mod console;
 
 pub use console::*;
+use core::fmt::Write;
 
 #[macro_export]
 macro_rules! print {
@@ -20,7 +21,6 @@ macro_rules! println {
 
 #[doc(hidden)]
 pub fn _print(args: core::fmt::Arguments) {
-    use core::fmt::Write;
     CONSOLE.lock().write_fmt(args).unwrap();
 }
 
@@ -41,13 +41,18 @@ impl log::Log for Logger {
             let mut mod_path = record.module_path_static().or_else(|| record.module_path()).unwrap_or("<n/a>");
 
             mod_path = if mod_path == "vanadinite" { "vanadinite::main" } else { mod_path };
+            let freq = crate::TIMER_FREQ.load(core::sync::atomic::Ordering::Relaxed);
+            let curr_time = crate::arch::csr::time::read();
+            let (secs, ms, _) = crate::utils::time_parts(crate::utils::micros(curr_time, freq));
 
             #[cfg(debug_assertions)]
             {
                 let file = record.file_static().or_else(|| record.file()).unwrap_or("<n/a>");
 
                 println!(
-                    "[ {:>5} ] [{} {}:{}] {}",
+                    "[{:>5}.{:<03}] [ {:>5} ] [{} {}:{}] {}",
+                    secs,
+                    ms,
                     record.level(),
                     mod_path,
                     file,
@@ -57,7 +62,7 @@ impl log::Log for Logger {
             }
 
             #[cfg(not(debug_assertions))]
-            println!("[ {:>5} ] [{}] {}", record.level(), mod_path, record.args());
+            println!("[{:>5}.{:<03}] [ {:>5} ] [{}] {}", secs, ms, record.level(), mod_path, record.args());
         }
     }
 

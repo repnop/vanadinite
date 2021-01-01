@@ -26,5 +26,7 @@ SECTIONS {
         *(.rodata .rodata.*)
     }
 
+    . = ALIGN(4K);
+    
     /DISCARD/ : { *(.eh_frame .eh_frame.* ); }
 }

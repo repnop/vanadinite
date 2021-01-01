@@ -203,6 +203,10 @@ impl PageTableEntry {
         self.0 = (self.0 & !(0b11110)) | permissions;
     }
 
+    pub fn is_readable(self) -> bool {
+        self.0 & 2 == 2
+    }
+
     pub fn make_branch(&mut self, next_level: PhysicalAddress) {
         let ppn = next_level.ppn();
         self.0 = (ppn << 10) | 1;
@@ -277,6 +281,10 @@ impl VirtualAddress {
             PageSize::Megapage => self.0 & 0x1FFFFF,
             PageSize::Kilopage => self.0 & 0xFFF,
         }
+    }
+
+    pub fn is_kernel_region(self) -> bool {
+        (self.0 as isize).is_negative()
     }
 }
 

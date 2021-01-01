@@ -15,7 +15,8 @@
     thread_local,
     maybe_uninit_ref,
     const_fn_fn_ptr_basics,
-    const_fn
+    const_fn,
+    arbitrary_self_types
 )]
 #![no_std]
 #![no_main]
@@ -38,6 +39,11 @@ mod sync;
 mod thread_local;
 mod trap;
 mod utils;
+
+mod syscall {
+    pub mod exit;
+    pub mod print;
+}
 
 use {
     arch::csr,
@@ -87,6 +93,10 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         None => crate::arch::exit(crate::arch::ExitStatus::Error(&"magic's fucked, my dude")),
     };
 
+    let current_cpu = fdt.cpus().find(|cpu| cpu.ids().first() == hart_id).unwrap();
+    let timebase_frequency = current_cpu.timebase_frequency();
+    TIMER_FREQ.store(timebase_frequency, Ordering::Relaxed);
+
     let mut stdout_interrupts = None;
     let stdout = fdt.chosen().and_then(|n| n.stdout());
     if let Some((node, reg, compatible)) = stdout.and_then(|n| Some((n, n.reg()?.next()?, n.compatible()?))) {
@@ -135,10 +145,6 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
         (memory.size.unwrap() / 1024 / 1024, memory.starting_address)
     };
-
-    let current_cpu = fdt.cpus().find(|cpu| cpu.ids().first() == hart_id).unwrap();
-    let timebase_frequency = current_cpu.timebase_frequency();
-    TIMER_FREQ.store(timebase_frequency, Ordering::Relaxed);
 
     log::info!("Booted on a {} on hart {}", model, hart_id);
     log::info!("{} MiB of memory starting at {:#p}", mem_size, mem_start);
@@ -219,11 +225,13 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     arch::csr::sstatus::enable_interrupts();
     arch::csr::sie::enable();
 
-    let process = process::Process::load(&elf64::Elf::new(process::INIT_PROCESS).unwrap());
+    pub static TEMPLATE: &[u8] =
+        include_bytes!("../../../userspace/template/target/riscv64gc-unknown-none-elf/release/template");
 
-    scheduler::context_switch(&process);
+    scheduler::Scheduler::push(&*scheduler::SCHEDULER, process::Process::load(&elf64::Elf::new(TEMPLATE).unwrap()));
+    scheduler::Scheduler::schedule(&*scheduler::SCHEDULER);
 
-    arch::exit(arch::ExitStatus::Ok)
+    //arch::exit(arch::ExitStatus::Ok)
 }
 
 #[panic_handler]

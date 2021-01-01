@@ -44,27 +44,25 @@ pub mod sip {
 
 pub mod sstatus {
     pub fn enable_interrupts() {
-        unsafe {
-            asm!(
-                "csrr {0}, sstatus",
-                "ori {0}, {0}, 2",
-                "csrw sstatus, {0}",
-                out(reg) _,
-            );
-        }
+        unsafe { asm!("csrsi sstatus, 2") };
     }
 
     pub fn disable_interrupts() {
-        unsafe {
-            asm!(
-                "csrr {0}, sstatus",
-                "li {1}, 2",
-                "not {1}, {1}",
-                "and {0}, {0}, {1}",
-                "csrw sstatus, {0}",
-                out(reg) _,
-                out(reg) _,
-            );
+        unsafe { asm!("csrci sstatus, 2") };
+    }
+
+    pub struct TemporaryUserMemoryAccess(());
+
+    impl TemporaryUserMemoryAccess {
+        pub fn new() -> Self {
+            unsafe { asm!("li {0}, 1 << 18", "csrs sstatus, {0}", out(reg) _) };
+            Self(())
+        }
+    }
+
+    impl Drop for TemporaryUserMemoryAccess {
+        fn drop(&mut self) {
+            unsafe { asm!("li {0}, 1 << 18", "csrc sstatus, {0}", out(reg) _) };
         }
     }
 

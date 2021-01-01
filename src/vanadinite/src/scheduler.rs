@@ -1,19 +1,87 @@
-use crate::mem::{paging::VirtualAddress, satp, virt2phys, SatpMode};
+use crate::{
+    mem::{paging::VirtualAddress, satp, sfence, virt2phys, SatpMode},
+    process::{Process, ProcessState, INIT_PROCESS},
+    thread_local,
+    trap::TrapFrame,
+};
+use alloc::collections::VecDeque;
+use core::{cell::RefCell, sync::atomic::Ordering};
 
-extern "C" {
-    fn return_to_usermode(_: &crate::trap::Registers, sepc: extern "C" fn()) -> !;
+thread_local! {
+    pub static SCHEDULER: RefCell<Scheduler> = RefCell::new(Scheduler::new(Process::load(&elf64::Elf::new(INIT_PROCESS).unwrap())));
 }
 
-pub fn context_switch(process: &crate::process::Process) -> ! {
-    satp(SatpMode::Sv39, 1, virt2phys(VirtualAddress::from_ptr(process.page_table.table())));
+pub struct Scheduler {
+    pub active: Process,
+    pub processes: VecDeque<Process>,
+}
 
-    log::info!("scheduling! {:#p}", process.pc);
-
-    for _ in 0..1000000000 {
-        unsafe { asm!("nop") };
+impl Scheduler {
+    pub fn new(init: Process) -> Self {
+        Self { active: init, processes: VecDeque::new() }
     }
 
-    unsafe { return_to_usermode(&process.frame.registers, process.pc) }
+    pub fn push(this: &RefCell<Self>, process: Process) {
+        this.borrow_mut().processes.push_back(process);
+    }
+
+    pub fn mark_active_dead(this: &RefCell<Self>) {
+        this.borrow_mut().active.state = ProcessState::Dead;
+    }
+
+    pub fn active_pid(this: &RefCell<Self>) -> usize {
+        this.borrow().active.pid
+    }
+
+    pub fn update_active_registers(this: &RefCell<Self>, frame: TrapFrame, pc: usize) {
+        let mut this = this.borrow_mut();
+        this.active.frame = frame;
+        this.active.pc = pc;
+    }
+
+    pub fn with_mut_self<T, F: FnOnce(&mut Self) -> T>(this: &RefCell<Self>, f: F) -> T {
+        f(&mut *this.borrow_mut())
+    }
+
+    pub fn schedule(this: &RefCell<Self>) -> ! {
+        let (registers, pc) = {
+            let mut this = this.borrow_mut();
+            let current_dead = this.active.state.is_dead();
+
+            if !this.processes.is_empty() && !current_dead {
+                let next = this.processes.pop_front().unwrap();
+                let old = core::mem::replace(&mut this.active, next);
+                log::info!("old.pc={:#x?}", old.pc);
+                this.processes.push_back(old);
+            } else if !this.processes.is_empty() && current_dead {
+                let next = this.processes.pop_front().unwrap();
+                this.active = next;
+            } else if current_dead {
+                unreachable!("we have no process to schedule :(");
+            }
+
+            satp(SatpMode::Sv39, 1, virt2phys(VirtualAddress::from_ptr(this.active.page_table.table())));
+            sfence(None, None);
+
+            log::info!("scheduling process: pid={}, pc={:#p}", this.active.pid, this.active.pc as *mut u8);
+            (this.active.frame.registers, this.active.pc)
+        };
+
+        let frequency = crate::TIMER_FREQ.load(Ordering::Relaxed);
+        let current_time = crate::arch::csr::time::read();
+        let target_time = current_time + crate::utils::ticks_per_us(10_000, frequency);
+        sbi::timer::set_timer(target_time as u64).unwrap();
+
+        crate::arch::csr::sstatus::enable_interrupts();
+
+        unsafe { return_to_usermode(&registers, pc) }
+    }
+}
+
+unsafe impl Send for Scheduler {}
+
+extern "C" {
+    fn return_to_usermode(_: &crate::trap::Registers, sepc: usize) -> !;
 }
 
 #[rustfmt::skip]

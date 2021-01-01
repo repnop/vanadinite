@@ -84,3 +84,15 @@ script = '''
     make PLATFORM=generic
     cp build/platform/generic/firmware/fw_dynamic.bin ../../opensbi-riscv64-generic-fw_dynamic.bin
 '''
+
+[tasks.template]
+script = '''
+    cd userspace/template
+    cargo build --release
+'''
+
+[tasks.init]
+script = '''
+    cd userspace/init
+    cargo build --release
+'''
