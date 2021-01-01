@@ -5,6 +5,7 @@
 use crate::{
     drivers::Plic,
     interrupts::{isr::isr_entry, PLIC},
+    mem::paging::VirtualAddress,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -179,7 +180,12 @@ pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stv
     log::debug!("scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
 
     if let t @ Trap::LoadPageFault | t @ Trap::StorePageFault = Trap::from_cause(scause) {
+        //crate::utils::manual_debug_point();
         panic!("{:?} accessing {:#p}", t, stval as *mut u8);
+    }
+
+    if let Trap::UserModeEnvironmentCall = Trap::from_cause(scause) {
+        panic!("ecall: a0: {:#x}, sepc: {:#p}", regs.registers.a0, VirtualAddress::new(sepc));
     }
 
     if let Trap::SupervisorExternalInterrupt = Trap::from_cause(scause) {
@@ -192,6 +198,8 @@ pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stv
             plic.complete(claimed);
         }
     }
+
+    panic!();
 
     sepc
 }

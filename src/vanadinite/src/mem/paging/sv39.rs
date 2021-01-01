@@ -3,13 +3,10 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::perms::ToPermissions;
-use core::cell::UnsafeCell;
-
-pub const KIB_PAGE_SIZE: usize = 4096;
 
 #[repr(C, align(4096))]
 pub struct Sv39PageTable {
-    entries: [PageTableEntry; 512],
+    pub entries: [PageTableEntry; 512],
 }
 
 impl Sv39PageTable {
@@ -113,6 +110,61 @@ impl Sv39PageTable {
 
         None
     }
+
+    pub fn entry<F>(&self, virt: VirtualAddress, address_conversion: F) -> Option<&PageTableEntry>
+    where
+        F: Fn(PhysicalAddress) -> VirtualAddress,
+    {
+        let mut page_table = self;
+        let mut page_size = PageSize::Gigapage;
+
+        for vpn in virt.vpns().iter().copied().rev() {
+            let pte = &page_table.entries[vpn];
+            if pte.is_branch() {
+                page_table = unsafe { &*address_conversion(pte.subtable().unwrap()).as_ptr().cast() };
+
+                page_size = match page_size {
+                    PageSize::Gigapage => PageSize::Megapage,
+                    _ => PageSize::Kilopage,
+                };
+            } else if pte.valid() {
+                return Some(pte);
+            }
+        }
+
+        None
+    }
+
+    pub fn entry_mut<F>(&mut self, virt: VirtualAddress, address_conversion: F) -> Option<&mut PageTableEntry>
+    where
+        F: Fn(PhysicalAddress) -> VirtualAddress,
+    {
+        let mut page_table = self;
+        let mut page_size = PageSize::Gigapage;
+
+        for vpn in virt.vpns().iter().copied().rev() {
+            let pte = unsafe { &mut *(&raw mut page_table.entries[vpn]) };
+            if pte.is_branch() {
+                page_table = unsafe { &mut *address_conversion(pte.subtable().unwrap()).as_mut_ptr().cast() };
+
+                page_size = match page_size {
+                    PageSize::Gigapage => PageSize::Megapage,
+                    _ => PageSize::Kilopage,
+                };
+            } else if pte.valid() {
+                return Some(pte);
+            }
+        }
+
+        None
+    }
+
+    pub unsafe fn current() -> *mut Sv39PageTable {
+        let satp: usize;
+        asm!("csrr {}, satp", out(reg) satp);
+
+        crate::mem::phys2virt(PhysicalAddress::new((satp & 0x0FFF_FFFF_FFFF) << 12)).as_mut_ptr().cast()
+    }
 }
 
 impl Default for Sv39PageTable {
@@ -144,6 +196,11 @@ impl PageTableEntry {
     pub fn make_leaf(&mut self, phys: PhysicalAddress, permissions: impl ToPermissions) {
         let permissions = (permissions.to_permissions() as usize) << 1;
         self.0 = (phys.ppn() << 10) | permissions | 1;
+    }
+
+    pub fn set_permissions(&mut self, permissions: impl ToPermissions) {
+        let permissions = (permissions.to_permissions() as usize) << 1;
+        self.0 = (self.0 & !(0b11110)) | permissions;
     }
 
     pub fn make_branch(&mut self, next_level: PhysicalAddress) {

@@ -30,5 +30,5 @@ extern "C" fn lang_start(_: isize, _: *const *const u8) -> isize {
 }
 
 extern "Rust" {
-    static main: fn();
+    fn main();
 }

@@ -6,6 +6,7 @@ edition = "2018"
 #build = "build.rs"
 
 [dependencies]
+elf64 = { path = "../elf64" }
 fdt = { path = "../fdt" }
 log = "0.4.11"
 lock_api = "0.4.1"

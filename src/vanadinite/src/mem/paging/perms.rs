@@ -121,6 +121,12 @@ pub enum Permissions {
     UserReadWriteExecute = 0b1111,
 }
 
+impl ToPermissions for Permissions {
+    fn to_permissions(self) -> Permissions {
+        self
+    }
+}
+
 impl core::ops::BitOr<Execute> for Read {
     type Output = ReadExecute;
 
@@ -269,6 +275,22 @@ impl core::ops::BitOr<UserRead> for Execute {
     type Output = UserReadExecute;
 
     fn bitor(self, _: UserRead) -> Self::Output {
+        UserReadExecute
+    }
+}
+
+impl core::ops::BitOr<Write> for UserRead {
+    type Output = UserReadWrite;
+
+    fn bitor(self, _: Write) -> Self::Output {
+        UserReadWrite
+    }
+}
+
+impl core::ops::BitOr<Execute> for UserRead {
+    type Output = UserReadExecute;
+
+    fn bitor(self, _: Execute) -> Self::Output {
         UserReadExecute
     }
 }

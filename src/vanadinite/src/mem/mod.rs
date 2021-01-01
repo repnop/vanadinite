@@ -1,11 +1,11 @@
-use paging::PAGE_TABLE_MANAGER;
-use phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR};
-
-use self::paging::{PhysicalAddress, VirtualAddress};
-
 // This Source Code Form is subject to the terms of the Mozilla Public License,
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
+
+use paging::Sv39PageTable;
+use phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR};
+
+use self::paging::{PhysicalAddress, VirtualAddress};
 
 pub mod heap;
 pub mod phys;
@@ -81,8 +81,9 @@ pub fn phys2virt(phys: PhysicalAddress) -> VirtualAddress {
     VirtualAddress::new(phys.as_usize() + 0xFFFFFFC000000000)
 }
 
+#[track_caller]
 pub fn virt2phys(virt: VirtualAddress) -> PhysicalAddress {
-    PAGE_TABLE_MANAGER.lock().resolve(virt).expect("no mapping found")
+    unsafe { &mut *Sv39PageTable::current() }.translate(virt, phys2virt).expect("no mapping found")
 }
 
 pub mod kernel_patching {

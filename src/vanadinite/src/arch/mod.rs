@@ -11,17 +11,17 @@ pub enum ExitStatus<'a> {
     Error(&'a dyn core::fmt::Display),
 }
 
-#[cfg(feature = "virt")]
-pub fn exit(status: ExitStatus) -> ! {
-    let exit_status = match status {
-        ExitStatus::Ok => virt::ExitStatus::Pass,
-        ExitStatus::Error(msg) => virt::ExitStatus::Fail(1),
-    };
-
-    virt::exit(exit_status)
-}
-
-#[cfg(not(feature = "virt"))]
+//#[cfg(feature = "virt")]
+//pub fn exit(status: ExitStatus) -> ! {
+//    let exit_status = match status {
+//        ExitStatus::Ok => virt::ExitStatus::Pass,
+//        ExitStatus::Error(msg) => virt::ExitStatus::Fail(1),
+//    };
+//
+//    virt::exit(exit_status)
+//}
+//
+//#[cfg(not(feature = "virt"))]
 pub fn exit(status: ExitStatus) -> ! {
     use sbi::{
         probe_extension,

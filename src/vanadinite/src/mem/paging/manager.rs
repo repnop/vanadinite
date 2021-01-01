@@ -10,15 +10,20 @@ use crate::{
         phys::PhysicalMemoryAllocator,
         sfence,
     },
-    sync::Mutex,
     PHYSICAL_MEMORY_ALLOCATOR,
 };
 
-pub static PAGE_TABLE_MANAGER: Mutex<PageTableManager> = Mutex::new(PageTableManager);
+// pub static PAGE_TABLE_MANAGER: Mutex<PageTableManager<'static>> = Mutex::new(PageTableManager(alloc::borrow::Cow::Borrowed(&)));
 
-pub struct PageTableManager;
+#[derive(Debug)]
+pub struct PageTableManager(&'static mut Sv39PageTable); //alloc::boxed::Box<Sv39PageTable>);
 
 impl PageTableManager {
+    pub fn new(table: &'static mut Sv39PageTable) -> Self {
+        //alloc::boxed::Box<Sv39PageTable>) -> Self {
+        Self(table)
+    }
+
     pub fn alloc_virtual_range<P: ToPermissions + Copy>(&mut self, start: VirtualAddress, size: usize, perms: P) {
         assert_eq!(size % 4096, 0, "bad map range size: {}", size);
 
@@ -32,7 +37,7 @@ impl PageTableManager {
         let phys = Self::new_phys_page();
 
         log::info!("PageTableManager::map_page: mapping {:#p} to {:#p}", phys, map_to);
-        unsafe { &mut *self.current_pagetable() }.map(
+        self.0.map(
             phys,
             map_to,
             PageSize::Kilopage,
@@ -53,6 +58,52 @@ impl PageTableManager {
         sfence(Some(map_to), None);
     }
 
+    pub fn alloc_virtual_range_with_data<P: ToPermissions + Copy>(
+        &mut self,
+        start: VirtualAddress,
+        size: usize,
+        perms: P,
+        data: &[u8],
+    ) {
+        assert_eq!(size % 4096, 0, "bad map range size: {}", size);
+
+        for (idx, data) in (0..size / 4096).zip(data.chunks(4096)) {
+            self.alloc_virtual_with_data(start.offset(idx * 4096), perms, data);
+        }
+    }
+
+    pub fn alloc_virtual_with_data<P: ToPermissions>(&mut self, map_to: VirtualAddress, perms: P, data: &[u8]) {
+        let _disabler = InterruptDisabler::new();
+        let phys = Self::new_phys_page();
+
+        log::info!("PageTableManager::map_page: mapping {:#p} to {:#p}", phys, map_to);
+        self.0.map(
+            phys,
+            map_to,
+            PageSize::Kilopage,
+            perms,
+            || {
+                let phys = Self::new_phys_page();
+                let virt = phys2virt(phys).as_mut_ptr().cast();
+
+                unsafe {
+                    *virt = Sv39PageTable::default();
+                }
+
+                (virt, phys)
+            },
+            phys2virt,
+        );
+
+        let ptr = phys2virt(phys).as_mut_ptr();
+
+        for (i, byte) in data.iter().copied().enumerate() {
+            unsafe { *ptr.add(i) = byte };
+        }
+
+        sfence(Some(map_to), None);
+    }
+
     pub fn map_direct<P: ToPermissions>(
         &mut self,
         map_from: PhysicalAddress,
@@ -61,7 +112,7 @@ impl PageTableManager {
         perms: P,
     ) {
         let _disabler = InterruptDisabler::new();
-        unsafe { &mut *self.current_pagetable() }.map(
+        self.0.map(
             map_from,
             map_to,
             size,
@@ -82,53 +133,29 @@ impl PageTableManager {
         sfence(Some(map_to), None);
     }
 
+    pub fn modify_page_permissions(&mut self, virt: VirtualAddress, new_permissions: impl ToPermissions) {
+        if let Some(entry) = self.0.entry_mut(virt, phys2virt) {
+            entry.set_permissions(new_permissions);
+        }
+    }
+
     pub fn resolve(&self, virt: VirtualAddress) -> Option<PhysicalAddress> {
         let _disabler = InterruptDisabler::new();
 
-        unsafe { &*self.current_pagetable() }.translate(virt, phys2virt)
+        self.0.translate(virt, phys2virt)
     }
 
-    pub unsafe fn current_pagetable(&self) -> *mut Sv39PageTable {
-        let satp: usize;
-        asm!("csrr {}, satp", out(reg) satp);
-
-        phys2virt(PhysicalAddress::new((satp & 0x0FFF_FFFF_FFFF) << 12)).as_mut_ptr().cast()
+    pub fn table(&self) -> &Sv39PageTable {
+        &self.0
     }
 
-    pub unsafe fn map_with_allocator<F, A, P>(
-        &mut self,
-        map_from: PhysicalAddress,
-        map_to: VirtualAddress,
-        page_size: PageSize,
-        perms: P,
-        f: F,
-        translation: A,
-    ) where
-        F: FnMut() -> (*mut Sv39PageTable, PhysicalAddress),
-        A: Fn(PhysicalAddress) -> VirtualAddress,
-        P: ToPermissions,
-    {
-        let _disabler = InterruptDisabler::new();
+    pub fn copy_kernel_pages(&mut self) {
+        let current = unsafe { &*Sv39PageTable::current() };
 
-        { &mut *self.current_pagetable() }.map(map_from, map_to, page_size, perms, f, translation);
-    }
-
-    /// Memory from this function is never freed since it could be invalid to free it with normal means
-    pub unsafe fn unmap_with_translation<A>(&mut self, map_to: VirtualAddress, translation: A)
-    where
-        A: Fn(PhysicalAddress) -> VirtualAddress,
-    {
-        let _disabler = InterruptDisabler::new();
-
-        { &mut *self.current_pagetable() }.unmap(map_to, translation);
-    }
-
-    pub unsafe fn is_mapped_with_translation<A>(&mut self, addr: VirtualAddress, translation: A) -> bool
-    where
-        A: Fn(PhysicalAddress) -> VirtualAddress,
-    {
-        let _disabler = InterruptDisabler::new();
-        { &mut *self.current_pagetable() }.is_mapped(addr, translation)
+        let start_idx = VirtualAddress::new(0xFFFFFFC000000000).vpns()[2];
+        for i in start_idx..512 {
+            self.0.entries[i] = current.entries[i];
+        }
     }
 
     fn new_phys_page() -> PhysicalAddress {

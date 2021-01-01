@@ -33,7 +33,7 @@ mod interrupts;
 mod io;
 mod mem;
 mod process;
-mod schedule;
+mod scheduler;
 mod sync;
 mod thread_local;
 mod trap;
@@ -46,7 +46,7 @@ use {
     interrupts::PLIC,
     mem::{
         kernel_patching,
-        paging::{PhysicalAddress, VirtualAddress, PAGE_TABLE_MANAGER},
+        paging::{PhysicalAddress, Sv39PageTable, VirtualAddress},
         phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
         phys2virt, virt2phys,
     },
@@ -68,7 +68,6 @@ static BLOCK_DEV: Mutex<Option<drivers::virtio::block::BlockDevice>> = Mutex::ne
 
 #[no_mangle]
 unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
-    let mut page_manager = PAGE_TABLE_MANAGER.lock();
     // Remove identity mapping after paging initialization
     let kernel_start = kernel_patching::kernel_start() as usize;
     let kernel_end = kernel_patching::kernel_end() as usize;
@@ -76,8 +75,8 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         // `kernel_start()` and `kernel_end()` now refer to virtual addresses so
         // we need to patch them back to physical "virtual" addresses to be
         // unmapped
-        let patched = VirtualAddress::new(mem::virt2phys(VirtualAddress::new(address)).as_usize());
-        page_manager.unmap_with_translation(patched, mem::phys2virt);
+        let patched = VirtualAddress::new(virt2phys(VirtualAddress::new(address)).as_usize());
+        unsafe { &mut *Sv39PageTable::current() }.unmap(patched, mem::phys2virt);
         //(&mut *mem::paging::PAGE_TABLE_ROOT.get()).unmap(patched, mem::phys2virt);
     }
 
@@ -95,7 +94,7 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
         if let Some(device) = crate::io::ConsoleDevices::from_compatible(stdout_addr, compatible) {
             let stdout_phys = PhysicalAddress::from_ptr(stdout_addr);
-            let ptr = phys2virt(stdout_phys); //page_manager.map_mmio(stdout_phys, stdout_size);
+            let ptr = phys2virt(stdout_phys);
 
             device.set_console(ptr.as_mut_ptr());
 
@@ -161,7 +160,7 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
             let reg = ic.reg().unwrap().next().unwrap();
             let ic_phys = PhysicalAddress::from_ptr(reg.starting_address);
-            let ic_virt = phys2virt(ic_phys); //page_manager.map_mmio(ic_phys, reg.size.unwrap());
+            let ic_virt = phys2virt(ic_phys);
 
             let plic = &*ic_virt.as_ptr().cast::<Plic>();
 
@@ -187,7 +186,7 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         let reg = child.reg().unwrap().next().unwrap();
 
         let virtio_mmio_phys = PhysicalAddress::from_ptr(reg.starting_address);
-        let virtio_mmio_virt = phys2virt(virtio_mmio_phys); //page_manager.map_mmio(virtio_mmio_phys, reg.size.unwrap());
+        let virtio_mmio_virt = phys2virt(virtio_mmio_phys);
 
         let device: &'static VirtIoHeader = &*(virtio_mmio_virt.as_ptr().cast());
 
@@ -219,16 +218,11 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     arch::csr::sstatus::set_fs(arch::csr::sstatus::FloatingPointStatus::Initial);
     arch::csr::sstatus::enable_interrupts();
     arch::csr::sie::enable();
-    let data = alloc::boxed::Box::into_raw(alloc::boxed::Box::new([0u8; 512]));
 
-    log::info!("data ptr={:#p}", data);
+    let process = process::Process::load(&elf64::Elf::new(process::INIT_PROCESS).unwrap());
 
-    BLOCK_DEV.lock().as_mut().unwrap().queue_read(0, virt2phys(VirtualAddress::from_ptr(data)));
+    scheduler::context_switch(&process);
 
-    loop {
-        asm!("wfi");
-        println!("{:?}", core::slice::from_raw_parts(data as *const u8, 512));
-    }
     arch::exit(arch::ExitStatus::Ok)
 }
 
@@ -240,10 +234,10 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
 #[no_mangle]
 pub extern "C" fn abort() -> ! {
-    panic!("we've aborted")
+    arch::exit(arch::ExitStatus::Error(&"aborted"))
 }
 
 #[alloc_error_handler]
 fn alloc_error_handler(_: alloc::alloc::Layout) -> ! {
-    panic!()
+    panic!("out of memory")
 }
