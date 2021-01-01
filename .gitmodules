@@ -10,3 +10,6 @@
 [submodule "submodules/riscv-pk"]
 	path = submodules/riscv-pk
 	url = https://github.com/riscv/riscv-pk
+[submodule "submodules/opensbi"]
+	path = submodules/opensbi
+	url = https://github.com/riscv/opensbi

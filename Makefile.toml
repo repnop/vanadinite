@@ -74,3 +74,13 @@ command = "lldb"
 args = [
     "target/riscv64gc-unknown-none-elf/release/vanadinite",
 ]
+
+[tasks.opensbi]
+env = { CROSS_COMPILE="riscv64-unknown-elf-", PLATFORM_RISCV_XLEN=64 }
+script = '''
+    git submodule init submodules/opensbi
+    git submodule update --remote submodules/opensbi
+    cd submodules/opensbi
+    make PLATFORM=generic
+    cp build/platform/generic/firmware/fw_dynamic.bin ../../opensbi-riscv64-generic-fw_dynamic.bin
+'''

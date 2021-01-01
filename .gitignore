@@ -7,3 +7,4 @@ Cargo.lock
 *.dtb
 *.dts
 qemu.log
+opensbi-riscv64-generic-fw_dynamic.bin
