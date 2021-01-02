@@ -7,7 +7,6 @@
 #![feature(
     asm,
     naked_functions,
-    global_asm,
     alloc_error_handler,
     raw_ref_op,
     const_generics,
@@ -15,8 +14,7 @@
     thread_local,
     maybe_uninit_ref,
     const_fn_fn_ptr_basics,
-    const_fn,
-    arbitrary_self_types
+    const_fn
 )]
 #![no_std]
 #![no_main]

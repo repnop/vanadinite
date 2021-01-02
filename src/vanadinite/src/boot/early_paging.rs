@@ -222,16 +222,14 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     vmem_trampoline(hart_id, fdt, new_sp, new_gp, kmain)
 }
 
-extern "C" {
-    fn vmem_trampoline(_: usize, _: *const u8, sp: usize, gp: usize, dest: usize) -> !;
+#[naked]
+#[no_mangle]
+unsafe extern "C" fn vmem_trampoline(_hart_id: usize, _fdt: *const u8, _sp: usize, _gp: usize, _dest: usize) -> ! {
+    #[rustfmt::skip]
+    asm!(
+        "mv sp, a2",
+        "mv gp, a3",
+        "jr a4",
+        options(noreturn),
+    );
 }
-
-#[rustfmt::skip]
-global_asm!("
-    .section .text
-    .globl vmem_trampoline
-    vmem_trampoline:
-        mv sp, a2
-        mv gp, a3
-        jr a4
-");

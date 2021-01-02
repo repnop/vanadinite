@@ -220,11 +220,11 @@ pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stv
     sepc
 }
 
-#[rustfmt::skip]
-global_asm!("
-    .section .text
-    .globl stvec_trap_shim
-    stvec_trap_shim:
+#[naked]
+#[no_mangle]
+unsafe extern "C" fn stvec_trap_shim() -> ! {
+    #[rustfmt::skip]
+    asm!("
         .align 4
         # Disable interrupts
         csrci sstatus, 2
@@ -375,4 +375,5 @@ global_asm!("
 
         # gtfo
         sret
-");
+    ", options(noreturn));
+}

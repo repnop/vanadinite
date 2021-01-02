@@ -38,7 +38,7 @@ impl<T: Send + 'static> ThreadLocal<T> {
         match state {
             true => unsafe { (&*self.1.get()).assume_init_ref() },
             false => {
-                assert!(!self.0.compare_and_swap(false, true, Ordering::AcqRel));
+                assert!(self.0.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok());
                 unsafe { self.1.get().write(core::mem::MaybeUninit::new((self.2)())) };
                 unsafe { (&*self.1.get()).assume_init_ref() }
             }

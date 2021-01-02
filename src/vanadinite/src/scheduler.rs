@@ -84,16 +84,11 @@ impl Scheduler {
 
 unsafe impl Send for Scheduler {}
 
-extern "C" {
-    fn return_to_usermode(_: &crate::trap::Registers, sepc: usize) -> !;
-}
-
-#[rustfmt::skip]
-global_asm!("
-    .section .text
-    .globl return_to_usermode
-    .align 4
-    return_to_usermode:
+#[naked]
+#[no_mangle]
+unsafe extern "C" fn return_to_usermode(_registers: &crate::trap::Registers, _sepc: usize) -> ! {
+    #[rustfmt::skip]
+    asm!("
         csrw sepc, a1
 
         li t0, 1 << 8
@@ -137,4 +132,5 @@ global_asm!("
         ld x10, 72(a0)
 
         sret
-");
+    ", options(noreturn));
+}
