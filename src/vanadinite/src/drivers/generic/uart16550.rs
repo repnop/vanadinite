@@ -129,13 +129,9 @@ impl CompatibleWith for Uart16550 {
 }
 
 impl InterruptServicable for Uart16550 {
-    fn isr(source: usize, private: usize) -> Result<(), &'static str> {
-        let value = {
-            let this: &'static Self = unsafe { &*(private as *const _) };
-            this.read()
-        };
-
-        crate::print!("{}", value as char);
+    fn isr(_: usize, private: usize) -> Result<(), &'static str> {
+        let this: &'static Self = unsafe { &*(private as *const _) };
+        this.write(this.read());
 
         Ok(())
     }

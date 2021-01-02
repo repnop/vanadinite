@@ -42,7 +42,6 @@ impl<T: Send + 'static> ThreadLocal<T> {
                 unsafe { self.1.get().write(core::mem::MaybeUninit::new((self.2)())) };
                 unsafe { (&*self.1.get()).assume_init_ref() }
             }
-            _ => unreachable!(),
         }
     }
 }

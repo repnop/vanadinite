@@ -73,7 +73,7 @@ thread_local! {
 static BLOCK_DEV: Mutex<Option<drivers::virtio::block::BlockDevice>> = Mutex::new(None);
 
 #[no_mangle]
-unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
+extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     // Remove identity mapping after paging initialization
     let kernel_start = kernel_patching::kernel_start() as usize;
     let kernel_end = kernel_patching::kernel_end() as usize;
@@ -82,13 +82,13 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         // we need to patch them back to physical "virtual" addresses to be
         // unmapped
         let patched = VirtualAddress::new(virt2phys(VirtualAddress::new(address)).as_usize());
-        unsafe { &mut *Sv39PageTable::current() }.unmap(patched, mem::phys2virt);
+        unsafe { (&mut *Sv39PageTable::current()).unmap(patched, mem::phys2virt) };
         //(&mut *mem::paging::PAGE_TABLE_ROOT.get()).unmap(patched, mem::phys2virt);
     }
 
     crate::io::init_logging();
 
-    let fdt = match fdt::Fdt::new(fdt) {
+    let fdt = match unsafe { fdt::Fdt::new(fdt) } {
         Some(fdt) => fdt,
         None => crate::arch::exit(crate::arch::ExitStatus::Error(&"magic's fucked, my dude")),
     };
@@ -102,7 +102,7 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     if let Some((node, reg, compatible)) = stdout.and_then(|n| Some((n, n.reg()?.next()?, n.compatible()?))) {
         let stdout_addr = reg.starting_address as *mut u8;
 
-        if let Some(device) = crate::io::ConsoleDevices::from_compatible(stdout_addr, compatible) {
+        if let Some(device) = crate::io::ConsoleDevices::from_compatible(compatible) {
             let stdout_phys = PhysicalAddress::from_ptr(stdout_addr);
             let ptr = phys2virt(stdout_phys);
 
@@ -116,11 +116,12 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
-    let heap_start = PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(64).expect("moar memory").as_phys_address();
+    let heap_frame_alloc = unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(64) };
+    let heap_start = heap_frame_alloc.expect("moar memory").as_phys_address();
     log::debug!("Initing heap at {:#p} (phys {:#p})", mem::phys2virt(heap_start), heap_start);
-    mem::heap::HEAP_ALLOCATOR.init(mem::phys2virt(heap_start).as_mut_ptr(), 64 * 4.kib());
+    unsafe { mem::heap::HEAP_ALLOCATOR.init(mem::phys2virt(heap_start).as_mut_ptr(), 64 * 4.kib()) };
 
-    crate::thread_local::init_thread_locals();
+    unsafe { crate::thread_local::init_thread_locals() };
     HART_ID.set(hart_id);
 
     let model = fdt
@@ -152,8 +153,8 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     log::info!("SBI spec version: {:?}", sbi::base::spec_version());
     log::info!("SBI implementor: {:?}", sbi::base::impl_id());
     log::info!("marchid: {:#x}", sbi::base::marchid());
-    log::info!("Installing trap handler at {:#p}", stvec_trap_shim.as_ptr());
-    csr::stvec::set(core::mem::transmute(stvec_trap_shim.as_ptr()));
+    log::info!("Installing trap handler at {:#p}", unsafe { stvec_trap_shim.as_ptr() });
+    csr::stvec::set(unsafe { core::mem::transmute(stvec_trap_shim.as_ptr()) });
 
     match fdt.all_nodes().find(|node| node.name.starts_with("plic")) {
         Some(ic) => {
@@ -168,7 +169,7 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             let ic_phys = PhysicalAddress::from_ptr(reg.starting_address);
             let ic_virt = phys2virt(ic_phys);
 
-            let plic = &*ic_virt.as_ptr().cast::<Plic>();
+            let plic = unsafe { &*ic_virt.as_ptr().cast::<Plic>() };
 
             log::info!("Registering PLIC @ {:#p}", ic_virt);
             interrupts::register_plic(plic as &'static dyn drivers::Plic);
@@ -194,10 +195,10 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         let virtio_mmio_phys = PhysicalAddress::from_ptr(reg.starting_address);
         let virtio_mmio_virt = phys2virt(virtio_mmio_phys);
 
-        let device: &'static VirtIoHeader = &*(virtio_mmio_virt.as_ptr().cast());
+        let device: &'static VirtIoHeader = unsafe { &*(virtio_mmio_virt.as_ptr().cast()) };
 
         if let Some(DeviceType::BlockDevice) = device.device_type() {
-            let block_device: &'static VirtIoBlockDevice = &*(device as *const _ as *const VirtIoBlockDevice);
+            let block_device = unsafe { &*(device as *const _ as *const VirtIoBlockDevice) };
 
             *BLOCK_DEV.lock() = Some(drivers::virtio::block::BlockDevice::new(block_device).unwrap());
 
@@ -210,25 +211,28 @@ unsafe extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
-    *process::THREAD_CONTROL_BLOCK.get() = process::ThreadControlBlock {
-        kernel_stack: mem::alloc_kernel_stack(8.kib()),
-        kernel_thread_local: thread_local::tp(),
-        saved_sp: 0,
-        saved_tp: 0,
-        kernel_stack_size: 8.kib(),
-        current_process: None,
-    };
+    unsafe {
+        *process::THREAD_CONTROL_BLOCK.get() = process::ThreadControlBlock {
+            kernel_stack: mem::alloc_kernel_stack(8.kib()),
+            kernel_thread_local: thread_local::tp(),
+            saved_sp: 0,
+            saved_tp: 0,
+            kernel_stack_size: 8.kib(),
+            current_process: None,
+        };
 
-    arch::csr::sscratch::write(process::THREAD_CONTROL_BLOCK.get() as usize);
+        arch::csr::sscratch::write(process::THREAD_CONTROL_BLOCK.get() as usize);
+    }
 
     arch::csr::sstatus::set_fs(arch::csr::sstatus::FloatingPointStatus::Initial);
-    arch::csr::sstatus::enable_interrupts();
     arch::csr::sie::enable();
 
     pub static TEMPLATE: &[u8] =
         include_bytes!("../../../userspace/template/target/riscv64gc-unknown-none-elf/release/template");
+    pub static HAX: &[u8] = include_bytes!("../../../userspace/hax/target/riscv64gc-unknown-none-elf/release/hax");
 
     scheduler::Scheduler::push(&*scheduler::SCHEDULER, process::Process::load(&elf64::Elf::new(TEMPLATE).unwrap()));
+    scheduler::Scheduler::push(&*scheduler::SCHEDULER, process::Process::load(&elf64::Elf::new(HAX).unwrap()));
     scheduler::Scheduler::schedule(&*scheduler::SCHEDULER);
 
     //arch::exit(arch::ExitStatus::Ok)

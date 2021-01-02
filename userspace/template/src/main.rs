@@ -3,6 +3,7 @@
 
 #[no_mangle]
 fn main() {
-    libvanadinite::print("hello world\n\r");
+    libvanadinite::print("hello world\n");
+    libvanadinite::print("this is print 2\n");
     libvanadinite::exit();
 }

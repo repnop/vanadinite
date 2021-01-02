@@ -4,7 +4,7 @@
 
 use crate::{
     drivers::{generic::uart16550::Uart16550, sifive::fu540_c000::uart::SifiveUart, CompatibleWith, EnableMode, Plic},
-    sync::{Mutex, RwLock},
+    sync::Mutex,
 };
 use core::cell::UnsafeCell;
 
@@ -92,7 +92,7 @@ pub enum ConsoleDevices {
 }
 
 impl ConsoleDevices {
-    pub fn from_compatible(ptr: *mut u8, compatible: fdt::Compatible<'_>) -> Option<Self> {
+    pub fn from_compatible(compatible: fdt::Compatible<'_>) -> Option<Self> {
         if compatible.all().any(|s| Uart16550::compatible_with().contains(&s)) {
             Some(ConsoleDevices::Uart16550)
         } else if compatible.all().any(|s| SifiveUart::compatible_with().contains(&s)) {

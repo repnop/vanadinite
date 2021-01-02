@@ -36,7 +36,7 @@ impl PageTableManager {
         let _disabler = InterruptDisabler::new();
         let phys = Self::new_phys_page();
 
-        log::info!("PageTableManager::map_page: mapping {:#p} to {:#p}", phys, map_to);
+        log::debug!("PageTableManager::map_page: mapping {:#p} to {:#p}", phys, map_to);
         self.0.map(
             phys,
             map_to,
@@ -76,7 +76,7 @@ impl PageTableManager {
         let _disabler = InterruptDisabler::new();
         let phys = Self::new_phys_page();
 
-        log::info!("PageTableManager::map_page: mapping {:#p} to {:#p}", phys, map_to);
+        log::debug!("PageTableManager::map_page: mapping {:#p} to {:#p}", phys, map_to);
         self.0.map(
             phys,
             map_to,
@@ -160,10 +160,7 @@ impl PageTableManager {
 
     pub fn is_valid_readable(&self, virt: VirtualAddress) -> bool {
         match self.0.entry(virt, phys2virt) {
-            Some(entry) => {
-                log::info!("valid entry, is_readable()={}", entry.is_readable());
-                entry.is_readable()
-            }
+            Some(entry) => entry.is_readable(),
             None => false,
         }
     }

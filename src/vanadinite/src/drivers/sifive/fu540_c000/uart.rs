@@ -85,7 +85,7 @@ impl CompatibleWith for SifiveUart {
 }
 
 impl InterruptServicable for SifiveUart {
-    fn isr(source: usize, private: usize) -> Result<(), &'static str> {
+    fn isr(_: usize, private: usize) -> Result<(), &'static str> {
         let value = {
             let this: &'static Self = unsafe { &*(private as *const _) };
             this.read()

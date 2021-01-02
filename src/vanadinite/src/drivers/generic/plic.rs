@@ -20,17 +20,17 @@ pub struct Plic {
 
 impl Plic {
     // FIXME: actually do initialization
-    pub fn init(&self, num_interrupts: usize) {
-        // for i in 0..1023 {
-        //     self.source_priorities[i].set(1);
-        // }
-        // //
-        // for context in 1..=1 {
-        //     self.interrupt_enable[context].init();
-        //     self.threshold_and_claim[context].priority_threshold.init();
-        // }
-        // self.threshold_and_claim[0].priority_threshold.init();
-    }
+    //pub fn init(&self, num_interrupts: usize) {
+    // for i in 0..1023 {
+    //     self.source_priorities[i].set(1);
+    // }
+    // //
+    // for context in 1..=1 {
+    //     self.interrupt_enable[context].init();
+    //     self.threshold_and_claim[context].priority_threshold.init();
+    // }
+    // self.threshold_and_claim[0].priority_threshold.init();
+    //}
 }
 
 mod registers {

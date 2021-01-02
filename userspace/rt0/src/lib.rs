@@ -13,7 +13,7 @@ pub unsafe extern "C" fn _start() -> ! {
         .option pop
     ");
 
-    unsafe { main() };
+    main();
 
     #[rustfmt::skip]
     asm!("

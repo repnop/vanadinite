@@ -104,7 +104,7 @@ impl Identification {
         }
 
         match &data[..4] {
-            magic @ [b'\x7F', b'E', b'L', b'F'] => Some(Self {
+            [b'\x7F', b'E', b'L', b'F'] => Some(Self {
                 magic: *b"\x7FELF",
                 class: data[4],
                 data: data[5],
