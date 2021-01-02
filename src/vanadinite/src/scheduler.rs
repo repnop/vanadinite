@@ -1,4 +1,5 @@
 use crate::{
+    interrupts::assert_interrupts_disabled,
     mem::{paging::VirtualAddress, satp, sfence, virt2phys, SatpMode},
     process::{Process, ProcessState, INIT_PROCESS},
     thread_local,
@@ -44,6 +45,7 @@ impl Scheduler {
     }
 
     pub fn schedule(this: &RefCell<Self>) -> ! {
+        assert_interrupts_disabled();
         let (registers, pc) = {
             let mut this = this.borrow_mut();
             let current_dead = this.active.state.is_dead();
@@ -51,19 +53,23 @@ impl Scheduler {
             if !this.processes.is_empty() && !current_dead {
                 let next = this.processes.pop_front().unwrap();
                 let old = core::mem::replace(&mut this.active, next);
-                log::info!("old.pc={:#x?}", old.pc);
                 this.processes.push_back(old);
             } else if !this.processes.is_empty() && current_dead {
+                log::info!("current process is ded");
                 let next = this.processes.pop_front().unwrap();
                 this.active = next;
             } else if current_dead {
                 unreachable!("we have no process to schedule :(");
             }
 
-            satp(SatpMode::Sv39, 1, virt2phys(VirtualAddress::from_ptr(this.active.page_table.table())));
+            satp(
+                SatpMode::Sv39,
+                this.active.pid as u16,
+                virt2phys(VirtualAddress::from_ptr(this.active.page_table.table())),
+            );
             sfence(None, None);
 
-            log::info!("scheduling process: pid={}, pc={:#p}", this.active.pid, this.active.pc as *mut u8);
+            log::debug!("scheduling process: pid={}, pc={:#p}", this.active.pid, this.active.pc as *mut u8);
             (this.active.frame.registers, this.active.pc)
         };
 
@@ -71,8 +77,6 @@ impl Scheduler {
         let current_time = crate::arch::csr::time::read();
         let target_time = current_time + crate::utils::ticks_per_us(10_000, frequency);
         sbi::timer::set_timer(target_time as u64).unwrap();
-
-        crate::arch::csr::sstatus::enable_interrupts();
 
         unsafe { return_to_usermode(&registers, pc) }
     }
@@ -95,6 +99,8 @@ global_asm!("
         li t0, 1 << 8
         csrc sstatus, t0
         li t0, 1 << 19
+        csrs sstatus, t0
+        li t0, 1 << 5
         csrs sstatus, t0
         
         ld x1, 0(a0)
@@ -129,5 +135,6 @@ global_asm!("
         ld x31, 240(a0)
 
         ld x10, 72(a0)
+
         sret
 ");

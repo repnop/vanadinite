@@ -178,7 +178,6 @@ impl Trap {
 
 #[no_mangle]
 pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stval: usize) -> usize {
-    let _disabler = crate::interrupts::InterruptDisabler::new();
     log::debug!("we trappin' on hart {}: {:x?}", crate::HART_ID.get(), regs);
     log::debug!("TCB: {:?}", unsafe { &*crate::process::THREAD_CONTROL_BLOCK.get() });
     log::debug!("scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
@@ -213,8 +212,10 @@ pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stv
                 plic.complete(claimed);
             }
         }
-        trap => log::info!("Ignoring trap: {:?}, sepc: {:#x}, stval: {:#x}", trap, sepc, stval),
+        trap => panic!("Ignoring trap: {:?}, sepc: {:#x}, stval: {:#x}", trap, sepc, stval),
     }
+
+    crate::interrupts::assert_interrupts_disabled();
 
     sepc
 }
@@ -225,6 +226,8 @@ global_asm!("
     .globl stvec_trap_shim
     stvec_trap_shim:
         .align 4
+        # Disable interrupts
+        csrci sstatus, 2
         csrrw s0, sscratch, s0
 
         sd sp, 16(s0)
@@ -326,6 +329,10 @@ global_asm!("
         csrr a2, scause
         csrr a3, stval
 
+        li s0, 1 << 5
+        # Reenable interrupts after sret (set SPIE)
+        csrs sstatus, s0
+
         call trap_handler
 
         csrw sepc, a0
@@ -365,7 +372,7 @@ global_asm!("
         sc.d zero, zero, 0(sp)
         csrr sp, sscratch
         ld sp, 16(sp)
-        
+
         # gtfo
         sret
 ");

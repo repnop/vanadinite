@@ -10,8 +10,9 @@
 pub unsafe extern "C" fn _boot() -> ! {
     #[rustfmt::skip]
     asm!("
-        li t0, 0
-        csrw sie, t0
+        csrw sie, zero
+        csrci sstatus, 2
+        
         .option push
         .option norelax
         lla gp, __global_pointer$
