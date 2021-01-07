@@ -177,14 +177,26 @@ impl Trap {
 }
 
 #[no_mangle]
-pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stval: usize) -> usize {
+pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize, stval: usize) -> usize {
     log::debug!("we trappin' on hart {}: {:x?}", crate::HART_ID.get(), regs);
     log::debug!("TCB: {:?}", unsafe { &*crate::process::THREAD_CONTROL_BLOCK.get() });
     log::debug!("scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
 
     let trap_kind = Trap::from_cause(scause);
     match trap_kind {
-        Trap::LoadPageFault | Trap::StorePageFault => panic!("{:?} accessing {:#p}", trap_kind, stval as *mut u8),
+        Trap::LoadPageFault | Trap::StorePageFault => {
+            let sepc = VirtualAddress::new(sepc);
+            let stval = VirtualAddress::new(stval);
+
+            match sepc.is_kernel_region() {
+                true => panic!("kernel {:?} at address {:#p}", trap_kind, stval),
+                false => {
+                    let pid = Scheduler::active_pid(&*SCHEDULER);
+                    log::error!("Active process (pid: {}) {:?} at address {:#p}, killing", pid, trap_kind, stval);
+                    Scheduler::mark_active_dead(&*SCHEDULER);
+                }
+            }
+        }
         Trap::SupervisorTimerInterrupt => {
             Scheduler::update_active_registers(&*SCHEDULER, *regs, sepc);
             Scheduler::schedule(&*SCHEDULER);
@@ -193,6 +205,7 @@ pub extern "C" fn trap_handler(regs: &TrapFrame, sepc: usize, scause: usize, stv
             match regs.registers.a0 {
                 0 => syscall::exit::exit(),
                 1 => syscall::print::print(VirtualAddress::new(regs.registers.a1), regs.registers.a2),
+                2 => syscall::read_stdin::read_stdin(VirtualAddress::new(regs.registers.a1), regs.registers.a2, regs),
                 n => {
                     log::error!("Unknown syscall number: {}", n);
                     Scheduler::mark_active_dead(&*SCHEDULER);

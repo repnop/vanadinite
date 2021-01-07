@@ -41,6 +41,7 @@ mod utils;
 mod syscall {
     pub mod exit;
     pub mod print;
+    pub mod read_stdin;
 }
 
 use {
@@ -224,13 +225,27 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     arch::csr::sstatus::set_fs(arch::csr::sstatus::FloatingPointStatus::Initial);
     arch::csr::sie::enable();
+    //arch::csr::sstatus::enable_interrupts();
+    //
+    //loop {
+    //    unsafe { asm!("wfi") };
+    //    if let Some(c) = io::INPUT_QUEUE.pop() {
+    //        print!("{}", c as char);
+    //    }
+    //}
 
-    pub static TEMPLATE: &[u8] =
-        include_bytes!("../../../userspace/template/target/riscv64gc-unknown-none-elf/release/template");
-    pub static HAX: &[u8] = include_bytes!("../../../userspace/hax/target/riscv64gc-unknown-none-elf/release/hax");
+    //pub static TEMPLATE: &[u8] =
+    //    include_bytes!("../../../userspace/template/target/riscv64gc-unknown-none-elf/release/template");
+    //pub static HAX: &[u8] = include_bytes!("../../../userspace/hax/target/riscv64gc-unknown-none-elf/release/hax");
+    pub static SHELL: &[u8] =
+        include_bytes!("../../../userspace/shell/target/riscv64gc-unknown-none-elf/release/shell");
 
-    scheduler::Scheduler::push(&*scheduler::SCHEDULER, process::Process::load(&elf64::Elf::new(TEMPLATE).unwrap()));
-    scheduler::Scheduler::push(&*scheduler::SCHEDULER, process::Process::load(&elf64::Elf::new(HAX).unwrap()));
+    //scheduler::Scheduler::push(&*scheduler::SCHEDULER, process::Process::load(&elf64::Elf::new(TEMPLATE).unwrap()));
+    //scheduler::Scheduler::push(&*scheduler::SCHEDULER, process::Process::load(&elf64::Elf::new(HAX).unwrap()));
+    scheduler::Scheduler::push(&*scheduler::SCHEDULER, process::Process::load(&elf64::Elf::new(SHELL).unwrap()));
+
+    log::info!("Scheduling init process!");
+
     scheduler::Scheduler::schedule(&*scheduler::SCHEDULER);
 
     //arch::exit(arch::ExitStatus::Ok)

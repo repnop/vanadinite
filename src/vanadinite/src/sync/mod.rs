@@ -2,9 +2,11 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+mod lazy;
 mod mutex;
 mod rwlock;
 
+pub use lazy::Lazy;
 pub use lock_api::{self, RawMutex};
 
 #[repr(transparent)]

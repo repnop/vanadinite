@@ -81,7 +81,10 @@ impl Process {
         for header in elf.program_headers().filter(|header| header.r#type == elf64::ProgramSegmentType::Load) {
             page_table.alloc_virtual_range_with_data(
                 VirtualAddress::new(header.vaddr as usize),
-                if header.memory_size < 4096 { 4096 } else { header.memory_size as usize },
+                match header.memory_size % 4096 {
+                    0 => header.memory_size as usize,
+                    n => (n as usize & !(4096 - 1)) + 4096,
+                },
                 match header.flags & 0b111 {
                     0b101 => (User | Read | Execute).to_permissions(),
                     0b110 => (User | Read | Write).to_permissions(),

@@ -28,10 +28,10 @@ args= [
     "-m", "${RAM}",
     
     # force the most recent VirtIO spec version
-    "-global", "virtio-mmio.force-legacy=false",
-    "-drive", "file=testing_files/test_fat.fs,if=none,format=raw,id=hd",
-    "-device", "virtio-blk-device,drive=hd",
-
+    #"-global", "virtio-mmio.force-legacy=false",
+    #"-drive", "file=testing_files/test_fat.fs,if=none,format=raw,id=hd",
+    #"-device", "virtio-blk-device,drive=hd",
+    #
     "-bios", "opensbi-riscv64-generic-fw_dynamic.bin",
     "-kernel", "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
     "-serial", "mon:stdio",
@@ -93,6 +93,19 @@ script = '''
         if [[ ! " ${filter_out[@]} " =~ " ${directory} " ]]; then
             cd ${directory}
             cargo build --release
+            cd ..
+        fi
+    done
+'''
+
+[tasks.'userspace.clean']
+script = '''
+    cd userspace
+    filter_out=(./libvanadinite/ ./rt0/ ./.cargo/)
+    for directory in ./*/; do
+        if [[ ! " ${filter_out[@]} " =~ " ${directory} " ]]; then
+            cd ${directory}
+            cargo clean
             cd ..
         fi
     done
