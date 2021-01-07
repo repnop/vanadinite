@@ -62,26 +62,13 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let start = memory_region.starting_address as usize;
     let size = memory_region.size.unwrap() as usize;
 
-    // let start = 0x80000000;
-    // let size = 0x8000000;
-
     let ident_mem_phys = (TEMP_PAGE_TABLE_IDENTITY.get(), PhysicalAddress::from_ptr(&TEMP_PAGE_TABLE_IDENTITY));
 
     let fdt_usize = fdt as usize;
     let fdt_phys = PhysicalAddress::new(fdt_usize);
     let fdt_virt = VirtualAddress::new(fdt_usize);
 
-    //let alloc_start = if fdt_usize >= kernel_end {
-    //    // round up to next page size after the FDT
-    //    ((phys2virt(fdt_phys).as_usize() + fdt_size as usize) & !0x1FFFFFusize) + 0x200000
-    //} else {
-    //    kernel_end
-    //};
-
     let kernel_end_phys = kernel_end as *mut u8;
-
-    // Set the allocator to start allocating memory after the end of the kernel or fdt
-    //let kernel_end_phys = mem::virt2phys(VirtualAddress::new(alloc_start)).as_mut_ptr();
 
     let mut pf_alloc = PHYSICAL_MEMORY_ALLOCATOR.lock();
     pf_alloc.init(kernel_end_phys, (start + size) as *mut u8);

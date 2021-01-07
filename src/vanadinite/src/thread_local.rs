@@ -24,10 +24,6 @@ impl<T: Send + 'static> ThreadLocal<T> {
         Self(AtomicBool::new(false), core::cell::UnsafeCell::new(core::mem::MaybeUninit::uninit()), init)
     }
 
-    //pub fn get(&'static self) -> &'static T {
-    //    self.init_if_needed()
-    //}
-
     pub fn with<R, F: FnOnce(&T) -> R>(&'static self, f: F) -> R {
         f(self.init_if_needed())
     }

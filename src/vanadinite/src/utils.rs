@@ -143,6 +143,7 @@ pub mod volatile {
     impl<T: Copy, const N: usize> core::ops::Index<usize> for Volatile<[T; N], Read> {
         type Output = Volatile<T>;
 
+        #[allow(clippy::clippy::transmute_ptr_to_ptr)]
         fn index(&self, index: usize) -> &Self::Output {
             unsafe { &core::mem::transmute::<_, &[Volatile<T>; N]>(self)[index] }
         }
@@ -151,6 +152,7 @@ pub mod volatile {
     impl<T: Copy, const N: usize> core::ops::Index<usize> for Volatile<[T; N], ReadWrite> {
         type Output = Volatile<T>;
 
+        #[allow(clippy::clippy::transmute_ptr_to_ptr)]
         fn index(&self, index: usize) -> &Self::Output {
             unsafe { &core::mem::transmute::<_, &[Volatile<T>; N]>(self)[index] }
         }

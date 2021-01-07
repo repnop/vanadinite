@@ -82,7 +82,6 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         // unmapped
         let patched = VirtualAddress::new(virt2phys(VirtualAddress::new(address)).as_usize());
         unsafe { (&mut *Sv39PageTable::current()).unmap(patched, mem::phys2virt) };
-        //(&mut *mem::paging::PAGE_TABLE_ROOT.get()).unmap(patched, mem::phys2virt);
     }
 
     crate::io::init_logging();
@@ -225,30 +224,15 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     csr::sstatus::set_fs(csr::sstatus::FloatingPointStatus::Initial);
     csr::sie::enable();
-    //csr::sstatus::enable_interrupts();
-    //
-    //loop {
-    //    unsafe { asm!("wfi") };
-    //    if let Some(c) = io::INPUT_QUEUE.pop() {
-    //        print!("{}", c as char);
-    //    }
-    //}
 
-    //pub static TEMPLATE: &[u8] =
-    //    include_bytes!("../../../userspace/template/target/riscv64gc-unknown-none-elf/release/template");
-    //pub static HAX: &[u8] = include_bytes!("../../../userspace/hax/target/riscv64gc-unknown-none-elf/release/hax");
     pub static SHELL: &[u8] =
         include_bytes!("../../../userspace/shell/target/riscv64gc-unknown-none-elf/release/shell");
 
-    //scheduler::Scheduler::push(&*scheduler::SCHEDULER, process::Process::load(&elf64::Elf::new(TEMPLATE).unwrap()));
-    //scheduler::Scheduler::push(&*scheduler::SCHEDULER, process::Process::load(&elf64::Elf::new(HAX).unwrap()));
     scheduler::Scheduler::push(&*scheduler::SCHEDULER, process::Process::load(&elf64::Elf::new(SHELL).unwrap()));
 
     log::info!("Scheduling init process!");
 
-    scheduler::Scheduler::schedule(&*scheduler::SCHEDULER);
-
-    //arch::exit(arch::ExitStatus::Ok)
+    scheduler::Scheduler::schedule(&*scheduler::SCHEDULER)
 }
 
 #[panic_handler]

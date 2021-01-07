@@ -13,14 +13,11 @@ use crate::{
     PHYSICAL_MEMORY_ALLOCATOR,
 };
 
-// pub static PAGE_TABLE_MANAGER: Mutex<PageTableManager<'static>> = Mutex::new(PageTableManager(alloc::borrow::Cow::Borrowed(&)));
-
 #[derive(Debug)]
-pub struct PageTableManager(&'static mut Sv39PageTable); //alloc::boxed::Box<Sv39PageTable>);
+pub struct PageTableManager(&'static mut Sv39PageTable);
 
 impl PageTableManager {
     pub fn new(table: &'static mut Sv39PageTable) -> Self {
-        //alloc::boxed::Box<Sv39PageTable>) -> Self {
         Self(table)
     }
 

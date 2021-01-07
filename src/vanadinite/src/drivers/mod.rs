@@ -4,8 +4,6 @@
 
 pub mod sifive {
     pub mod fu540_c000 {
-        pub mod clint;
-        pub mod plic;
         pub mod uart;
     }
 }
