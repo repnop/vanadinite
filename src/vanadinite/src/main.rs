@@ -24,13 +24,14 @@ compile_error!("vanadinite assumes a 64-bit pointer size, cannot compile on non-
 
 extern crate alloc;
 
-mod arch;
 mod asm;
 mod boot;
+mod csr;
 mod drivers;
 mod interrupts;
 mod io;
 mod mem;
+mod platform;
 mod process;
 mod scheduler;
 mod sync;
@@ -45,7 +46,6 @@ mod syscall {
 }
 
 use {
-    arch::csr,
     core::sync::atomic::{AtomicUsize, Ordering},
     drivers::{CompatibleWith, EnableMode},
     interrupts::PLIC,
@@ -89,7 +89,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     let fdt = match unsafe { fdt::Fdt::new(fdt) } {
         Some(fdt) => fdt,
-        None => crate::arch::exit(crate::arch::ExitStatus::Error(&"magic's fucked, my dude")),
+        None => crate::platform::exit(crate::platform::ExitStatus::Error(&"magic's fucked, my dude")),
     };
 
     let current_cpu = fdt.cpus().find(|cpu| cpu.ids().first() == hart_id).unwrap();
@@ -220,12 +220,12 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             current_process: None,
         };
 
-        arch::csr::sscratch::write(process::THREAD_CONTROL_BLOCK.get() as usize);
+        csr::sscratch::write(process::THREAD_CONTROL_BLOCK.get() as usize);
     }
 
-    arch::csr::sstatus::set_fs(arch::csr::sstatus::FloatingPointStatus::Initial);
-    arch::csr::sie::enable();
-    //arch::csr::sstatus::enable_interrupts();
+    csr::sstatus::set_fs(csr::sstatus::FloatingPointStatus::Initial);
+    csr::sie::enable();
+    //csr::sstatus::enable_interrupts();
     //
     //loop {
     //    unsafe { asm!("wfi") };
@@ -254,12 +254,12 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     log::error!("{}", info);
-    arch::exit(arch::ExitStatus::Error(info))
+    platform::exit(platform::ExitStatus::Error(info))
 }
 
 #[no_mangle]
 pub extern "C" fn abort() -> ! {
-    arch::exit(arch::ExitStatus::Error(&"aborted"))
+    platform::exit(platform::ExitStatus::Error(&"aborted"))
 }
 
 #[alloc_error_handler]

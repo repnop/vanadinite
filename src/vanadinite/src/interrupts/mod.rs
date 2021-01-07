@@ -52,9 +52,9 @@ pub struct InterruptDisabler(bool);
 impl InterruptDisabler {
     #[inline(always)]
     pub fn new() -> Self {
-        let reenable = match crate::arch::csr::sstatus::read() & 2 == 2 {
+        let reenable = match crate::csr::sstatus::read() & 2 == 2 {
             true => {
-                crate::arch::csr::sstatus::disable_interrupts();
+                crate::csr::sstatus::disable_interrupts();
                 true
             }
             false => false,
@@ -67,12 +67,12 @@ impl InterruptDisabler {
 impl Drop for InterruptDisabler {
     fn drop(&mut self) {
         if self.0 {
-            crate::arch::csr::sstatus::enable_interrupts();
+            crate::csr::sstatus::enable_interrupts();
         }
     }
 }
 
 #[track_caller]
 pub fn assert_interrupts_disabled() {
-    assert_eq!(crate::arch::csr::sstatus::read() & 2, 0, "interrupts not disabled!");
+    assert_eq!(crate::csr::sstatus::read() & 2, 0, "interrupts not disabled!");
 }

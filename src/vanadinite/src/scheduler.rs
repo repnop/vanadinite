@@ -74,7 +74,7 @@ impl Scheduler {
         };
 
         let frequency = crate::TIMER_FREQ.load(Ordering::Relaxed);
-        let current_time = crate::arch::csr::time::read();
+        let current_time = crate::csr::time::read();
         let target_time = current_time + crate::utils::ticks_per_us(10_000, frequency);
         sbi::timer::set_timer(target_time as u64).unwrap();
 

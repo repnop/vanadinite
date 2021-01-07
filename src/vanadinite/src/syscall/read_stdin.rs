@@ -1,5 +1,5 @@
 use crate::{
-    arch::csr::sstatus::TemporaryUserMemoryAccess,
+    csr::sstatus::TemporaryUserMemoryAccess,
     io::INPUT_QUEUE,
     mem::paging::VirtualAddress,
     scheduler::{Scheduler, SCHEDULER},

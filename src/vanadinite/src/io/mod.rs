@@ -45,7 +45,7 @@ impl log::Log for Logger {
 
             mod_path = if mod_path == "vanadinite" { "vanadinite::main" } else { mod_path };
             let freq = crate::TIMER_FREQ.load(core::sync::atomic::Ordering::Relaxed);
-            let curr_time = crate::arch::csr::time::read();
+            let curr_time = crate::csr::time::read();
             let (secs, ms, _) = crate::utils::time_parts(crate::utils::micros(curr_time, freq));
 
             #[cfg(debug_assertions)]

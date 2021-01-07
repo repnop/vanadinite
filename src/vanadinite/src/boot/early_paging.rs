@@ -38,7 +38,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     let fdt_struct = match fdt::Fdt::new(fdt) {
         Some(fdt) => fdt,
-        None => crate::arch::exit(crate::arch::ExitStatus::Error(&"magic's fucked, my dude")),
+        None => crate::platform::exit(crate::platform::ExitStatus::Error(&"magic's fucked, my dude")),
     };
 
     let fdt_size = fdt_struct.total_size() as u64;
