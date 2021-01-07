@@ -1,40 +1,33 @@
-#![feature(asm)]
+#![feature(asm, prelude_import, no_core)]
 #![no_std]
 
 extern crate rt0;
 
-#[inline(always)]
-pub fn exit() -> ! {
-    unsafe {
-        #[rustfmt::skip]
-        asm!(
-            "mv a0, zero",
-            "ecall",
-            options(noreturn),
-        );
-    }
+pub mod io;
+pub mod prelude;
+pub mod syscalls;
+
+#[prelude_import]
+pub use prelude::v1::*;
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => ($crate::_print(format_args!($($arg)*)));
 }
 
-#[inline(always)]
-pub fn print<T: AsRef<[u8]> + ?Sized>(value: &T) {
-    let value = value.as_ref();
-    unsafe {
-        #[rustfmt::skip]
-        asm!(
-            "li a0, 1",
-            "mv a1, {}",
-            "mv a2, {}",
-            "ecall",
-            in(reg) value.as_ptr(),
-            in(reg) value.len(),
-            out("a0") _,
-            out("a1") _,
-            out("a2") _,
-        );
-    }
+#[macro_export]
+macro_rules! println {
+    () => ($crate::print!("\n"));
+    ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
+}
+
+#[doc(hidden)]
+pub fn _print(args: core::fmt::Arguments) {
+    use core::fmt::Write;
+    let _ = io::Stdout.write_fmt(args);
 }
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
-    exit()
+    syscalls::exit()
 }

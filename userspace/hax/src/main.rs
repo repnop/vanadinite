@@ -1,9 +1,17 @@
-#![no_std]
-#![no_main]
-
-#[no_mangle]
 fn main() {
-    libvanadinite::print(unsafe { core::slice::from_raw_parts(0xffffffd000004690 as *mut u8, 1024) });
-    libvanadinite::print("this is print 2\n");
-    libvanadinite::exit();
+    let mut input = [0; 10];
+    let mut total_read = 0;
+
+    while total_read < 10 {
+        let start = total_read;
+        let read = read_stdin(&mut input[start..]);
+        total_read += read;
+        print!("{}", core::str::from_utf8(&input[start..][..read]).unwrap());
+    }
+
+    print!("\nyou typed: ");
+    println!("{}", core::str::from_utf8(&input).unwrap());
+
+    std::syscalls::print(unsafe { core::slice::from_raw_parts(0xffffffd000004690 as *mut u8, 1024) });
+    println!("this is print 2\n");
 }

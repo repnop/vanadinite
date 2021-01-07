@@ -1,5 +1,5 @@
 [package]
-name = "libvanadinite"
+name = "std"
 version = "0.1.0"
 authors = ["repnop <repnop@repnop.dev>"]
 edition = "2018"
