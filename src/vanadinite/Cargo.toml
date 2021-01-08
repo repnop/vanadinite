@@ -14,7 +14,7 @@ lock_api = "0.4.1"
 sbi = { path = "../sbi" }
 
 [features]
-default = []
+default = ["virt"]
 
 debug_log = []
 virt = []
