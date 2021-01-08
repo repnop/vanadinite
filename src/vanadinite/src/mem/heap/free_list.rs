@@ -14,6 +14,10 @@ impl FreeListAllocator {
         Self { inner: Mutex::new(FreeList { head: None, origin: core::ptr::null_mut(), size: 0 }) }
     }
 
+    /// # Safety
+    ///
+    /// `origin` and `size` must create a valid memory region that does not
+    /// conflict with anything else
     pub unsafe fn init(&self, origin: *mut u8, size: usize) {
         let mut inner = self.inner.lock();
         inner.head = Some(NonNull::new(origin.cast()).expect("bad origin passed"));
@@ -56,7 +60,7 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
                 log::debug!("FreeListAllocator::alloc: reusing node, but its not big enough to split");
 
                 match prev_node {
-                    Some(prev_node) => (&mut *prev_node).next = (*node).next,
+                    Some(prev_node) => (*prev_node).next = (*node).next,
                     None => this.origin = (*node).next.expect("valid next").as_ptr().cast(),
                 }
 
@@ -67,10 +71,10 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
                 log::debug!("FreeListAllocator::alloc: reusing node and splitting");
 
                 let new_node_ptr: *mut FreeListNode = (&*node).data().add(size).cast();
-                (&mut *new_node_ptr).size = (*node).size - (size + FreeListNode::struct_size());
-                (&mut *new_node_ptr).next = (*node).next;
-                (&mut *node).size = size;
-                (&mut *node).next = None;
+                (*new_node_ptr).size = (*node).size - (size + FreeListNode::struct_size());
+                (*new_node_ptr).next = (*node).next;
+                (*node).size = size;
+                (*node).next = None;
 
                 log::debug!(
                     "FreeListAllocator::alloc: created new node, current node={:?}, new node={:?}",
@@ -81,7 +85,7 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
                 let next = Some(NonNull::new_unchecked(new_node_ptr));
 
                 match prev_node {
-                    Some(prev_node) => (&mut *prev_node).next = next,
+                    Some(prev_node) => (*prev_node).next = next,
                     None => {
                         log::debug!("Setting head to {:?}", &*new_node_ptr);
                         this.head = next;
@@ -108,7 +112,7 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
         let ptr = (ptr as usize - core::mem::size_of::<FreeListNode>()) as *mut FreeListNode;
 
         log::debug!("Freeing {:?}, head={:?}", &*ptr, &*inner.head.unwrap().as_ptr());
-        (&mut *ptr).next = inner.head;
+        (*ptr).next = inner.head;
         inner.head = Some(NonNull::new_unchecked(ptr));
     }
 }

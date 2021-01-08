@@ -120,6 +120,10 @@ pub mod kernel_patching {
         unsafe { KERNEL_END.as_ptr() }
     }
 
+    /// # Safety
+    ///
+    /// The physical address passed in must be inside the kernel sections,
+    /// otherwise the resulting [`VirtualAddress`] will be invalid
     pub unsafe fn kernel_section_p2v(phys: PhysicalAddress) -> VirtualAddress {
         let phys_offset = *KERNEL_PHYS_LOAD_LOCATION.0.get();
         assert!(phys_offset != 0);

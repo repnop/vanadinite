@@ -52,6 +52,7 @@ impl Sv39PageTable {
     }
 
     /// # Safety
+    ///
     /// This method ***MUST*** be called with the exact inverse function with
     /// which created the initial page table mappings
     ///
@@ -143,6 +144,7 @@ impl Sv39PageTable {
         let mut page_size = PageSize::Gigapage;
 
         for vpn in virt.vpns().iter().copied().rev() {
+            #[allow(clippy::deref_addrof)]
             let pte = unsafe { &mut *(&raw mut page_table.entries[vpn]) };
             if pte.is_branch() {
                 page_table = unsafe { &mut *address_conversion(pte.subtable().unwrap()).as_mut_ptr().cast() };
@@ -159,6 +161,10 @@ impl Sv39PageTable {
         None
     }
 
+    /// # Safety
+    ///
+    /// This function assumes that `satp` holds a valid physical pointer to a
+    /// page table that can be safely converted with [`phys2virt`](crate::mem::phys2virt)
     pub unsafe fn current() -> *mut Sv39PageTable {
         let satp: usize;
         asm!("csrr {}, satp", out(reg) satp);
@@ -194,12 +200,12 @@ impl PageTableEntry {
     }
 
     pub fn make_leaf(&mut self, phys: PhysicalAddress, permissions: impl ToPermissions) {
-        let permissions = (permissions.to_permissions() as usize) << 1;
+        let permissions = (permissions.into_permissions() as usize) << 1;
         self.0 = (phys.ppn() << 10) | permissions | 1;
     }
 
     pub fn set_permissions(&mut self, permissions: impl ToPermissions) {
-        let permissions = (permissions.to_permissions() as usize) << 1;
+        let permissions = (permissions.into_permissions() as usize) << 1;
         self.0 = (self.0 & !(0b11110)) | permissions;
     }
 

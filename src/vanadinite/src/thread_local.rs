@@ -50,6 +50,10 @@ impl<T: Send + 'static> core::ops::Deref for ThreadLocal<T> {
     }
 }
 
+/// # Safety
+///
+/// This function ***must*** be called before any references to any per-hart
+/// statics are used, and failing to do so can result in undefined behavior
 pub unsafe fn init_thread_locals() {
     use crate::utils::LinkerSymbol;
 

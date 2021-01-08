@@ -42,65 +42,65 @@ pub struct UserReadExecute;
 pub struct UserReadWriteExecute;
 
 pub trait ToPermissions {
-    fn to_permissions(self) -> Permissions;
+    fn into_permissions(self) -> Permissions;
 }
 
 impl ToPermissions for Read {
-    fn to_permissions(self) -> Permissions {
+    fn into_permissions(self) -> Permissions {
         Permissions::Read
     }
 }
 
 impl ToPermissions for Execute {
-    fn to_permissions(self) -> Permissions {
+    fn into_permissions(self) -> Permissions {
         Permissions::Execute
     }
 }
 
 impl ToPermissions for ReadExecute {
-    fn to_permissions(self) -> Permissions {
+    fn into_permissions(self) -> Permissions {
         Permissions::ReadExecute
     }
 }
 
 impl ToPermissions for ReadWrite {
-    fn to_permissions(self) -> Permissions {
+    fn into_permissions(self) -> Permissions {
         Permissions::ReadWrite
     }
 }
 
 impl ToPermissions for ReadWriteExecute {
-    fn to_permissions(self) -> Permissions {
+    fn into_permissions(self) -> Permissions {
         Permissions::ReadWriteExecute
     }
 }
 
 impl ToPermissions for UserRead {
-    fn to_permissions(self) -> Permissions {
+    fn into_permissions(self) -> Permissions {
         Permissions::UserRead
     }
 }
 
 impl ToPermissions for UserExecute {
-    fn to_permissions(self) -> Permissions {
+    fn into_permissions(self) -> Permissions {
         Permissions::UserExecute
     }
 }
 
 impl ToPermissions for UserReadExecute {
-    fn to_permissions(self) -> Permissions {
+    fn into_permissions(self) -> Permissions {
         Permissions::UserReadExecute
     }
 }
 
 impl ToPermissions for UserReadWrite {
-    fn to_permissions(self) -> Permissions {
+    fn into_permissions(self) -> Permissions {
         Permissions::UserReadWrite
     }
 }
 
 impl ToPermissions for UserReadWriteExecute {
-    fn to_permissions(self) -> Permissions {
+    fn into_permissions(self) -> Permissions {
         Permissions::UserReadWriteExecute
     }
 }
@@ -122,7 +122,7 @@ pub enum Permissions {
 }
 
 impl ToPermissions for Permissions {
-    fn to_permissions(self) -> Permissions {
+    fn into_permissions(self) -> Permissions {
         self
     }
 }

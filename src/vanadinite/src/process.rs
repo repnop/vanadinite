@@ -46,6 +46,7 @@ pub struct ThreadControlBlock {
 }
 
 impl ThreadControlBlock {
+    #[allow(clippy::clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             kernel_stack: core::ptr::null_mut(),
@@ -86,9 +87,9 @@ impl Process {
                     n => (n as usize & !(4096 - 1)) + 4096,
                 },
                 match header.flags & 0b111 {
-                    0b101 => (User | Read | Execute).to_permissions(),
-                    0b110 => (User | Read | Write).to_permissions(),
-                    0b100 => (User | Read).to_permissions(),
+                    0b101 => (User | Read | Execute).into_permissions(),
+                    0b110 => (User | Read | Write).into_permissions(),
+                    0b100 => (User | Read).into_permissions(),
                     flags => unreachable!("flags: {:#b}", flags),
                 },
                 elf.program_segment_data(header),

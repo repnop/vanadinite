@@ -79,9 +79,8 @@ unsafe impl Sync for StaticConsoleDevice {}
 pub static CONSOLE: Mutex<StaticConsoleDevice> = Mutex::new(StaticConsoleDevice(None));
 
 /// # Safety
-/// The given pointer must be a valid object in memory
 ///
-/// The device will also have `.init()` called on it.
+/// The given pointer must be a valid object in memory
 pub unsafe fn set_console<T: ConsoleDevice>(device: *mut T) {
     *CONSOLE.lock() = StaticConsoleDevice::new(device);
 }

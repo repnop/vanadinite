@@ -138,11 +138,6 @@ mod registers {
             let val = (self.0.read() & !2) | ((enable as u32) << 1);
             self.0.write(val);
         }
-
-        pub fn watermark_level(&self, watermark: u8) {
-            let val = (self.0.read() & !(0b111 << 16)) | ((watermark as u32 & 0b111) << 16);
-            self.0.write(val);
-        }
     }
 
     #[derive(Debug)]
@@ -180,16 +175,6 @@ mod registers {
     #[derive(Debug)]
     #[repr(transparent)]
     pub struct InterruptPending(Volatile<u32>);
-
-    impl InterruptPending {
-        pub fn tx_watermark_pending(&self) -> bool {
-            self.0.read() & 1 == 1
-        }
-
-        pub fn rx_watermark_pending(&self) -> bool {
-            (self.0.read() >> 1) & 1 == 1
-        }
-    }
 
     #[derive(Debug)]
     #[repr(transparent)]

@@ -21,7 +21,7 @@ impl BitmapAllocator {
 
 unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
     #[track_caller]
-    fn init(&mut self, start: *mut u8, end: *mut u8) {
+    unsafe fn init(&mut self, start: *mut u8, end: *mut u8) {
         assert_eq!(start as usize % 4096, 0, "unaligned memory start page");
         self.mem_start = start;
         self.mem_end = end;

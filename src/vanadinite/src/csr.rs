@@ -54,6 +54,7 @@ pub mod sstatus {
     pub struct TemporaryUserMemoryAccess(());
 
     impl TemporaryUserMemoryAccess {
+        #[allow(clippy::clippy::new_without_default)]
         pub fn new() -> Self {
             unsafe { asm!("li {0}, 1 << 18", "csrs sstatus, {0}", out(reg) _) };
             Self(())

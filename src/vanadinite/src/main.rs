@@ -2,7 +2,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![allow(clippy::match_bool)]
+#![allow(clippy::match_bool, clippy::identity_op)]
 #![allow(incomplete_features)]
 #![feature(
     asm,
@@ -24,20 +24,20 @@ compile_error!("vanadinite assumes a 64-bit pointer size, cannot compile on non-
 
 extern crate alloc;
 
-mod asm;
-mod boot;
-mod csr;
-mod drivers;
-mod interrupts;
-mod io;
-mod mem;
-mod platform;
-mod process;
-mod scheduler;
-mod sync;
-mod thread_local;
-mod trap;
-mod utils;
+pub mod asm;
+pub mod boot;
+pub mod csr;
+pub mod drivers;
+pub mod interrupts;
+pub mod io;
+pub mod mem;
+pub mod platform;
+pub mod process;
+pub mod scheduler;
+pub mod sync;
+pub mod thread_local;
+pub mod trap;
+pub mod utils;
 
 mod syscall {
     pub mod exit;

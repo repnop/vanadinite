@@ -3,6 +3,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 /// # Safety
+///
 /// I'm the kernel, rustc
 #[naked]
 #[no_mangle]

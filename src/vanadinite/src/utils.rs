@@ -30,6 +30,10 @@ impl<T> StaticMut<T> {
         Self(core::cell::UnsafeCell::new(t))
     }
 
+    /// # Safety
+    ///
+    /// You must ensure that no data races nor aliasing occurs when using the
+    /// resulting pointer
     pub const unsafe fn get(&self) -> *mut T {
         self.0.get()
     }

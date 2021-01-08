@@ -63,7 +63,6 @@ impl Plic {
         self.threshold_and_claim[context].priority_threshold.set(threshold as u32)
     }
 
-    #[allow(dead_code)]
     pub fn is_pending(&self, source: usize) -> bool {
         self.interrupt_pending.is_pending(source)
     }

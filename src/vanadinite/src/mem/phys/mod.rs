@@ -11,12 +11,49 @@ use bitmap::BitmapAllocator;
 pub static PHYSICAL_MEMORY_ALLOCATOR: Mutex<BitmapAllocator> = Mutex::new(BitmapAllocator::new());
 
 pub unsafe trait PhysicalMemoryAllocator {
-    fn init(&mut self, start: *mut u8, end: *mut u8);
+    /// # Safety
+    ///
+    /// `start` and `end` must form a valid region of physical memory that is
+    /// accessible to the kernel
+    unsafe fn init(&mut self, start: *mut u8, end: *mut u8);
+
+    /// # Safety
+    ///
+    /// This method must not return the same physical page multiple times
+    /// without it having been deallocated before being reused each time
     unsafe fn alloc(&mut self) -> Option<PhysicalPage>;
+
+    /// # Safety
+    ///
+    /// The requirements for this method are the same as [`alloc`], but apply to
+    /// the entire range returned
     unsafe fn alloc_contiguous(&mut self, n: usize) -> Option<PhysicalPage>;
+
+    /// # Safety
+    ///
+    /// See the memory safety requirements of [`set_unused`]
     unsafe fn dealloc(&mut self, page: PhysicalPage);
+
+    /// # Safety
+    ///
+    /// The requirements for this method are the same as [`dealloc`], but apply
+    /// to the entire range returned
     unsafe fn dealloc_contiguous(&mut self, page: PhysicalPage, n: usize);
+
+    /// # Safety
+    ///
+    /// The effects of this call should not be memory unsafe, however marking
+    /// free pages as used without good reason will eat up the available
+    /// physical memory and strain kernel allocations which could result in the
+    /// kernel being out of memory, which is very much undesired
     unsafe fn set_used(&mut self, page: PhysicalPage);
+
+    /// # Safety
+    ///
+    /// You must ensure that page being marked as unused has no remaining
+    /// references to it and is wholly unused. Failure to uphold that
+    /// requirement could result in undefined behavior if the freed page is then
+    /// reallocated to another object in memory, resulting in memory corruption
     unsafe fn set_unused(&mut self, page: PhysicalPage);
 }
 
