@@ -172,6 +172,11 @@ impl Fdt {
         unsafe { node::find_node(&mut self.structs_ptr().cast(), "/chosen", self, None) }.map(|node| Chosen { node })
     }
 
+    pub fn find_compatible(&self, with: &[&str]) -> Option<node::FdtNode<'_>> {
+        self.all_nodes()
+            .find(|n| n.compatible().and_then(|compats| compats.all().find(|c| with.contains(&c))).is_some())
+    }
+
     pub fn memory(&self) -> MemoryNode<'_> {
         MemoryNode { node: self.find_node("/memory").expect("requires memory node") }
     }
@@ -325,6 +330,10 @@ impl<'a> Cpu<'a> {
                 _ => unreachable!(),
             })
             .unwrap()
+    }
+
+    pub fn properties(self) -> impl Iterator<Item = NodeProperty<'a>> {
+        self.node.properties()
     }
 }
 

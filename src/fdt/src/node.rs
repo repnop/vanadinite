@@ -276,17 +276,18 @@ impl Default for CellSizes {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct Compatible<'a> {
     data: &'a [u8],
 }
 
-impl Compatible<'_> {
-    pub fn first(&self) -> &str {
+impl<'a> Compatible<'a> {
+    pub fn first(self) -> &'a str {
         let idx = self.data.iter().position(|b| *b == b'\0').unwrap_or(1) - 1;
         core::str::from_utf8(&self.data[..idx]).expect("valid utf-8")
     }
 
-    pub fn all(&self) -> impl Iterator<Item = &str> {
+    pub fn all(self) -> impl Iterator<Item = &'a str> {
         let mut data = self.data;
         core::iter::from_fn(move || {
             if data.is_empty() {
@@ -478,7 +479,19 @@ pub struct NodeProperty<'a> {
     pub value: &'a [u8],
 }
 
-impl NodeProperty<'_> {
+impl<'a> NodeProperty<'a> {
+    pub fn as_usize(self) -> Option<usize> {
+        match self.value.len() {
+            4 => BigEndianU32::from_bytes(self.value).map(|i| i.get() as usize),
+            8 => BigEndianU64::from_bytes(self.value).map(|i| i.get() as usize),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> Option<&'a str> {
+        core::str::from_utf8(self.value).ok()
+    }
+
     fn parse(ptr: &mut *const BigEndianU32, header: &Fdt) -> Self {
         unsafe {
             if (**ptr).get() != FDT_PROP {
