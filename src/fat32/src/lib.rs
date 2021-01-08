@@ -192,7 +192,7 @@ struct FsInfo {
     next_free: u32,
 }
 
-struct DirectoryRecord {
+pub struct DirectoryRecord {
     // Offset: 0x00
     /// Short filename for the directory entry
     short_filename: [u8; 11],
@@ -217,46 +217,46 @@ struct DirectoryRecord {
 }
 
 impl DirectoryRecord {
-    fn read_only(&self) -> bool {
+    pub fn read_only(&self) -> bool {
         self.attribute & 0b0001 == 0b0001
     }
 
-    fn hidden(&self) -> bool {
+    pub fn hidden(&self) -> bool {
         self.attribute & 0b0010 == 0b0010
     }
 
-    fn system(&self) -> bool {
+    pub fn system(&self) -> bool {
         self.attribute & 0b0100 == 0b0100
     }
 
-    fn bpb(&self) -> bool {
+    pub fn bpb(&self) -> bool {
         self.attribute & 0b1000 == 0b1000
     }
 
-    fn long_filename(&self) -> bool {
+    pub fn long_filename(&self) -> bool {
         self.attribute & 0b1111 == 0b1111
     }
 
-    fn subdirectory(&self) -> bool {
+    pub fn subdirectory(&self) -> bool {
         self.attribute & 0b10000 == 0b10000
     }
 
-    fn archive(&self) -> bool {
+    pub fn archive(&self) -> bool {
         self.attribute & 0b100000 == 0b100000
     }
 
-    fn unused(&self) -> bool {
+    pub fn unused(&self) -> bool {
         self.short_filename[0] == 0xE5
     }
 
-    fn end_of_directory(&self) -> bool {
+    pub fn end_of_directory(&self) -> bool {
         self.short_filename[0] == 0x00
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
-struct ModifyTime(u16);
+pub struct ModifyTime(u16);
 
 impl ModifyTime {
     pub fn second(self) -> u8 {
@@ -274,7 +274,7 @@ impl ModifyTime {
 
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
-struct ModifyDate(u16);
+pub struct ModifyDate(u16);
 
 impl ModifyDate {
     pub fn day(self) -> u8 {
