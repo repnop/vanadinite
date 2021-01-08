@@ -86,12 +86,8 @@ impl CompatibleWith for SifiveUart {
 
 impl InterruptServicable for SifiveUart {
     fn isr(_: usize, private: usize) -> Result<(), &'static str> {
-        let value = {
-            let this: &'static Self = unsafe { &*(private as *const _) };
-            this.read()
-        };
-
-        crate::print!("{}", value as char);
+        let this: &'static Self = unsafe { &*(private as *const _) };
+        let _ = crate::io::INPUT_QUEUE.push(this.read());
 
         Ok(())
     }
