@@ -5,6 +5,30 @@
 #[cfg(feature = "virt")]
 pub mod virt;
 
+// FIXME: this is kind of hacky because contexts aren't currently standardized,
+// should look for a better way to do it in the future
+pub fn current_plic_context() -> usize {
+    #[cfg(not(feature = "sifive_u"))]
+    return 1 + 2 * crate::HART_ID.get();
+
+    // first context is M-mode E51 monitor core which doesn't support S-mode so
+    // we'll always be on hart >=1 which ends up working out to remove the +1
+    // from the other fn
+    #[cfg(feature = "sifive_u")]
+    return 2 * crate::HART_ID.get();
+}
+
+pub fn plic_context_for(hart_id: usize) -> usize {
+    #[cfg(not(feature = "sifive_u"))]
+    return 1 + 2 * hart_id;
+
+    // first context is M-mode E51 monitor core which doesn't support S-mode so
+    // we'll always be on hart >=1 which ends up working out to remove the +1
+    // from the other fn
+    #[cfg(feature = "sifive_u")]
+    return 2 * hart_id;
+}
+
 pub enum ExitStatus<'a> {
     Ok,
     Error(&'a dyn core::fmt::Display),

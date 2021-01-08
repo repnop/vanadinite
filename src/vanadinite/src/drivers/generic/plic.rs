@@ -3,33 +3,82 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    drivers::{self, CompatibleWith, EnableMode},
+    drivers::CompatibleWith,
     utils::volatile::{Read, ReadWrite, Volatile},
 };
 
 #[repr(C)]
 pub struct Plic {
-    pub source_priorities: [registers::Priority; 1024],
-    pub interrupt_pending: registers::InterruptPending,
+    source_priorities: [registers::Priority; 1024],
+    interrupt_pending: registers::InterruptPending,
     _padding1: [u8; 3968],
-    pub interrupt_enable: [registers::Context<registers::InterruptEnable>; 15872],
+    interrupt_enable: [registers::Context<registers::InterruptEnable>; 15872],
     _padding2: [u8; 57344],
-    pub threshold_and_claim: [registers::Context<registers::ThresholdAndClaim>; 15872],
+    threshold_and_claim: [registers::Context<registers::ThresholdAndClaim>; 15872],
     _padding3: [u8; 8184],
 }
 
 impl Plic {
-    // FIXME: actually do initialization
-    pub fn init(&self, num_interrupts: usize) {
-        for i in 0..1023 {
+    pub fn init(&self, max_interrupts: usize, contexts: impl Iterator<Item = usize>) {
+        for i in 1..max_interrupts {
             self.source_priorities[i].set(0);
         }
-        //
-        for context in 1..=1 {
-            self.interrupt_enable[context].init();
-            self.threshold_and_claim[context].priority_threshold.init();
+
+        for context in contexts {
+            for i in 0..max_interrupts {
+                self.interrupt_enable[context].disable(i);
+            }
+
+            self.threshold_and_claim[context].priority_threshold.set(0);
         }
-        self.threshold_and_claim[0].priority_threshold.init();
+    }
+
+    pub fn enable_interrupt(&self, context: usize, source: usize) {
+        log::info!("Enabling interrupt {}", source);
+        self.interrupt_enable[context].enable(source);
+    }
+
+    pub fn disable_interrupt(&self, context: usize, source: usize) {
+        log::info!("Disabling interrupt {}", source);
+        self.interrupt_enable[context].disable(source);
+    }
+
+    pub fn set_interrupt_priority(&self, source: usize, mut priority: usize) {
+        if priority > Self::max_priority() {
+            log::warn!("Priority provided for source {} exceeds max priority value, setting to max", source);
+            priority = Self::max_priority();
+        }
+
+        log::info!("Setting priority {} for source {}", priority, source);
+        self.source_priorities[source].set(priority as u32)
+    }
+
+    pub fn set_context_threshold(&self, context: usize, mut threshold: usize) {
+        if threshold > Self::max_priority() {
+            log::warn!("Threshold provided for context {} exceeds max priority value, setting to max", context);
+            threshold = Self::max_priority();
+        }
+
+        log::info!("Setting threshold {} for context {}", threshold, context);
+        self.threshold_and_claim[context].priority_threshold.set(threshold as u32)
+    }
+
+    #[allow(dead_code)]
+    pub fn is_pending(&self, source: usize) -> bool {
+        self.interrupt_pending.is_pending(source)
+    }
+
+    pub fn claim(&self, context: usize) -> Option<registers::InterruptClaim<'_>> {
+        self.threshold_and_claim[context].claim_complete.claim()
+    }
+
+    pub const fn max_priority() -> usize {
+        #[cfg(all(not(feature = "virt"), not(feature = "sifive_u")))]
+        compile_error!("Update PLIC max priority for new platform");
+
+        // This value is fixed for the platforms we currently support, but may
+        // need `#[cfg]`'d in the future
+        7
     }
 }
 
@@ -53,10 +102,6 @@ mod registers {
     pub struct Priority(Volatile<u32, ReadWrite>);
 
     impl Priority {
-        pub fn get(&self) -> u32 {
-            self.0.read()
-        }
-
         pub fn set(&self, priority: u32) {
             self.0.write(priority);
         }
@@ -98,12 +143,7 @@ mod registers {
     pub struct PriorityThreshold(Volatile<u32, ReadWrite>);
 
     impl PriorityThreshold {
-        pub fn get(&self) -> u32 {
-            self.0.read()
-        }
-
         pub fn set(&self, priority: u32) {
-            log::info!("{:#p}, {:#x}", &self.0, priority);
             self.0.write(priority);
         }
     }
@@ -113,34 +153,32 @@ mod registers {
     pub struct ClaimComplete(Volatile<u32, ReadWrite>);
 
     impl ClaimComplete {
-        pub fn claim(&self) -> Option<usize> {
-            match self.0.read() {
+        pub fn claim(&self) -> Option<InterruptClaim<'_>> {
+            match self.0.read() as usize {
                 0 => None,
-                n => Some(n as usize),
+                interrupt_id => Some(InterruptClaim { interrupt_id, register: self }),
             }
-        }
-
-        pub fn complete(&self, interrupt_id: usize) {
-            self.0.write(interrupt_id as u32);
         }
     }
 
-    // Neat idea, but currently can't fit it into the design, oh well.
-    // #[derive(Debug)]
-    // pub struct InterruptClaim<'a> {
-    //     interrupt_id: u32,
-    //     register: &'a ClaimComplete,
-    // }
-    //
-    // impl InterruptClaim<'_> {
-    //     pub fn source(&self) -> u32 {
-    //         self.interrupt_id
-    //     }
-    //
-    //     pub fn complete(self) {
-    //         self.register.0.write(self.interrupt_id);
-    //     }
-    // }
+    #[derive(Debug)]
+    #[must_use]
+    pub struct InterruptClaim<'a> {
+        interrupt_id: usize,
+        register: &'a ClaimComplete,
+    }
+
+    impl InterruptClaim<'_> {
+        pub fn interrupt_id(&self) -> usize {
+            self.interrupt_id
+        }
+
+        pub fn complete(self) {
+            // Casting back here is fine because we don't let the user change
+            // the interrupt id
+            self.register.0.write(self.interrupt_id as u32);
+        }
+    }
 
     #[repr(C)]
     pub struct ThresholdAndClaim {
@@ -154,61 +192,4 @@ impl CompatibleWith for Plic {
     fn compatible_with() -> &'static [&'static str] {
         &["riscv,plic0"]
     }
-}
-
-impl drivers::Plic for Plic {
-    fn enable_interrupt(&self, mode: EnableMode, source: usize) {
-        log::info!("Enabling interrupt {}", source);
-        match mode {
-            EnableMode::Local => self.interrupt_enable[current_context()].enable(source),
-            EnableMode::Global => todo!("plic global enable_interrupt"),
-        }
-    }
-
-    fn disable_interrupt(&self, mode: EnableMode, source: usize) {
-        match mode {
-            EnableMode::Local => self.interrupt_enable[current_context()].disable(source),
-            EnableMode::Global => todo!("plic global enable_interrupt"),
-        }
-    }
-
-    fn interrupt_priority(&self, source: usize, priority: usize) {
-        log::info!("Setting priority {} for source {}", priority, source);
-        self.source_priorities[source].set(priority as u32)
-    }
-
-    fn context_threshold(&self, mode: EnableMode, threshold: usize) {
-        log::info!("Setting threshold {} for context {}", threshold, current_context());
-        match mode {
-            EnableMode::Local => self.threshold_and_claim[current_context()].priority_threshold.set(threshold as u32),
-            EnableMode::Global => todo!("plic global enable_interrupt"),
-        }
-    }
-
-    fn is_pending(&self, source: usize) -> bool {
-        self.interrupt_pending.is_pending(source)
-    }
-
-    fn claim(&self) -> Option<usize> {
-        self.threshold_and_claim[current_context()].claim_complete.claim()
-    }
-
-    fn complete(&self, source: usize) {
-        self.threshold_and_claim[current_context()].claim_complete.complete(source)
-    }
-}
-
-// FIXME: this is kind of hacky because contexts aren't currently standardized,
-// should look for a better way to do it in the future
-#[cfg(not(feature = "sifive_u"))]
-pub fn current_context() -> usize {
-    1 + 2 * crate::HART_ID.get()
-}
-
-#[cfg(feature = "sifive_u")]
-pub fn current_context() -> usize {
-    // first context is M-mode E51 monitor core which doesn't support S-mode so
-    // we'll always be on hart >=1 which ends up working out to remove the +1
-    // from the other fn
-    2 * crate::HART_ID.get()
 }

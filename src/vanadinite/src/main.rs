@@ -47,7 +47,7 @@ mod syscall {
 
 use {
     core::sync::atomic::{AtomicUsize, Ordering},
-    drivers::{CompatibleWith, EnableMode},
+    drivers::{generic::plic::Plic, CompatibleWith},
     interrupts::PLIC,
     mem::{
         kernel_patching,
@@ -154,25 +154,38 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     log::info!("Installing trap handler at {:#p}", unsafe { stvec_trap_shim.as_ptr() });
     csr::stvec::set(unsafe { core::mem::transmute(stvec_trap_shim.as_ptr()) });
 
-    match fdt.all_nodes().find(|node| node.name.starts_with("plic")) {
+    match fdt.find_compatible(Plic::compatible_with()) {
         Some(ic) => {
-            use drivers::generic::plic::Plic;
-            let compatible = ic.compatible().unwrap();
-
-            if compatible.all().find(|c| Plic::compatible_with().contains(c)).is_none() {
-                panic!("Missing driver for interrupt controller!");
-            }
-
             let reg = ic.reg().unwrap().next().unwrap();
             let ic_phys = PhysicalAddress::from_ptr(reg.starting_address);
             let ic_virt = phys2virt(ic_phys);
 
+            // Number of interrupts available
+            let ndevs = ic
+                .properties()
+                .find(|p| p.name == "riscv,ndev")
+                .and_then(|p| p.as_usize())
+                .expect("missing number of interrupts");
+
+            // Find harts which have S-mode available
+            let contexts = fdt
+                .cpus()
+                .filter(|cpu| {
+                    cpu.properties()
+                        .find(|p| p.name == "riscv,isa")
+                        .and_then(|p| p.as_str()?.chars().find(|c| *c == 's'))
+                        .is_some()
+                })
+                .map(|cpu| platform::plic_context_for(cpu.ids().first()));
+
             let plic = unsafe { &*ic_virt.as_ptr().cast::<Plic>() };
 
+            plic.init(ndevs, contexts);
+
             log::info!("Registering PLIC @ {:#p}", ic_virt);
-            interrupts::register_plic(plic as &'static dyn drivers::Plic);
+            interrupts::register_plic(plic);
         }
-        None => panic!("Can't find interrupt controller!"),
+        None => panic!("Can't find PLIC!"),
     }
 
     if let Some((device, interrupts, ptr)) = stdout_interrupts {
@@ -181,7 +194,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
-    drivers::Plic::context_threshold(&*PLIC.lock(), drivers::EnableMode::Local, 0x00);
+    PLIC.lock().set_context_threshold(platform::current_plic_context(), 0);
 
     for child in fdt.find_all_nodes("/soc/virtio_mmio") {
         use drivers::virtio::mmio::{
@@ -200,10 +213,10 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
             *BLOCK_DEV.lock() = Some(drivers::virtio::block::BlockDevice::new(block_device).unwrap());
 
-            let plic = &*PLIC.lock();
+            let plic = PLIC.lock();
             for interrupt in child.interrupts().unwrap() {
-                drivers::Plic::enable_interrupt(plic, EnableMode::Local, interrupt);
-                drivers::Plic::interrupt_priority(plic, interrupt, 1);
+                plic.enable_interrupt(platform::current_plic_context(), interrupt);
+                plic.set_interrupt_priority(interrupt, 1);
                 interrupts::isr::register_isr::<drivers::virtio::block::BlockDevice>(interrupt, 0);
             }
         }

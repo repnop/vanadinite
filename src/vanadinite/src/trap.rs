@@ -3,7 +3,6 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    drivers::Plic,
     interrupts::{isr::isr_entry, PLIC},
     mem::paging::VirtualAddress,
     scheduler::Scheduler,
@@ -217,18 +216,16 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
         }
         Trap::SupervisorExternalInterrupt => {
             let plic = PLIC.lock();
-            if let Some(claimed) = plic.claim() {
-                if let Some((callback, private)) = isr_entry(claimed) {
-                    callback(claimed, private).unwrap();
+            if let Some(claimed) = plic.claim(crate::platform::current_plic_context()) {
+                if let Some((callback, private)) = isr_entry(claimed.interrupt_id()) {
+                    callback(claimed.interrupt_id(), private).unwrap();
                 }
 
-                plic.complete(claimed);
+                claimed.complete();
             }
         }
         trap => panic!("Ignoring trap: {:?}, sepc: {:#x}, stval: {:#x}", trap, sepc, stval),
     }
-
-    crate::interrupts::assert_interrupts_disabled();
 
     sepc
 }

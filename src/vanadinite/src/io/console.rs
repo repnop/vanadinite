@@ -3,7 +3,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    drivers::{generic::uart16550::Uart16550, sifive::fu540_c000::uart::SifiveUart, CompatibleWith, EnableMode, Plic},
+    drivers::{generic::uart16550::Uart16550, sifive::fu540_c000::uart::SifiveUart, CompatibleWith},
     sync::Mutex,
 };
 use core::cell::UnsafeCell;
@@ -116,7 +116,7 @@ impl ConsoleDevices {
         }
 
         let plic = crate::interrupts::PLIC.lock();
-        plic.enable_interrupt(EnableMode::Local, interrupt_id);
-        plic.interrupt_priority(interrupt_id, 1);
+        plic.enable_interrupt(crate::platform::current_plic_context(), interrupt_id);
+        plic.set_interrupt_priority(interrupt_id, 1);
     }
 }
