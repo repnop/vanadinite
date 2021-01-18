@@ -4,7 +4,9 @@ ENTRY(_boot);
 
 
 SECTIONS {
-    /* . = 0x80000000; */
+    . = 0xFFFFFFC000000000;
+    PROVIDE(PHYSICAL_OFFSET = .);
+
     . = 0xFFFFFFD000000000;
     PROVIDE(PAGE_OFFSET = .);
 

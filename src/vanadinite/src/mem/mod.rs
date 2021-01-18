@@ -2,10 +2,11 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use paging::Sv39PageTable;
-use phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR};
-
-use self::paging::{PhysicalAddress, VirtualAddress};
+use {
+    core::sync::atomic::{AtomicUsize, Ordering},
+    paging::{PhysicalAddress, Sv39PageTable, VirtualAddress},
+    phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
+};
 
 pub mod heap;
 pub mod phys;
@@ -52,19 +53,6 @@ pub fn fence(mode: FenceMode) {
     }
 }
 
-#[inline(always)]
-pub fn satp(mode: SatpMode, asid: u16, root_page_table: paging::PhysicalAddress) {
-    let value = ((mode as usize) << 60) | ((asid as usize) << 44) | root_page_table.ppn();
-    unsafe { asm!("csrw satp, {}", in(reg) value) };
-}
-
-#[repr(usize)]
-pub enum SatpMode {
-    Bare = 0,
-    Sv39 = 8,
-    Sv48 = 9,
-}
-
 pub fn alloc_kernel_stack(size: usize) -> *mut u8 {
     assert!(size.is_power_of_two());
     assert_eq!(size % 4096, 0);
@@ -78,13 +66,15 @@ pub fn alloc_kernel_stack(size: usize) -> *mut u8 {
 }
 
 pub fn phys2virt(phys: PhysicalAddress) -> VirtualAddress {
-    VirtualAddress::new(phys.as_usize() + 0xFFFFFFC000000000)
+    VirtualAddress::new(phys.as_usize() + PHYSICAL_OFFSET.load(Ordering::Relaxed))
 }
 
 #[track_caller]
 pub fn virt2phys(virt: VirtualAddress) -> PhysicalAddress {
-    unsafe { &mut *Sv39PageTable::current() }.translate(virt, phys2virt).expect("no mapping found")
+    unsafe { &*Sv39PageTable::current() }.translate(virt).expect("no mapping found")
 }
+
+pub static PHYSICAL_OFFSET: AtomicUsize = AtomicUsize::new(0);
 
 pub mod kernel_patching {
     use crate::utils;

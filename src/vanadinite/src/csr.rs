@@ -134,3 +134,44 @@ pub mod sscratch {
         unsafe { asm!("csrw sscratch, {}", in(reg) value) };
     }
 }
+
+pub mod satp {
+    use crate::mem::paging::{PhysicalAddress, PHYS_PPN_MASK};
+
+    pub struct Satp {
+        pub mode: SatpMode,
+        pub asid: u16,
+        pub root_page_table: PhysicalAddress,
+    }
+
+    #[inline(always)]
+    pub fn read() -> Satp {
+        let value: usize;
+        unsafe { asm!("csrr {}, satp", out(reg) value) };
+
+        let asid = ((value >> 44) & 0xFFFF) as u16;
+        let root_page_table = PhysicalAddress::new((value & PHYS_PPN_MASK) << 12);
+        let mode = match value >> 60 {
+            0 => SatpMode::Bare,
+            8 => SatpMode::Sv39,
+            9 => SatpMode::Sv48,
+            _ => unreachable!("invalid satp mode"),
+        };
+
+        Satp { mode, asid, root_page_table }
+    }
+
+    #[inline(always)]
+    pub fn write(value: Satp) {
+        let Satp { mode, asid, root_page_table } = value;
+        let value = ((mode as usize) << 60) | ((asid as usize) << 44) | root_page_table.ppn();
+        unsafe { asm!("csrw satp, {}", in(reg) value) };
+    }
+
+    #[repr(usize)]
+    pub enum SatpMode {
+        Bare = 0,
+        Sv39 = 8,
+        Sv48 = 9,
+    }
+}

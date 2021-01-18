@@ -1,6 +1,7 @@
 use crate::{
+    csr::satp::{self, Satp, SatpMode},
     interrupts::assert_interrupts_disabled,
-    mem::{paging::VirtualAddress, satp, sfence, virt2phys, SatpMode},
+    mem::{paging::VirtualAddress, sfence, virt2phys},
     process::{Process, ProcessState, INIT_PROCESS},
     thread_local,
     trap::TrapFrame,
@@ -62,12 +63,13 @@ impl Scheduler {
                 unreachable!("we have no process to schedule :(");
             }
 
-            satp(
-                SatpMode::Sv39,
-                this.active.pid as u16,
-                virt2phys(VirtualAddress::from_ptr(this.active.page_table.table())),
-            );
-            sfence(None, None);
+            satp::write(Satp {
+                mode: SatpMode::Sv39,
+                asid: this.active.pid as u16,
+                root_page_table: virt2phys(VirtualAddress::from_ptr(this.active.page_table.table())),
+            });
+
+            sfence(None, Some(this.active.pid as u16));
 
             log::debug!("scheduling process: pid={}, pc={:#p}", this.active.pid, this.active.pc as *mut u8);
             (this.active.frame.registers, this.active.pc)

@@ -34,23 +34,7 @@ impl PageTableManager {
         let phys = Self::new_phys_page();
 
         log::debug!("PageTableManager::map_page: mapping {:#p} to {:#p}", phys, map_to);
-        self.0.map(
-            phys,
-            map_to,
-            PageSize::Kilopage,
-            perms,
-            || {
-                let phys = Self::new_phys_page();
-                let virt = phys2virt(phys).as_mut_ptr().cast();
-
-                unsafe {
-                    *virt = Sv39PageTable::default();
-                }
-
-                (virt, phys)
-            },
-            phys2virt,
-        );
+        self.0.map(phys, map_to, PageSize::Kilopage, perms);
 
         sfence(Some(map_to), None);
     }
@@ -74,23 +58,7 @@ impl PageTableManager {
         let phys = Self::new_phys_page();
 
         log::debug!("PageTableManager::map_page: mapping {:#p} to {:#p}", phys, map_to);
-        self.0.map(
-            phys,
-            map_to,
-            PageSize::Kilopage,
-            perms,
-            || {
-                let phys = Self::new_phys_page();
-                let virt = phys2virt(phys).as_mut_ptr().cast();
-
-                unsafe {
-                    *virt = Sv39PageTable::default();
-                }
-
-                (virt, phys)
-            },
-            phys2virt,
-        );
+        self.0.map(phys, map_to, PageSize::Kilopage, perms);
 
         let ptr = phys2virt(phys).as_mut_ptr();
 
@@ -109,37 +77,19 @@ impl PageTableManager {
         perms: P,
     ) {
         let _disabler = InterruptDisabler::new();
-        self.0.map(
-            map_from,
-            map_to,
-            size,
-            perms,
-            || {
-                let phys = Self::new_phys_page();
-                let virt = phys2virt(phys).as_mut_ptr().cast();
-
-                unsafe {
-                    *virt = Sv39PageTable::default();
-                }
-
-                (virt, phys)
-            },
-            phys2virt,
-        );
+        self.0.map(map_from, map_to, size, perms);
 
         sfence(Some(map_to), None);
     }
 
     pub fn modify_page_permissions(&mut self, virt: VirtualAddress, new_permissions: impl ToPermissions) {
-        if let Some(entry) = self.0.entry_mut(virt, phys2virt) {
+        if let Some((entry, _)) = self.0.entry_mut(virt) {
             entry.set_permissions(new_permissions);
         }
     }
 
     pub fn resolve(&self, virt: VirtualAddress) -> Option<PhysicalAddress> {
-        let _disabler = InterruptDisabler::new();
-
-        self.0.translate(virt, phys2virt)
+        self.0.translate(virt)
     }
 
     pub fn table(&self) -> &Sv39PageTable {
@@ -156,8 +106,8 @@ impl PageTableManager {
     }
 
     pub fn is_valid_readable(&self, virt: VirtualAddress) -> bool {
-        match self.0.entry(virt, phys2virt) {
-            Some(entry) => entry.is_readable(),
+        match self.0.entry(virt) {
+            Some((entry, _)) => entry.is_readable(),
             None => false,
         }
     }

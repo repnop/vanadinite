@@ -3,6 +3,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    csr::satp::{self, Satp, SatpMode},
     mem::{
         kernel_patching,
         paging::{Execute, PageSize, PhysicalAddress, Read, Sv39PageTable, VirtualAddress, Write},
@@ -20,6 +21,7 @@ extern "C" {
     static __text_end: LinkerSymbol;
     static __kernel_thread_local_start: LinkerSymbol;
     static __kernel_thread_local_end: LinkerSymbol;
+    static PHYS_OFFSET_VALUE: usize;
 }
 
 pub static TEMP_PAGE_TABLE_IDENTITY: StaticMut<Sv39PageTable> = StaticMut::new(Sv39PageTable::new());
@@ -62,12 +64,6 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let start = memory_region.starting_address as usize;
     let size = memory_region.size.unwrap() as usize;
 
-    let ident_mem_phys = (TEMP_PAGE_TABLE_IDENTITY.get(), PhysicalAddress::from_ptr(&TEMP_PAGE_TABLE_IDENTITY));
-
-    let fdt_usize = fdt as usize;
-    let fdt_phys = PhysicalAddress::new(fdt_usize);
-    let fdt_virt = VirtualAddress::new(fdt_usize);
-
     let kernel_end_phys = kernel_end as *mut u8;
 
     let mut pf_alloc = PHYSICAL_MEMORY_ALLOCATOR.lock();
@@ -80,24 +76,14 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
         }
     }
 
-    let mut page_alloc = || {
-        let phys_addr = pf_alloc.alloc().unwrap().as_phys_address();
-        (phys_addr.as_mut_ptr() as *mut Sv39PageTable, phys_addr)
-    };
+    drop(pf_alloc);
 
     for address in (kernel_start..kernel_end).step_by(2.mib()) {
         let ident = VirtualAddress::new(address);
         let phys = PhysicalAddress::new(address);
         let permissions = Read | Write | Execute;
 
-        (&mut *PAGE_TABLE_ROOT.get()).map(
-            phys,
-            ident,
-            PageSize::Megapage,
-            permissions,
-            || ident_mem_phys,
-            |p| VirtualAddress::new(p.as_usize()),
-        );
+        (&mut *PAGE_TABLE_ROOT.get()).map(phys, ident, PageSize::Megapage, permissions);
     }
 
     let bss_start = __bss_start.as_usize();
@@ -110,8 +96,6 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             crate::kernel_patching::kernel_section_p2v(addr),
             PageSize::Kilopage,
             Read | Write,
-            &mut page_alloc,
-            |p| VirtualAddress::new(p.as_usize()),
         );
     }
 
@@ -125,8 +109,6 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             crate::kernel_patching::kernel_section_p2v(addr),
             PageSize::Kilopage,
             Read | Write,
-            &mut page_alloc,
-            |p| VirtualAddress::new(p.as_usize()),
         );
     }
 
@@ -140,8 +122,6 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             crate::kernel_patching::kernel_section_p2v(addr),
             PageSize::Kilopage,
             Read | Execute,
-            &mut page_alloc,
-            |p| VirtualAddress::new(p.as_usize()),
         );
     }
 
@@ -155,45 +135,17 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             crate::kernel_patching::kernel_section_p2v(addr),
             PageSize::Kilopage,
             Read | Write,
-            &mut page_alloc,
-            |p| VirtualAddress::new(p.as_usize()),
         );
     }
 
     for addr in 0..64 {
         (&mut *PAGE_TABLE_ROOT.get()).map(
             PhysicalAddress::new(addr * 1.gib()),
-            VirtualAddress::new(0xFFFFFFC000000000 + addr * 1.gib()),
+            VirtualAddress::new(PHYS_OFFSET_VALUE + addr * 1.gib()),
             PageSize::Gigapage,
             Read | Write,
-            &mut page_alloc,
-            |p| VirtualAddress::new(p.as_usize()),
         );
     }
-
-    #[cfg(feature = "virt")]
-    (&mut *PAGE_TABLE_ROOT.get()).map(
-        PhysicalAddress::new(0x10_0000),
-        VirtualAddress::new(0x10_0000),
-        PageSize::Kilopage,
-        Read | Write,
-        &mut page_alloc,
-        |p| VirtualAddress::new(p.as_usize()),
-    );
-
-    if !(&*PAGE_TABLE_ROOT.get()).is_mapped(fdt_virt, |p| VirtualAddress::new(p.as_usize())) {
-        let rounded_up = ((fdt_phys.as_usize() + fdt_size as usize) & !0xFFF) + 0x1000;
-
-        for addr in (fdt_phys.as_usize()..rounded_up).step_by(4096) {
-            let fdt_phys = PhysicalAddress::new(addr);
-            let fdt_virt = VirtualAddress::new(addr);
-            (&mut *PAGE_TABLE_ROOT.get()).map(fdt_phys, fdt_virt, PageSize::Kilopage, Read, &mut page_alloc, |p| {
-                VirtualAddress::new(p.as_usize())
-            });
-        }
-    }
-
-    drop(pf_alloc);
 
     let sp: usize;
     let gp: usize;
@@ -203,10 +155,12 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let new_sp = (sp - phys_load) + page_offset_value;
     let new_gp = (gp - phys_load) + page_offset_value;
 
-    crate::mem::satp(crate::mem::SatpMode::Sv39, 0, PhysicalAddress::from_ptr(&PAGE_TABLE_ROOT));
+    satp::write(Satp { mode: SatpMode::Sv39, asid: 0, root_page_table: PhysicalAddress::from_ptr(&PAGE_TABLE_ROOT) });
     crate::mem::sfence(None, None);
 
-    vmem_trampoline(hart_id, fdt, new_sp, new_gp, kmain)
+    crate::mem::PHYSICAL_OFFSET.store(PHYS_OFFSET_VALUE, core::sync::atomic::Ordering::Relaxed);
+
+    vmem_trampoline(hart_id, (fdt as usize + PHYS_OFFSET_VALUE) as *const u8, new_sp, new_gp, kmain)
 }
 
 #[naked]

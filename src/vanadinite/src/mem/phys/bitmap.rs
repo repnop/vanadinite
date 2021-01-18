@@ -29,8 +29,6 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
 
     #[track_caller]
     unsafe fn alloc(&mut self) -> Option<PhysicalPage> {
-        let mut page = None;
-
         if let Some((index, entry)) = self.bitmap.iter_mut().enumerate().find(|(_, e)| **e != FULL_ENTRY) {
             let bit_index = entry.trailing_ones() as usize;
 
@@ -38,12 +36,12 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
             let page_ptr = page_ptr as *mut u8;
 
             if page_ptr <= self.mem_end {
-                page = Some(PhysicalPage(page_ptr));
                 *entry |= 1 << bit_index;
+                return Some(PhysicalPage(page_ptr));
             }
         }
 
-        page
+        None
     }
 
     // FIXME: this should look for inter-u64 regions

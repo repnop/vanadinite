@@ -2,7 +2,17 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::perms::ToPermissions;
+use crate::{
+    csr::satp,
+    mem::{
+        paging::ToPermissions,
+        phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
+        phys2virt,
+    },
+    utils::Units,
+};
+
+pub const PHYS_PPN_MASK: usize = 0x0FFF_FFFF_FFFF;
 
 #[repr(C, align(4096))]
 pub struct Sv39PageTable {
@@ -15,161 +25,126 @@ impl Sv39PageTable {
     }
 
     #[track_caller]
-    pub fn map<F, A, P>(
-        &mut self,
-        phys: PhysicalAddress,
-        virt: VirtualAddress,
-        size: PageSize,
-        permissions: P,
-        mut page_alloc: F,
-        address_conversion: A,
-    ) where
-        F: FnMut() -> (*mut Sv39PageTable, PhysicalAddress),
-        A: Fn(PhysicalAddress) -> VirtualAddress,
+    pub fn map<P>(&mut self, phys: PhysicalAddress, virt: VirtualAddress, size: PageSize, perms: P)
+    where
         P: ToPermissions,
     {
-        size.assert_addr_aligned(phys.0);
-        size.assert_addr_aligned(virt.0);
+        PageSize::assert_addr_aligned(size, phys.as_usize());
+        PageSize::assert_addr_aligned(size, virt.as_usize());
 
-        let mut page_table = self;
-        let mut pte = &mut page_table.entries[virt.vpns()[2]];
+        let [kib_index, mib_index, gib_index] = virt.vpns();
 
-        for i in size.i() {
-            if pte.is_branch() {
-                let addr = pte.subtable().unwrap();
-                page_table = unsafe { &mut *address_conversion(addr).as_mut_ptr().cast() };
-            } else {
-                let (pt, phys_addr) = page_alloc();
-                pte.make_branch(phys_addr);
-                page_table = unsafe { &mut *pt };
+        let pte = match size {
+            PageSize::Gigapage => &mut self.entries[gib_index],
+            PageSize::Megapage => {
+                let next = Self::get_or_alloc_next_level(&mut self.entries[gib_index]);
+                &mut next.entries[mib_index]
             }
-            pte = &mut page_table.entries[virt.vpns()[i]];
-        }
+            PageSize::Kilopage => {
+                let next = Self::get_or_alloc_next_level(&mut self.entries[gib_index]);
+                let next = Self::get_or_alloc_next_level(&mut next.entries[mib_index]);
+                &mut next.entries[kib_index]
+            }
+        };
 
-        assert!(!pte.valid(), "Sv39PageTable::map: {:#p} -> {:#p}, page table entry already populated!", phys, virt);
-
-        pte.make_leaf(phys, permissions);
+        assert!(!pte.valid(), "Page table entry already populated mapping {:#p} -> {:#p}!", phys, virt);
+        pte.make_leaf(phys, perms);
     }
 
-    /// # Safety
-    ///
-    /// This method ***MUST*** be called with the exact inverse function with
-    /// which created the initial page table mappings
-    ///
-    /// Unmaps a page table and returns the virtual address of the last level
-    /// table if the mapping exists
-    pub unsafe fn unmap<F>(&mut self, virt: VirtualAddress, f: F) -> Option<VirtualAddress>
-    where
-        F: Fn(PhysicalAddress) -> VirtualAddress,
-    {
-        let mut va = None;
-        let mut pt = self;
-
-        for vpn in virt.vpns().iter().copied().rev() {
-            let entry = &mut pt.entries[vpn];
-            if entry.is_leaf() {
-                *entry = PageTableEntry::new();
-                break;
-            }
-
-            let pt_virt = f(entry.subtable().unwrap());
-
-            va = Some(pt_virt);
-            pt = &mut *(pt_virt.as_mut_ptr() as *mut Sv39PageTable);
-        }
-
-        va
-    }
-
-    pub fn is_mapped<F>(&self, virt: VirtualAddress, address_conversion: F) -> bool
-    where
-        F: Fn(PhysicalAddress) -> VirtualAddress,
-    {
-        self.translate(virt, address_conversion).is_some()
-    }
-
-    pub fn translate<F>(&self, virt: VirtualAddress, address_conversion: F) -> Option<PhysicalAddress>
-    where
-        F: Fn(PhysicalAddress) -> VirtualAddress,
-    {
-        let mut page_table = self;
-        let mut page_size = PageSize::Gigapage;
-
-        for vpn in virt.vpns().iter().copied().rev() {
-            let pte = &page_table.entries[vpn];
-            if pte.is_branch() {
-                page_table = unsafe { &*address_conversion(pte.subtable().unwrap()).as_ptr().cast() };
-
-                page_size = match page_size {
-                    PageSize::Gigapage => PageSize::Megapage,
-                    _ => PageSize::Kilopage,
-                };
-            } else if pte.valid() {
-                return pte.ppn().map(|p| p.offset(virt.offset_into_page(page_size)));
-            }
-        }
+    #[track_caller]
+    pub fn unmap(&mut self, virt: VirtualAddress) -> Option<(PhysicalAddress, PageSize)> {
+        let (entry, _size) = self.entry_mut(virt).expect("Attempted to unmap an already unmapped page!");
+        *entry = PageTableEntry::new();
 
         None
+
+        // FIXME: Free page table if able
     }
 
-    pub fn entry<F>(&self, virt: VirtualAddress, address_conversion: F) -> Option<&PageTableEntry>
-    where
-        F: Fn(PhysicalAddress) -> VirtualAddress,
-    {
-        let mut page_table = self;
-        let mut page_size = PageSize::Gigapage;
-
-        for vpn in virt.vpns().iter().copied().rev() {
-            let pte = &page_table.entries[vpn];
-            if pte.is_branch() {
-                page_table = unsafe { &*address_conversion(pte.subtable().unwrap()).as_ptr().cast() };
-
-                page_size = match page_size {
-                    PageSize::Gigapage => PageSize::Megapage,
-                    _ => PageSize::Kilopage,
-                };
-            } else if pte.valid() {
-                return Some(pte);
-            }
-        }
-
-        None
+    pub fn is_mapped(&self, virt: VirtualAddress) -> bool {
+        self.translate(virt).is_some()
     }
 
-    pub fn entry_mut<F>(&mut self, virt: VirtualAddress, address_conversion: F) -> Option<&mut PageTableEntry>
-    where
-        F: Fn(PhysicalAddress) -> VirtualAddress,
-    {
-        let mut page_table = self;
-        let mut page_size = PageSize::Gigapage;
+    pub fn translate(&self, virt: VirtualAddress) -> Option<PhysicalAddress> {
+        self.entry(virt).and_then(|(entry, size)| Some(entry.ppn()?.offset(virt.offset_into_page(size))))
+    }
 
-        for vpn in virt.vpns().iter().copied().rev() {
-            #[allow(clippy::deref_addrof)]
-            let pte = unsafe { &mut *(&raw mut page_table.entries[vpn]) };
-            if pte.is_branch() {
-                page_table = unsafe { &mut *address_conversion(pte.subtable().unwrap()).as_mut_ptr().cast() };
+    pub fn entry(&self, virt: VirtualAddress) -> Option<(&PageTableEntry, PageSize)> {
+        let [kib_index, mib_index, gib_index] = virt.vpns();
 
-                page_size = match page_size {
-                    PageSize::Gigapage => PageSize::Megapage,
-                    _ => PageSize::Kilopage,
-                };
-            } else if pte.valid() {
-                return Some(pte);
-            }
+        let gib_entry = &self.entries[gib_index];
+        let next_table = match gib_entry.kind() {
+            EntryKind::Leaf => return Some((gib_entry, PageSize::Gigapage)),
+            EntryKind::NotValid => return None,
+            EntryKind::Branch(phys) => unsafe { &*phys2virt(phys).as_ptr().cast::<Sv39PageTable>() },
+        };
+
+        let mib_entry = &next_table.entries[mib_index];
+        let next_table = match mib_entry.kind() {
+            EntryKind::Leaf => return Some((mib_entry, PageSize::Megapage)),
+            EntryKind::NotValid => return None,
+            EntryKind::Branch(phys) => unsafe { &*phys2virt(phys).as_ptr().cast::<Sv39PageTable>() },
+        };
+
+        let kib_entry = &next_table.entries[kib_index];
+        match kib_entry.kind() {
+            EntryKind::Leaf => Some((kib_entry, PageSize::Kilopage)),
+            EntryKind::NotValid => None,
+            EntryKind::Branch(_) => unreachable!("A KiB PTE was marked as a branch?"),
         }
+    }
 
-        None
+    pub fn entry_mut(&mut self, virt: VirtualAddress) -> Option<(&mut PageTableEntry, PageSize)> {
+        let [kib_index, mib_index, gib_index] = virt.vpns();
+
+        let gib_entry = &mut self.entries[gib_index];
+        let next_table = match gib_entry.kind() {
+            EntryKind::Leaf => return Some((gib_entry, PageSize::Gigapage)),
+            EntryKind::NotValid => return None,
+            EntryKind::Branch(phys) => unsafe { &mut *phys2virt(phys).as_mut_ptr().cast::<Sv39PageTable>() },
+        };
+
+        let mib_entry = &mut next_table.entries[mib_index];
+        let next_table = match mib_entry.kind() {
+            EntryKind::Leaf => return Some((mib_entry, PageSize::Megapage)),
+            EntryKind::NotValid => return None,
+            EntryKind::Branch(phys) => unsafe { &mut *phys2virt(phys).as_mut_ptr().cast::<Sv39PageTable>() },
+        };
+
+        let kib_entry = &mut next_table.entries[kib_index];
+        match kib_entry.kind() {
+            EntryKind::Leaf => Some((kib_entry, PageSize::Kilopage)),
+            EntryKind::NotValid => None,
+            EntryKind::Branch(_) => unreachable!("A KiB PTE was marked as a branch?"),
+        }
     }
 
     /// # Safety
     ///
     /// This function assumes that `satp` holds a valid physical pointer to a
     /// page table that can be safely converted with [`phys2virt`](crate::mem::phys2virt)
+    #[inline(always)]
     pub unsafe fn current() -> *mut Sv39PageTable {
-        let satp: usize;
-        asm!("csrr {}, satp", out(reg) satp);
+        phys2virt(satp::read().root_page_table).as_mut_ptr().cast()
+    }
 
-        crate::mem::phys2virt(PhysicalAddress::new((satp & 0x0FFF_FFFF_FFFF) << 12)).as_mut_ptr().cast()
+    #[track_caller]
+    fn get_or_alloc_next_level(entry: &mut PageTableEntry) -> &mut Sv39PageTable {
+        match entry.kind() {
+            EntryKind::Branch(phys) => unsafe { &mut *phys2virt(phys).as_mut_ptr().cast() },
+            EntryKind::NotValid => unsafe {
+                let page = PHYSICAL_MEMORY_ALLOCATOR.lock().alloc().expect("out of memory!");
+                // make sure the memory is initialized before we convert to
+                // a exclusive reference
+                let ptr = phys2virt(page.as_phys_address()).as_mut_ptr().cast::<Sv39PageTable>();
+                ptr.write(Sv39PageTable::new());
+
+                entry.make_branch(page.as_phys_address());
+
+                &mut *ptr
+            },
+            EntryKind::Leaf => panic!("Attempting to overwrite a leaf entry somehow"),
+        }
     }
 }
 
@@ -218,6 +193,14 @@ impl PageTableEntry {
         self.0 = (ppn << 10) | 1;
     }
 
+    pub fn kind(self) -> EntryKind {
+        match (self.valid(), self.is_branch()) {
+            (true, true) => EntryKind::Branch(PhysicalAddress::new(((self.0 >> 10) & 0x0FFF_FFFF_FFFF) << 12)),
+            (true, false) => EntryKind::Leaf,
+            (false, _) => EntryKind::NotValid,
+        }
+    }
+
     pub fn is_leaf(self) -> bool {
         self.valid() && (self.0 & 0b1110 != 0)
     }
@@ -239,6 +222,12 @@ impl PageTableEntry {
             false => None,
         }
     }
+}
+
+pub enum EntryKind {
+    NotValid,
+    Leaf,
+    Branch(PhysicalAddress),
 }
 
 impl core::fmt::Pointer for PhysicalAddress {
@@ -340,6 +329,14 @@ impl PhysicalAddress {
         // Physical page numbers are 44 bits wide
         (self.0 >> 12) & 0x0FFF_FFFF_FFFF
     }
+
+    pub fn offset_into_page(self, page_size: PageSize) -> usize {
+        match page_size {
+            PageSize::Gigapage => self.0 & 0x3FFFFFFF,
+            PageSize::Megapage => self.0 & 0x1FFFFF,
+            PageSize::Kilopage => self.0 & 0xFFF,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -352,20 +349,16 @@ pub enum PageSize {
 impl PageSize {
     #[track_caller]
     fn assert_addr_aligned(self, addr: usize) {
-        let alignment_required = match self {
-            PageSize::Kilopage => 4 * 1024,
-            PageSize::Megapage => 2 * 1024 * 1024,
-            PageSize::Gigapage => 1 * 1024 * 1024 * 1024,
-        };
+        let alignment_required = self.to_byte_size();
 
         assert_eq!(addr % alignment_required, 0, "physical address alignment check failed");
     }
 
-    fn i(self) -> impl Iterator<Item = usize> {
+    pub fn to_byte_size(self) -> usize {
         match self {
-            PageSize::Kilopage => (0..2).rev(),
-            PageSize::Megapage => (1..2).rev(),
-            PageSize::Gigapage => (2..2).rev(),
+            PageSize::Kilopage => 4.kib(),
+            PageSize::Megapage => 2.mib(),
+            PageSize::Gigapage => 1.gib(),
         }
     }
 }

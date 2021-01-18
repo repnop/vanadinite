@@ -81,7 +81,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         // we need to patch them back to physical "virtual" addresses to be
         // unmapped
         let patched = VirtualAddress::new(virt2phys(VirtualAddress::new(address)).as_usize());
-        unsafe { (&mut *Sv39PageTable::current()).unmap(patched, mem::phys2virt) };
+        unsafe { (&mut *Sv39PageTable::current()).unmap(patched) };
     }
 
     crate::io::init_logging();
