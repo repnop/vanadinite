@@ -84,6 +84,13 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         unsafe { (&mut *Sv39PageTable::current()).unmap(patched) };
     }
 
+    let heap_frame_alloc = unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(64) };
+    let heap_start = heap_frame_alloc.expect("moar memory").as_phys_address();
+    unsafe { mem::heap::HEAP_ALLOCATOR.init(mem::phys2virt(heap_start).as_mut_ptr(), 64 * 4.kib()) };
+
+    unsafe { crate::thread_local::init_thread_locals() };
+    HART_ID.set(hart_id);
+
     crate::io::init_logging();
 
     let fdt = match unsafe { fdt::Fdt::new(fdt) } {
@@ -114,13 +121,20 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
-    let heap_frame_alloc = unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(64) };
-    let heap_start = heap_frame_alloc.expect("moar memory").as_phys_address();
-    log::debug!("Initing heap at {:#p} (phys {:#p})", mem::phys2virt(heap_start), heap_start);
-    unsafe { mem::heap::HEAP_ALLOCATOR.init(mem::phys2virt(heap_start).as_mut_ptr(), 64 * 4.kib()) };
+    if let Some(args) = fdt.chosen().and_then(|c| c.bootargs()) {
+        let split_args = args.split(' ').map(|s| {
+            let mut parts = s.splitn(2, '=');
+            (parts.next().unwrap(), parts.next())
+        });
 
-    unsafe { crate::thread_local::init_thread_locals() };
-    HART_ID.set(hart_id);
+        for (option, value) in split_args {
+            match option {
+                "log-filter" => io::parse_log_filter(value),
+                "" => {}
+                _ => log::warn!("Unknown kernel argument: '{}'", option),
+            }
+        }
+    }
 
     let model = fdt
         .find_node("/")

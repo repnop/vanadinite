@@ -6,35 +6,68 @@ MACHINE = "virt"
 RAM = "512M"
 CPUS = "5"
 ADDITIONAL_FEATURES = ""
+KARGS = ""
 
 [tasks.'build-vanadinite.release']
 env = { RUSTFLAGS = "-C link-arg=-Tvanadinite/lds/${MACHINE}.lds -C code-model=medium" }
 command = "cargo"
-args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown-none-elf", "--manifest-path", "src/vanadinite/Cargo.toml", "--no-default-features", "--features", "${MACHINE} ${ADDITIONAL_FEATURES}"]
+args = [
+    "build",
+    "-p",
+    "vanadinite",
+    "--release",
+    "--target",
+    "riscv64gc-unknown-none-elf",
+    "--manifest-path",
+    "src/vanadinite/Cargo.toml",
+    "--no-default-features",
+    "--features",
+    "${MACHINE} ${ADDITIONAL_FEATURES}",
+]
 
 [tasks.'build-vanadinite.debug']
 env = { RUSTFLAGS = "-C link-arg=-Tvanadinite/lds/${MACHINE}.lds -C code-model=medium" }
 command = "cargo"
-args = ["build", "-p", "vanadinite", "--release", "--target", "riscv64gc-unknown-none-elf", "--manifest-path", "src/vanadinite/Cargo.toml", "--no-default-features", "--features", "${MACHINE} ${ADDITIONAL_FEATURES} debug_log"]
+args = [
+    "build",
+    "-p",
+    "vanadinite",
+    "--release",
+    "--target",
+    "riscv64gc-unknown-none-elf",
+    "--manifest-path",
+    "src/vanadinite/Cargo.toml",
+    "--no-default-features",
+    "--features",
+    "${MACHINE} ${ADDITIONAL_FEATURES} debug_log",
+]
 
 
 [tasks.run]
 dependencies = ["build-vanadinite.release"]
 command = "qemu-system-riscv64"
-args= [
-    "-machine", "${MACHINE}",
-    "-cpu", "rv64",
-    "-smp", "${CPUS}",
-    "-m", "${RAM}",
-    
+args = [
+    "-machine",
+    "${MACHINE}",
+    "-cpu",
+    "rv64",
+    "-smp",
+    "${CPUS}",
+    "-m",
+    "${RAM}",
+    "-append",
+    "${KARGS}",
     # force the most recent VirtIO spec version
     #"-global", "virtio-mmio.force-legacy=false",
     #"-drive", "file=testing_files/test_fat.fs,if=none,format=raw,id=hd",
     #"-device", "virtio-blk-device,drive=hd",
     #
-    "-bios", "opensbi-riscv64-generic-fw_dynamic.bin",
-    "-kernel", "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
-    "-serial", "mon:stdio",
+    "-bios",
+    "opensbi-riscv64-generic-fw_dynamic.bin",
+    "-kernel",
+    "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
+    "-serial",
+    "mon:stdio",
     "-nographic",
     #"-machine", "dumpdtb=testing_files/virt_with_virtio.dtb"
 ]
@@ -42,41 +75,50 @@ args= [
 [tasks.debug]
 dependencies = ["build-vanadinite.debug"]
 command = "qemu-system-riscv64"
-args= [
-    "-machine", "${MACHINE}",
-    "-cpu", "rv64",
-    "-smp", "${CPUS}",
-    "-m", "${RAM}",
-    
+args = [
+    "-machine",
+    "${MACHINE}",
+    "-cpu",
+    "rv64",
+    "-smp",
+    "${CPUS}",
+    "-m",
+    "${RAM}",
+    "-append",
+    "${KARGS}",
     # force the most recent VirtIO spec version
     #"-global", "virtio-mmio.force-legacy=false",
     #"-drive", "file=testing_files/test_fat.fs,if=none,format=raw,id=hd",
     #"-device", "virtio-blk-device,drive=hd",
-
-    "-bios", "opensbi-riscv64-generic-fw_dynamic.bin",
-    "-kernel", "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
-    "-monitor", "stdio",
-    "-gdb", "tcp::1234",
+    "-bios",
+    "opensbi-riscv64-generic-fw_dynamic.bin",
+    "-kernel",
+    "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
+    "-monitor",
+    "stdio",
+    "-gdb",
+    "tcp::1234",
     "-S",
-    "-d", "guest_errors,trace:riscv_trap,trace:sifive_gpio_write,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int,trace:exynos_uart_read",
-    "-D", "qemu.log",
+    "-d",
+    "guest_errors,trace:riscv_trap,trace:sifive_gpio_write,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int,trace:exynos_uart_read",
+    "-D",
+    "qemu.log",
 ]
 
 [tasks.gdb]
 command = "riscv64-unknown-elf-gdb"
 args = [
     "src/target/riscv64gc-unknown-none-elf/release/vanadinite",
-    "--eval-command", "target remote :1234",
+    "--eval-command",
+    "target remote :1234",
 ]
 
 [tasks.lldb]
 command = "lldb"
-args = [
-    "target/riscv64gc-unknown-none-elf/release/vanadinite",
-]
+args = ["target/riscv64gc-unknown-none-elf/release/vanadinite"]
 
 [tasks.opensbi]
-env = { CROSS_COMPILE="riscv64-unknown-elf-", PLATFORM_RISCV_XLEN=64 }
+env = { CROSS_COMPILE = "riscv64-unknown-elf-", PLATFORM_RISCV_XLEN = 64 }
 script = '''
     git submodule init submodules/opensbi
     git submodule update --remote submodules/opensbi
