@@ -91,7 +91,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     unsafe { crate::thread_local::init_thread_locals() };
     HART_ID.set(hart_id);
 
-    crate::io::init_logging();
+    crate::io::logging::init_logging();
 
     let fdt = match unsafe { fdt::Fdt::new(fdt) } {
         Some(fdt) => fdt,
@@ -129,7 +129,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
         for (option, value) in split_args {
             match option {
-                "log-filter" => io::parse_log_filter(value),
+                "log-filter" => io::logging::parse_log_filter(value),
                 "" => {}
                 _ => log::warn!("Unknown kernel argument: '{}'", option),
             }

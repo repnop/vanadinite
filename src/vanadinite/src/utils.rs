@@ -2,6 +2,15 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+#[macro_export]
+macro_rules! dbg {
+    ($e:expr) => {{
+        let value = $e;
+        crate::println!(concat!(stringify!($e), " = {:?}"), value);
+        value
+    }};
+}
+
 #[repr(transparent)]
 pub struct LinkerSymbol(u8);
 

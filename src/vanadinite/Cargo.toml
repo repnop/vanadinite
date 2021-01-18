@@ -16,7 +16,6 @@ sbi = { path = "../sbi" }
 [features]
 default = ["virt"]
 
-debug_log = []
 virt = []
 sifive_u = []
 "pmalloc.allocator.bitmap" = []

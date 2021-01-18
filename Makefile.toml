@@ -39,7 +39,7 @@ args = [
     "src/vanadinite/Cargo.toml",
     "--no-default-features",
     "--features",
-    "${MACHINE} ${ADDITIONAL_FEATURES} debug_log",
+    "${MACHINE} ${ADDITIONAL_FEATURES}",
 ]
 
 
