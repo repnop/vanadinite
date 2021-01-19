@@ -129,12 +129,15 @@ script = '''
 
 [tasks.userspace]
 script = '''
+    rm -f initfs.tar
+    touch initfs.tar
     cd userspace
-    filter_out=(./libvanadinite/ ./rt0/ ./.cargo/)
-    for directory in ./*/; do
+    filter_out=(libvanadinite rt0 .cargo)
+    ls -l | awk '/^d/ { print $9 }' | while IFS= read -r directory; do
         if [[ ! " ${filter_out[@]} " =~ " ${directory} " ]]; then
             cd ${directory}
             cargo build --release
+            tar -rf ../../initfs.tar -C ./target/riscv64gc-unknown-none-elf/release/ ${directory}
             cd ..
         fi
     done

@@ -121,6 +121,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
+    let mut init_path = "init";
     if let Some(args) = fdt.chosen().and_then(|c| c.bootargs()) {
         let split_args = args.split(' ').map(|s| {
             let mut parts = s.splitn(2, '=');
@@ -130,8 +131,12 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         for (option, value) in split_args {
             match option {
                 "log-filter" => io::logging::parse_log_filter(value),
+                "init" => match value {
+                    Some(path) => init_path = path,
+                    None => log::warn!("No path provided for init process! Defaulting to `init`"),
+                },
                 "" => {}
-                _ => log::warn!("Unknown kernel argument: '{}'", option),
+                _ => log::warn!("Unknown kernel argument: `{}`", option),
             }
         }
     }
@@ -268,15 +273,18 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     csr::sstatus::set_fs(csr::sstatus::FloatingPointStatus::Initial);
     csr::sie::enable();
 
-    pub static SHELL: &[u8] =
-        include_bytes!("../../../userspace/shell/target/riscv64gc-unknown-none-elf/release/shell");
+    let tar = tar::Archive::new(INIT_FS).unwrap();
 
-    scheduler::Scheduler::push(process::Process::load(&elf64::Elf::new(SHELL).unwrap()));
+    scheduler::Scheduler::push(process::Process::load(
+        &elf64::Elf::new(tar.file(init_path).unwrap().contents).unwrap(),
+    ));
 
     log::info!("Scheduling init process!");
 
     scheduler::Scheduler::schedule()
 }
+
+static INIT_FS: &[u8] = include_bytes!("../../../init.tar");
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
