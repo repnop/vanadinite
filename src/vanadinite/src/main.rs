@@ -284,7 +284,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     scheduler::Scheduler::schedule()
 }
 
-static INIT_FS: &[u8] = include_bytes!("../../../init.tar");
+static INIT_FS: &[u8] = include_bytes!("../../../initfs.tar");
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
