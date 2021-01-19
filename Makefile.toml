@@ -137,7 +137,7 @@ script = '''
         if [[ ! " ${filter_out[@]} " =~ " ${directory} " ]]; then
             cd ${directory}
             cargo build --release
-            tar -rf ../../initfs.tar -C ./target/riscv64gc-unknown-none-elf/release/ ${directory}
+            tar -rf ../../initfs.tar --format=ustar -C ./target/riscv64gc-unknown-none-elf/release/ ${directory}
             cd ..
         fi
     done
