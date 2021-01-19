@@ -23,29 +23,35 @@ impl Scheduler {
         Self { active: init, processes: VecDeque::new() }
     }
 
-    pub fn push(this: &RefCell<Self>, process: Process) {
+    pub fn push(process: Process) {
+        let this = &SCHEDULER;
         this.borrow_mut().processes.push_back(process);
     }
 
-    pub fn mark_active_dead(this: &RefCell<Self>) {
+    pub fn mark_active_dead() {
+        let this = &SCHEDULER;
         this.borrow_mut().active.state = ProcessState::Dead;
     }
 
-    pub fn active_pid(this: &RefCell<Self>) -> usize {
+    pub fn active_pid() -> usize {
+        let this = &SCHEDULER;
         this.borrow().active.pid
     }
 
-    pub fn update_active_registers(this: &RefCell<Self>, frame: TrapFrame, pc: usize) {
+    pub fn update_active_registers(frame: TrapFrame, pc: usize) {
+        let this = &SCHEDULER;
         let mut this = this.borrow_mut();
         this.active.frame = frame;
         this.active.pc = pc;
     }
 
-    pub fn with_mut_self<T, F: FnOnce(&mut Self) -> T>(this: &RefCell<Self>, f: F) -> T {
+    pub fn with_mut_self<T, F: FnOnce(&mut Self) -> T>(f: F) -> T {
+        let this = &SCHEDULER;
         f(&mut *this.borrow_mut())
     }
 
-    pub fn schedule(this: &RefCell<Self>) -> ! {
+    pub fn schedule() -> ! {
+        let this = &SCHEDULER;
         assert_interrupts_disabled();
         let (registers, pc) = {
             let mut this = this.borrow_mut();

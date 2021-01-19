@@ -6,7 +6,6 @@ use crate::{
     interrupts::{isr::isr_entry, PLIC},
     mem::paging::VirtualAddress,
     scheduler::Scheduler,
-    scheduler::SCHEDULER,
     syscall,
 };
 
@@ -190,15 +189,15 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
             match sepc.is_kernel_region() {
                 true => panic!("kernel {:?} at address {:#p}", trap_kind, stval),
                 false => {
-                    let pid = Scheduler::active_pid(&*SCHEDULER);
+                    let pid = Scheduler::active_pid();
                     log::error!("Active process (pid: {}) {:?} at address {:#p}, killing", pid, trap_kind, stval);
-                    Scheduler::mark_active_dead(&*SCHEDULER);
+                    Scheduler::mark_active_dead();
                 }
             }
         }
         Trap::SupervisorTimerInterrupt => {
-            Scheduler::update_active_registers(&*SCHEDULER, *regs, sepc);
-            Scheduler::schedule(&*SCHEDULER);
+            Scheduler::update_active_registers(*regs, sepc);
+            Scheduler::schedule();
         }
         Trap::UserModeEnvironmentCall => {
             match regs.registers.a0 {
@@ -207,12 +206,12 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                 2 => syscall::read_stdin::read_stdin(VirtualAddress::new(regs.registers.a1), regs.registers.a2, regs),
                 n => {
                     log::error!("Unknown syscall number: {}", n);
-                    Scheduler::mark_active_dead(&*SCHEDULER);
+                    Scheduler::mark_active_dead();
                 }
             }
 
-            Scheduler::update_active_registers(&*SCHEDULER, *regs, sepc + 4);
-            Scheduler::schedule(&*SCHEDULER);
+            Scheduler::update_active_registers(*regs, sepc + 4);
+            Scheduler::schedule();
         }
         Trap::SupervisorExternalInterrupt => {
             let plic = PLIC.lock();

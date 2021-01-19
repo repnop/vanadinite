@@ -159,13 +159,29 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         (memory.size.unwrap() / 1024 / 1024, memory.starting_address)
     };
 
-    log::info!("Booted on a {} on hart {}", model, hart_id);
-    log::info!("{} MiB of memory starting at {:#p}", mem_size, mem_start);
-    log::info!("Timer clock running @ {}Hz", timebase_frequency);
-    log::info!("SBI spec version: {:?}", sbi::base::spec_version());
-    log::info!("SBI implementor: {:?}", sbi::base::impl_id());
-    log::info!("marchid: {:#x}", sbi::base::marchid());
-    log::info!("Installing trap handler at {:#p}", unsafe { stvec_trap_shim.as_ptr() });
+    let (impl_major, impl_minor) = {
+        let version = sbi::base::impl_version();
+        // This is how OpenSBI encodes their version, hopefully will be the same
+        // between others
+        (version >> 16, version & 0xFFFF)
+    };
+
+    let (spec_major, spec_minor) = {
+        let version = sbi::base::spec_version();
+        (version.major, version.minor)
+    };
+
+    log::info!("vanadinite version {}", env!("CARGO_PKG_VERSION"));
+    log::info!("=== Machine Info ===");
+    log::info!(" Device Model: {}", model);
+    log::info!(" Booting Hart ID: {}", hart_id);
+    log::info!(" RAM: {} MiB @ {:#X}", mem_size, mem_start as usize);
+    log::info!(" Timer Clock: {}Hz", timebase_frequency);
+    log::info!("=== SBI Implementation ===");
+    log::info!(" Implementor: {:?} (version: {}.{})", sbi::base::impl_id(), impl_major, impl_minor);
+    log::info!(" Spec Version: {}.{}", spec_major, spec_minor);
+
+    log::debug!("Installing trap handler at {:#p}", unsafe { stvec_trap_shim.as_ptr() });
     csr::stvec::set(unsafe { core::mem::transmute(stvec_trap_shim.as_ptr()) });
 
     match fdt.find_compatible(Plic::compatible_with()) {
@@ -196,7 +212,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
             plic.init(ndevs, contexts);
 
-            log::info!("Registering PLIC @ {:#p}", ic_virt);
+            log::debug!("Registering PLIC @ {:#p}", ic_virt);
             interrupts::register_plic(plic);
         }
         None => panic!("Can't find PLIC!"),
@@ -255,11 +271,11 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     pub static SHELL: &[u8] =
         include_bytes!("../../../userspace/shell/target/riscv64gc-unknown-none-elf/release/shell");
 
-    scheduler::Scheduler::push(&*scheduler::SCHEDULER, process::Process::load(&elf64::Elf::new(SHELL).unwrap()));
+    scheduler::Scheduler::push(process::Process::load(&elf64::Elf::new(SHELL).unwrap()));
 
     log::info!("Scheduling init process!");
 
-    scheduler::Scheduler::schedule(&*scheduler::SCHEDULER)
+    scheduler::Scheduler::schedule()
 }
 
 #[panic_handler]

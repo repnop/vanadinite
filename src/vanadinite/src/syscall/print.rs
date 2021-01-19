@@ -1,23 +1,20 @@
 use crate::{
-    csr::sstatus::TemporaryUserMemoryAccess,
-    io::ConsoleDevice,
-    mem::paging::VirtualAddress,
-    scheduler::{Scheduler, SCHEDULER},
+    csr::sstatus::TemporaryUserMemoryAccess, io::ConsoleDevice, mem::paging::VirtualAddress, scheduler::Scheduler,
 };
 
 pub fn print(virt: VirtualAddress, len: usize) {
     log::debug!("Attempting to print memory at {:#p} (len={})", virt, len);
-    let valid_memory = Scheduler::with_mut_self(&*SCHEDULER, |s| {
+    let valid_memory = Scheduler::with_mut_self(|s| {
         s.active.page_table.is_valid_readable(virt) && s.active.page_table.is_valid_readable(virt.offset(len))
     });
 
     if virt.is_kernel_region() {
         log::error!("Process tried to get us to read from our own memory >:(");
-        Scheduler::mark_active_dead(&*SCHEDULER);
+        Scheduler::mark_active_dead();
         return;
     } else if !valid_memory {
         log::error!("Process tried to get us to read from unmapped memory >:(");
-        Scheduler::mark_active_dead(&*SCHEDULER);
+        Scheduler::mark_active_dead();
         return;
     }
 

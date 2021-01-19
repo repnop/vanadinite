@@ -25,7 +25,7 @@ impl IsrEntry {
 }
 
 pub fn register_isr<T: InterruptServicable>(interrupt_id: usize, private: usize) {
-    log::info!("Registering ISR for {} on ID {}", core::any::type_name::<T>(), interrupt_id);
+    log::debug!("Registering ISR for {} on ID {}", core::any::type_name::<T>(), interrupt_id);
     let _disabler = super::InterruptDisabler::new();
     let slot = &ISR_REGISTRY[interrupt_id];
 

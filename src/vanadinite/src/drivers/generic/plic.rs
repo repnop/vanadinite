@@ -34,12 +34,12 @@ impl Plic {
     }
 
     pub fn enable_interrupt(&self, context: usize, source: usize) {
-        log::info!("Enabling interrupt {}", source);
+        log::debug!("Enabling interrupt {}", source);
         self.interrupt_enable[context].enable(source);
     }
 
     pub fn disable_interrupt(&self, context: usize, source: usize) {
-        log::info!("Disabling interrupt {}", source);
+        log::debug!("Disabling interrupt {}", source);
         self.interrupt_enable[context].disable(source);
     }
 
@@ -49,7 +49,7 @@ impl Plic {
             priority = Self::max_priority();
         }
 
-        log::info!("Setting priority {} for source {}", priority, source);
+        log::debug!("Setting priority {} for source {}", priority, source);
         self.source_priorities[source].set(priority as u32)
     }
 
@@ -59,7 +59,7 @@ impl Plic {
             threshold = Self::max_priority();
         }
 
-        log::info!("Setting threshold {} for context {}", threshold, context);
+        log::debug!("Setting threshold {} for context {}", threshold, context);
         self.threshold_and_claim[context].priority_threshold.set(threshold as u32)
     }
 
