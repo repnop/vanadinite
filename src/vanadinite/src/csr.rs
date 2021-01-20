@@ -12,13 +12,7 @@ pub mod stvec {
 pub mod sie {
     #[inline(always)]
     pub fn enable() {
-        unsafe {
-            asm!(
-                "li {tmp}, 0x222",
-                "csrw sie, {tmp}",
-                tmp = out(reg) _,
-            );
-        }
+        unsafe { asm!("csrw sie, {}", in(reg) 0x222) };
     }
 
     #[inline(always)]
