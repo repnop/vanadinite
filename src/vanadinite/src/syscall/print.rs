@@ -6,9 +6,11 @@ use libvanadinite::{syscalls::print::PrintErr, KResult};
 pub fn print(virt: VirtualAddress, len: usize, res_out: VirtualAddress) {
     log::debug!("Attempting to print memory at {:#p} (len={})", virt, len);
     let (valid_memory, valid_res) = Scheduler::with_mut_self(|s| {
+        let active = s.processes.front_mut().unwrap();
+
         (
-            s.active.page_table.is_valid_readable(virt) && s.active.page_table.is_valid_readable(virt.offset(len)),
-            s.active.page_table.is_valid_writable(res_out),
+            active.page_table.is_valid_readable(virt) && active.page_table.is_valid_readable(virt.offset(len)),
+            active.page_table.is_valid_writable(res_out),
         )
     });
 

@@ -19,9 +19,6 @@ thread_local! {
     pub static THREAD_CONTROL_BLOCK: StaticMut<ThreadControlBlock> = StaticMut::new(ThreadControlBlock::new());
 }
 
-pub static INIT_PROCESS: &[u8] =
-    include_bytes!("../../../userspace/init/target/riscv64gc-unknown-none-elf/release/init");
-
 pub struct PidCounter(AtomicUsize);
 
 impl PidCounter {

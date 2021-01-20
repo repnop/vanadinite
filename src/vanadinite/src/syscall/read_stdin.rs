@@ -6,7 +6,8 @@ use crate::{
 pub fn read_stdin(virt: VirtualAddress, len: usize, regs: &mut TrapFrame) {
     log::debug!("Attempting to print memory at {:#p} (len={})", virt, len);
     let valid_memory = Scheduler::with_mut_self(|s| {
-        s.active.page_table.is_valid_readable(virt) && s.active.page_table.is_valid_readable(virt.offset(len))
+        let active = s.processes.front_mut().unwrap();
+        active.page_table.is_valid_readable(virt) && active.page_table.is_valid_readable(virt.offset(len))
     });
 
     if virt.is_kernel_region() {

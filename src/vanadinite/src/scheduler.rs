@@ -2,7 +2,7 @@ use crate::{
     csr::satp::{self, Satp, SatpMode},
     interrupts::assert_interrupts_disabled,
     mem::{paging::VirtualAddress, sfence, virt2phys},
-    process::{Process, ProcessState, INIT_PROCESS},
+    process::{Process, ProcessState},
     thread_local,
     trap::TrapFrame,
 };
@@ -10,17 +10,17 @@ use alloc::collections::VecDeque;
 use core::{cell::RefCell, sync::atomic::Ordering};
 
 thread_local! {
-    pub static SCHEDULER: RefCell<Scheduler> = RefCell::new(Scheduler::new(Process::load(&elf64::Elf::new(INIT_PROCESS).unwrap())));
+    pub static SCHEDULER: RefCell<Scheduler> = RefCell::new(Scheduler::new());
 }
 
+#[derive(Default)]
 pub struct Scheduler {
-    pub active: Process,
     pub processes: VecDeque<Process>,
 }
 
 impl Scheduler {
-    pub fn new(init: Process) -> Self {
-        Self { active: init, processes: VecDeque::new() }
+    pub fn new() -> Self {
+        Self { processes: VecDeque::new() }
     }
 
     pub fn push(process: Process) {
@@ -29,20 +29,22 @@ impl Scheduler {
     }
 
     pub fn mark_active_dead() {
-        let this = &SCHEDULER;
-        this.borrow_mut().active.state = ProcessState::Dead;
+        let mut this = SCHEDULER.borrow_mut();
+        let active = this.processes.front_mut().expect("no active process?");
+        active.state = ProcessState::Dead;
     }
 
     pub fn active_pid() -> usize {
-        let this = &SCHEDULER;
-        this.borrow().active.pid
+        let this = SCHEDULER.borrow();
+        let active = this.processes.front().expect("no active process?");
+        active.pid
     }
 
     pub fn update_active_registers(frame: TrapFrame, pc: usize) {
-        let this = &SCHEDULER;
-        let mut this = this.borrow_mut();
-        this.active.frame = frame;
-        this.active.pc = pc;
+        let mut this = SCHEDULER.borrow_mut();
+        let active = this.processes.front_mut().expect("no active process?");
+        active.frame = frame;
+        active.pc = pc;
     }
 
     pub fn with_mut_self<T, F: FnOnce(&mut Self) -> T>(f: F) -> T {
@@ -55,30 +57,31 @@ impl Scheduler {
         assert_interrupts_disabled();
         let (registers, pc) = {
             let mut this = this.borrow_mut();
-            let current_dead = this.active.state.is_dead();
+            let current_dead = this.processes.front_mut().expect("no active process?").state.is_dead();
 
-            if !this.processes.is_empty() && !current_dead {
-                let next = this.processes.pop_front().unwrap();
-                let old = core::mem::replace(&mut this.active, next);
-                this.processes.push_back(old);
-            } else if !this.processes.is_empty() && current_dead {
-                log::info!("current process is ded");
-                let next = this.processes.pop_front().unwrap();
-                this.active = next;
+            if this.processes.len() > 1 {
+                let active = this.processes.pop_front().unwrap();
+
+                if !current_dead {
+                    log::debug!("current process is ded");
+                    this.processes.push_back(active);
+                }
             } else if current_dead {
                 unreachable!("we have no process to schedule :(");
             }
 
+            let active = this.processes.front_mut().expect("no active process?");
+
             satp::write(Satp {
                 mode: SatpMode::Sv39,
-                asid: this.active.pid as u16,
-                root_page_table: virt2phys(VirtualAddress::from_ptr(this.active.page_table.table())),
+                asid: active.pid as u16,
+                root_page_table: virt2phys(VirtualAddress::from_ptr(active.page_table.table())),
             });
 
-            sfence(None, Some(this.active.pid as u16));
+            sfence(None, Some(active.pid as u16));
 
-            log::debug!("scheduling process: pid={}, pc={:#p}", this.active.pid, this.active.pc as *mut u8);
-            (this.active.frame.registers, this.active.pc)
+            log::debug!("scheduling process: pid={}, pc={:#p}", active.pid, active.pc as *mut u8);
+            (active.frame.registers, active.pc)
         };
 
         let frequency = crate::TIMER_FREQ.load(Ordering::Relaxed);
