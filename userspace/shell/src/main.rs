@@ -14,7 +14,9 @@ fn main() {
 
         match cmd.split(' ').next().unwrap() {
             "echo" => println!("{}", cmd.split_once(' ').map(|(_, s)| s).unwrap_or_default()),
-            "yeet" => std::syscalls::print(unsafe { core::slice::from_raw_parts(0xffffffc000000000 as *mut u8, 1024) }),
+            "yeet" => {
+                drop(std::syscalls::print(unsafe { core::slice::from_raw_parts(0xffffffc000000000 as *mut u8, 1024) }))
+            }
             "" => {}
             _ => println!("Unrecognized command :("),
         }

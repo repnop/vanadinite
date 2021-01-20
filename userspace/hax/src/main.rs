@@ -12,6 +12,9 @@ fn main() {
     print!("\nyou typed: ");
     println!("{}", core::str::from_utf8(&input).unwrap());
 
-    std::syscalls::print(unsafe { core::slice::from_raw_parts(0xffffffd000004690 as *mut u8, 1024) });
-    println!("this is print 2\n");
+    let result = std::syscalls::print(unsafe { core::slice::from_raw_parts(0xffffffd000004690 as *mut u8, 1024) });
+    println!("{:?}", result);
+
+    let result = std::syscalls::print(&input[..]);
+    println!("\n{:?}", result);
 }

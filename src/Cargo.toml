@@ -1,5 +1,14 @@
 [workspace]
-members = ["common", "elf64", "fat32", "fdt", "sbi", "tar", "vanadinite"]
+members = [
+    "common",
+    "elf64",
+    "fat32",
+    "fdt",
+    "libvanadinite",
+    "sbi",
+    "tar",
+    "vanadinite",
+]
 
 [profile.release]
 debug = true

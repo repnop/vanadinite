@@ -8,7 +8,7 @@ CPUS = "5"
 ADDITIONAL_FEATURES = ""
 KARGS = ""
 
-[tasks.'build-vanadinite.release']
+[tasks.vanadinite]
 env = { RUSTFLAGS = "-C link-arg=-Tvanadinite/lds/${MACHINE}.lds -C code-model=medium" }
 command = "cargo"
 args = [
@@ -24,27 +24,9 @@ args = [
     "--features",
     "${MACHINE} ${ADDITIONAL_FEATURES}",
 ]
-
-[tasks.'build-vanadinite.debug']
-env = { RUSTFLAGS = "-C link-arg=-Tvanadinite/lds/${MACHINE}.lds -C code-model=medium" }
-command = "cargo"
-args = [
-    "build",
-    "-p",
-    "vanadinite",
-    "--release",
-    "--target",
-    "riscv64gc-unknown-none-elf",
-    "--manifest-path",
-    "src/vanadinite/Cargo.toml",
-    "--no-default-features",
-    "--features",
-    "${MACHINE} ${ADDITIONAL_FEATURES}",
-]
-
 
 [tasks.run]
-dependencies = ["build-vanadinite.release"]
+dependencies = ["userspace", "vanadinite"]
 command = "qemu-system-riscv64"
 args = [
     "-machine",
@@ -73,7 +55,7 @@ args = [
 ]
 
 [tasks.debug]
-dependencies = ["build-vanadinite.debug"]
+dependencies = ["userspace", "vanadinite"]
 command = "qemu-system-riscv64"
 args = [
     "-machine",
@@ -113,10 +95,6 @@ args = [
     "target remote :1234",
 ]
 
-[tasks.lldb]
-command = "lldb"
-args = ["target/riscv64gc-unknown-none-elf/release/vanadinite"]
-
 [tasks.opensbi]
 env = { CROSS_COMPILE = "riscv64-unknown-elf-", PLATFORM_RISCV_XLEN = 64 }
 script = '''
@@ -132,26 +110,16 @@ script = '''
     rm -f initfs.tar
     touch initfs.tar
     cd userspace
-    filter_out=(libvanadinite rt0 .cargo)
-    ls -l | awk '/^d/ { print $9 }' | while IFS= read -r directory; do
-        if [[ ! " ${filter_out[@]} " =~ " ${directory} " ]]; then
-            cd ${directory}
-            cargo build --release
-            tar -rf ../../initfs.tar --format=ustar -C ./target/riscv64gc-unknown-none-elf/release/ ${directory}
-            cd ..
-        fi
+    
+    cargo build --release --workspace
+
+    find target/riscv64gc-unknown-none-elf/release/ -maxdepth 1 -executable -type f -printf '%P\n' | while IFS= read -r bin; do
+        tar -rf ../initfs.tar --format=ustar -C target/riscv64gc-unknown-none-elf/release/ ${bin}
     done
 '''
 
 [tasks.'userspace.clean']
 script = '''
     cd userspace
-    filter_out=(./libvanadinite/ ./rt0/ ./.cargo/)
-    for directory in ./*/; do
-        if [[ ! " ${filter_out[@]} " =~ " ${directory} " ]]; then
-            cd ${directory}
-            cargo clean
-            cd ..
-        fi
-    done
+    cargo clean
 '''

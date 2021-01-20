@@ -21,6 +21,13 @@ macro_rules! println {
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
 
+#[derive(Debug)]
+#[repr(C)]
+pub enum KResult<T, E> {
+    Ok(T),
+    Err(E),
+}
+
 #[doc(hidden)]
 pub fn _print(args: core::fmt::Arguments) {
     use core::fmt::Write;

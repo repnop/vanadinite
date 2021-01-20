@@ -202,7 +202,11 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
         Trap::UserModeEnvironmentCall => {
             match regs.registers.a0 {
                 0 => syscall::exit::exit(),
-                1 => syscall::print::print(VirtualAddress::new(regs.registers.a1), regs.registers.a2),
+                1 => syscall::print::print(
+                    VirtualAddress::new(regs.registers.a1),
+                    regs.registers.a2,
+                    VirtualAddress::new(regs.registers.a3),
+                ),
                 2 => syscall::read_stdin::read_stdin(VirtualAddress::new(regs.registers.a1), regs.registers.a2, regs),
                 n => {
                     log::error!("Unknown syscall number: {}", n);

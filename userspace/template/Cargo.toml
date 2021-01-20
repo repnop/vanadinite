@@ -5,4 +5,4 @@ authors = ["repnop <repnop@repnop.dev>"]
 edition = "2018"
 
 [dependencies]
-std = { path = "../libvanadinite" }
+std = { path = "../std" }

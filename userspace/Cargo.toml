@@ -1,0 +1,2 @@
+[workspace]
+members = ["hax", "init", "rt0", "shell", "std", "template"]

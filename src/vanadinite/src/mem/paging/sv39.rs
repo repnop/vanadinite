@@ -188,6 +188,10 @@ impl PageTableEntry {
         self.0 & 2 == 2
     }
 
+    pub fn is_writable(self) -> bool {
+        self.0 & 4 == 4
+    }
+
     pub fn make_branch(&mut self, next_level: PhysicalAddress) {
         let ppn = next_level.ppn();
         self.0 = (ppn << 10) | 1;
