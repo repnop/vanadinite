@@ -1,34 +1,43 @@
+use clap::Clap;
 use xshell::pushd;
 use xtask::{
     build::{self, Target as BuildTarget},
     runner::{self, Target as RunTarget},
-    EnvArgs, Result, ENV_LIST,
+    Env, Result,
 };
 
+#[derive(Clap)]
+#[clap(rename_all = "snake_case")]
+enum Arguments {
+    /// Clean all projects
+    Clean,
+    /// Build `vanadinite`, run QEMU, and wait for GDB
+    Debug(Env),
+    /// Start GDB and connect to a running QEMU instance
+    Gdb,
+    /// Build the OpenSBI firmware image and copy it to the root directory
+    #[clap(name = "opensbi")]
+    OpenSBI,
+    /// Build `vanadinite` and run QEMU
+    Run(Env),
+    /// Build userspace and pack executables into tar file in the root directory
+    Userspace,
+    /// Build `vanadinite`
+    Vanadinite(Env),
+}
+
 fn main() -> Result<()> {
-    let mut args = std::env::args().skip(1);
-    let command = args.next().unwrap_or_default();
-    let subcommand = args.next().unwrap_or_default();
-
-    let env_parts = std::env::vars()
-        // TODO: Is this really needed?
-        .filter(|(key, _)| ENV_LIST.contains(&key.as_str()))
-        .collect();
-
-    let env = EnvArgs::new(env_parts);
-
+    let args = Arguments::parse();
     let _working_dir = pushd(xtask::root())?;
 
-    match command.as_str() {
-        "v" | "vanadinite" => build::build(BuildTarget::Vanadinite, &env)?,
-        "u" | "userspace" => build::build(BuildTarget::Userspace, &env)?,
-        "opensbi" => build::build(BuildTarget::OpenSBI, &env)?,
-        "debug" => runner::run(RunTarget::Debug, &env, subcommand)?,
-        "gdb" => runner::run(RunTarget::Gdb, &env, subcommand)?,
-        "run" => runner::run(RunTarget::Run, &env, subcommand)?,
-        "c" | "clean" => xtask::clean()?,
-
-        _ => anyhow::bail!("Unknown command provided!"),
+    match args {
+        Arguments::Vanadinite(env) => build::build(BuildTarget::Vanadinite, &env)?,
+        Arguments::Userspace => build::build(BuildTarget::Userspace, &Env::default())?,
+        Arguments::OpenSBI => build::build(BuildTarget::OpenSBI, &Env::default())?,
+        Arguments::Debug(env) => runner::run(RunTarget::Debug, &env)?,
+        Arguments::Gdb => runner::run(RunTarget::Gdb, &Env::default())?,
+        Arguments::Run(env) => runner::run(RunTarget::Run, &env)?,
+        Arguments::Clean => xtask::clean()?,
     }
 
     Ok(())

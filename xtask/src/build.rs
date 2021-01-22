@@ -1,4 +1,4 @@
-use crate::{root, EnvArgs, Result};
+use crate::{root, Env, Result};
 use std::fs;
 use tar::{Builder, Header};
 use xshell::{cmd, cp, pushd, pushenv, rm_rf};
@@ -21,25 +21,23 @@ impl Target {
         }
     }
 
-    fn runtime_env(self, env: &EnvArgs) -> Vec<xshell::Pushenv> {
+    fn runtime_env(self, env: &Env) -> Vec<xshell::Pushenv> {
         match self {
             Target::Userspace => vec![],
             Target::Vanadinite => {
-                vec![pushenv("RUSTFLAGS", format!("-C link-arg=-Tvanadinite/lds/{}.lds", env.machine()))]
+                vec![pushenv("RUSTFLAGS", format!("-C link-arg=-Tvanadinite/lds/{}.lds", env.machine))]
             }
             Target::OpenSBI => vec![],
         }
     }
 }
 
-pub fn build(target: Target, env: &EnvArgs) -> Result<()> {
+pub fn build(target: Target, env: &Env) -> Result<()> {
     let _env = target.predefined_env();
     let _env2 = target.runtime_env(env);
 
-    let mut features = vec![env.machine()];
-    if let Some(additional) = env.additional_features() {
-        features.push(additional);
-    }
+    let additional_features = env.additional_features.as_deref().unwrap_or_default();
+    let features = format!("{} {}", env.machine, additional_features);
 
     match target {
         Target::Userspace => {
@@ -54,7 +52,6 @@ pub fn build(target: Target, env: &EnvArgs) -> Result<()> {
 
             let out = fs::File::create(init_tar)?;
             let mut archive = Builder::new(out);
-            let mut header = Header::new_ustar();
 
             for (bin, path) in walkdir::WalkDir::new("./target/riscv64gc-unknown-none-elf/release/")
                 .max_depth(1)
@@ -65,22 +62,33 @@ pub fn build(target: Target, env: &EnvArgs) -> Result<()> {
                 .filter(|e| e.is_file() && e.extension().is_none())
                 .map(|p| (fs::read(&p), p))
             {
+                let mut header = Header::new_ustar();
                 let bin = std::io::Cursor::new(bin?);
-                let path = path.file_name().unwrap();
+                let metadata = fs::metadata(&path)?;
+                let filename = path.file_name().unwrap();
 
-                archive.append_data(&mut header, path, bin)?;
+                header.set_device_major(0)?;
+                header.set_device_minor(0)?;
+                header.set_metadata(&metadata);
+                header.set_cksum();
+
+                archive.append_data(&mut header, filename, bin)?;
             }
 
             archive.finish()?;
         }
         Target::Vanadinite => {
             let manifest = root().join("src/vanadinite/Cargo.toml");
-            cmd!(
-                "cargo build -p vanadinite --release --target riscv64gc-unknown-none-elf 
-                --manifest-path {manifest} --no-default-features --features {features...}
-                "
-            )
-            .run()?;
+            #[rustfmt::skip]
+            cmd!("
+                cargo build
+                    -p vanadinite
+                    --release
+                    --target riscv64gc-unknown-none-elf
+                    --manifest-path {manifest}
+                    --no-default-features
+                    --features {features}
+            ").run()?;
         }
         Target::OpenSBI => {
             cmd!("git submodule init submodules/opensbi").run()?;

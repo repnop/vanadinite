@@ -1,62 +1,56 @@
-use std::{
-    collections::HashMap,
-    env,
-    path::{Path, PathBuf},
-};
-
-use xshell::{cmd, pushd};
-
 pub mod build;
 pub mod runner;
 
-pub const ENV_LIST: &[&str] = &["MACHINE", "RAM", "CPUS", "ADDITIONAL_FEATURES", "KARGS"];
-const ENV_DEFAULTS: &[(&str, &str)] =
-    &[("MACHINE", "virt"), ("RAM", "512M"), ("CPUS", "5"), ("ADDITIONAL_FEATURES", ""), ("KARGS", "")];
-
-pub struct EnvArgs(HashMap<String, String>);
-
-impl EnvArgs {
-    pub fn machine(&self) -> &str {
-        self.0.get("MACHINE").unwrap()
-    }
-
-    pub fn ram(&self) -> &str {
-        self.0.get("RAM").unwrap()
-    }
-
-    pub fn cpus(&self) -> &str {
-        self.0.get("CPUS").unwrap()
-    }
-
-    pub fn additional_features(&self) -> Option<&str> {
-        let inner = self.0.get("ADDITIONAL_FEATURES").unwrap();
-
-        if inner.is_empty() {
-            None
-        } else {
-            Some(inner.as_str())
-        }
-    }
-
-    pub fn kernel_args(&self) -> &str {
-        self.0.get("KARGS").unwrap()
-    }
-}
-
-impl EnvArgs {
-    pub fn new(mut from_env: HashMap<String, String>) -> Self {
-        for (var, default) in ENV_DEFAULTS {
-            if from_env.contains_key(*var) {
-                continue;
-            }
-            from_env.insert(var.to_string(), default.to_string());
-        }
-
-        Self(from_env)
-    }
-}
+use std::{
+    env,
+    fmt::{self, Display},
+    path::{Path, PathBuf},
+};
+use xshell::{cmd, pushd};
 
 pub type Result<T> = anyhow::Result<T>;
+
+#[derive(clap::Clap)]
+pub struct Env {
+    #[clap(arg_enum, long, env = "MACHINE", default_value = "virt")]
+    machine: Machine,
+    #[clap(long, env = "RAM", default_value = "512M")]
+    ram: String,
+    #[clap(long, env = "CPUS", default_value = "5")]
+    cpus: usize,
+    #[clap(long, env = "KARGS", default_value)]
+    kernel_args: String,
+    #[clap(long, env = "ADDITIONAL_FEATURES")]
+    additional_features: Option<String>,
+}
+
+impl Default for Env {
+    fn default() -> Self {
+        Self {
+            machine: Machine::Virt,
+            ram: String::from("512M"),
+            cpus: 5,
+            kernel_args: String::new(),
+            additional_features: None,
+        }
+    }
+}
+
+#[derive(clap::Clap, Clone, Copy)]
+#[clap(rename_all = "snake_case")]
+pub enum Machine {
+    Virt,
+    SifiveU,
+}
+
+impl Display for Machine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Machine::Virt => write!(f, "virt"),
+            Machine::SifiveU => write!(f, "sifive_u"),
+        }
+    }
+}
 
 pub fn root() -> PathBuf {
     Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_owned()))
