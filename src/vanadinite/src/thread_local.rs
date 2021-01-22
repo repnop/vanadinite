@@ -8,7 +8,6 @@ use core::sync::atomic::{AtomicBool, Ordering};
 macro_rules! thread_local {
     ($($v:vis static $name:ident: $ty:ty = $val:expr;)+) => {
         $(
-            #[link_section = ".kernel_thread_local"]
             #[thread_local]
             // FIXME: temporarily assert that alignment is 8 or lower, until we have a better heap allocator
             $v static $name: crate::thread_local::ThreadLocal<$ty> = unsafe { const _: () = [()][!(core::mem::align_of::<$ty>() <= 8) as usize]; crate::thread_local::ThreadLocal::new(|| $val) };
@@ -58,13 +57,13 @@ pub unsafe fn init_thread_locals() {
     use crate::utils::LinkerSymbol;
 
     extern "C" {
-        static __kernel_thread_local_start: LinkerSymbol;
-        static __kernel_thread_local_end: LinkerSymbol;
+        static __tdata_start: LinkerSymbol;
+        static __tdata_end: LinkerSymbol;
     }
 
-    let size = __kernel_thread_local_end.as_usize() - __kernel_thread_local_start.as_usize();
+    let size = __tdata_end.as_usize() - __tdata_start.as_usize();
 
-    let original_thread_locals = core::slice::from_raw_parts(__kernel_thread_local_start.as_ptr(), size);
+    let original_thread_locals = core::slice::from_raw_parts(__tdata_start.as_ptr(), size);
     let new_thread_locals = alloc::alloc::alloc_zeroed(alloc::alloc::Layout::from_size_align(size, 8).unwrap());
 
     core::slice::from_raw_parts_mut(new_thread_locals, size)[..].copy_from_slice(original_thread_locals);

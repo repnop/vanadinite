@@ -53,14 +53,14 @@ SECTIONS {
     . = ALIGN(4K);
     PROVIDE(__bss_end = .);
 
-    .kernel_thread_local : AT(ADDR(.kernel_thread_local) - __offset) {
+    .tdata : AT(ADDR(.tdata) - __offset) {
         . = ALIGN(4K);
-        PROVIDE(__kernel_thread_local_start = .);
+        PROVIDE(__tdata_start = .);
         
-        *(.kernel_thread_local .kernel_thread_local.*)
+        *(.tdata .tdata.*)
 
         . = ALIGN(4K);
-        PROVIDE(__kernel_thread_local_end = .);
+        PROVIDE(__tdata_end = .);
     }
 
     . = ALIGN(2M);

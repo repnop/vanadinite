@@ -19,8 +19,8 @@ extern "C" {
     static __data_end: LinkerSymbol;
     static __text_start: LinkerSymbol;
     static __text_end: LinkerSymbol;
-    static __kernel_thread_local_start: LinkerSymbol;
-    static __kernel_thread_local_end: LinkerSymbol;
+    static __tdata_start: LinkerSymbol;
+    static __tdata_end: LinkerSymbol;
     static PHYS_OFFSET_VALUE: usize;
 }
 
@@ -125,8 +125,8 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
         );
     }
 
-    let ktls_start = __kernel_thread_local_start.as_usize();
-    let ktls_end = __kernel_thread_local_end.as_usize();
+    let ktls_start = __tdata_start.as_usize();
+    let ktls_end = __tdata_end.as_usize();
 
     for addr in (ktls_start..ktls_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
@@ -134,7 +134,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
             PageSize::Kilopage,
-            Read | Write,
+            Read,
         );
     }
 
