@@ -29,6 +29,9 @@ pub struct Env {
     #[clap(setting = ArgSettings::AllowEmptyValues)]
     #[clap(long, env = "ADDITIONAL_FEATURES", default_value = "")]
     additional_features: String,
+
+    #[clap(long, env = "DRIVE_FILE")]
+    drive_file: Option<PathBuf>,
 }
 
 impl Default for Env {
@@ -39,6 +42,7 @@ impl Default for Env {
             cpus: 5,
             kernel_args: String::new(),
             additional_features: String::new(),
+            drive_file: None,
         }
     }
 }

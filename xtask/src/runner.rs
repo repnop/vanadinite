@@ -30,16 +30,16 @@ pub fn run(target: Target, env: &Env) -> Result<()> {
     let ram = &env.ram;
     let kernel_args = &env.kernel_args;
 
-    let enable_virtio_block_device = match env.machine {
-        Machine::Virt => &[
-            "-global",
-            "virtio-mmio.force-legacy=false",
-            "-drive",
-            "file=testing_files/test_fat.fs,if=none,format=raw,id=hd",
-            "-device",
-            "virtio-blk-device,drive=hd",
+    let enable_virtio_block_device = match (env.machine, &env.drive_file) {
+        (Machine::Virt, Some(path)) => vec![
+            String::from("-global"),
+            String::from("virtio-mmio.force-legacy=false"),
+            String::from("-drive"),
+            format!("file={},if=none,format=raw,id=hd", path.display()),
+            String::from("-device"),
+            String::from("virtio-blk-device,drive=hd"),
         ],
-        _ => &[][..],
+        _ => vec![],
     };
 
     #[rustfmt::skip]
@@ -53,7 +53,7 @@ pub fn run(target: Target, env: &Env) -> Result<()> {
                     -m {ram}
                     -append {kernel_args}
                     {enable_virtio_block_device...}
-                    -bios opensbi-riscv64-generic-fw_dynamic.bin 
+                    -bios opensbi-riscv64-generic-fw_jump.bin 
                     -kernel src/target/riscv64gc-unknown-none-elf/release/vanadinite
                     -monitor stdio
                     -gdb tcp::1234
@@ -78,7 +78,7 @@ pub fn run(target: Target, env: &Env) -> Result<()> {
                     -m {ram}
                     -append {kernel_args}
                     {enable_virtio_block_device...}
-                    -bios opensbi-riscv64-generic-fw_dynamic.bin 
+                    -bios opensbi-riscv64-generic-fw_jump.bin 
                     -kernel src/target/riscv64gc-unknown-none-elf/release/vanadinite
                     -serial mon:stdio
                     -nographic

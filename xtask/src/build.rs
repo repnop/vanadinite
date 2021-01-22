@@ -96,7 +96,7 @@ pub fn build(target: Target, env: &Env) -> Result<()> {
 
             cmd!("make PLATFORM=generic").run()?;
 
-            cp("build/platform/generic/firmware/fw_dynamic.bin", "../../opensbi-riscv64-generic-fw_dynamic.bin")?;
+            cp("build/platform/generic/firmware/fw_jump.bin", "../../opensbi-riscv64-generic-fw_jump.bin")?;
         }
     }
 
