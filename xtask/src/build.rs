@@ -36,8 +36,7 @@ pub fn build(target: Target, env: &Env) -> Result<()> {
     let _env = target.predefined_env();
     let _env2 = target.runtime_env(env);
 
-    let additional_features = env.additional_features.as_deref().unwrap_or_default();
-    let features = format!("{} {}", env.machine, additional_features);
+    let features = format!("{} {}", env.machine, env.additional_features);
 
     match target {
         Target::Userspace => {

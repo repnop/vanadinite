@@ -1,6 +1,7 @@
 pub mod build;
 pub mod runner;
 
+use clap::{ArgSettings, Clap};
 use std::{
     env,
     fmt::{self, Display},
@@ -10,18 +11,24 @@ use xshell::{cmd, pushd};
 
 pub type Result<T> = anyhow::Result<T>;
 
-#[derive(clap::Clap)]
+#[derive(Clap)]
 pub struct Env {
     #[clap(arg_enum, long, env = "MACHINE", default_value = "virt")]
     machine: Machine,
+
     #[clap(long, env = "RAM", default_value = "512M")]
     ram: String,
+
     #[clap(long, env = "CPUS", default_value = "5")]
     cpus: usize,
-    #[clap(long, env = "KARGS", default_value)]
+
+    #[clap(setting = ArgSettings::AllowEmptyValues)]
+    #[clap(long, env = "KARGS", default_value = "")]
     kernel_args: String,
-    #[clap(long, env = "ADDITIONAL_FEATURES")]
-    additional_features: Option<String>,
+
+    #[clap(setting = ArgSettings::AllowEmptyValues)]
+    #[clap(long, env = "ADDITIONAL_FEATURES", default_value = "")]
+    additional_features: String,
 }
 
 impl Default for Env {
@@ -31,12 +38,12 @@ impl Default for Env {
             ram: String::from("512M"),
             cpus: 5,
             kernel_args: String::new(),
-            additional_features: None,
+            additional_features: String::new(),
         }
     }
 }
 
-#[derive(clap::Clap, Clone, Copy)]
+#[derive(Clap, Clone, Copy)]
 #[clap(rename_all = "snake_case")]
 pub enum Machine {
     Virt,
