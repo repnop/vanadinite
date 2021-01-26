@@ -1,4 +1,4 @@
-#![feature(asm, prelude_import, no_core)]
+#![feature(asm, prelude_import)]
 #![no_std]
 
 extern crate rt0;

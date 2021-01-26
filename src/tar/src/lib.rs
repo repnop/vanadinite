@@ -71,8 +71,8 @@ impl<'a> FileHeader<'a> {
             return None;
         }
 
-        match bytes[MAGIC_HEADER_OFFSET..][..MAGIC_HEADER_LENGTH] {
-            [b'u', b's', b't', b'a', b'r', b'\0'] => {}
+        match &bytes[MAGIC_HEADER_OFFSET..][..MAGIC_HEADER_LENGTH] {
+            b"ustar\0" => {}
             _ => return None,
         }
 
