@@ -50,3 +50,7 @@ fn read_line(buf: &mut [u8]) -> Option<&str> {
 
     core::str::from_utf8(&buf[..read]).ok()
 }
+
+#[used]
+#[link_section = ".capabilities"]
+static CAPABILITIES: [std::Capability; 2] = [std::Capability::Driver, std::Capability::Server];

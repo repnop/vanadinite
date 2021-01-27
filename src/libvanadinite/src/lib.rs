@@ -4,6 +4,7 @@
 
 #![no_std]
 
+pub mod capabilities;
 pub mod syscalls;
 
 #[derive(Debug)]

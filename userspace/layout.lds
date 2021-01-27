@@ -26,6 +26,10 @@ SECTIONS {
         *(.rodata .rodata.*)
     }
 
+    .capabilities : {
+        KEEP(*(.capabilities))
+    }
+
     . = ALIGN(4K);
     
     /DISCARD/ : { *(.eh_frame .eh_frame.* ); }

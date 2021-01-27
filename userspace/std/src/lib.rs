@@ -7,6 +7,8 @@ pub mod io;
 pub mod prelude;
 pub mod syscalls;
 
+pub use libvanadinite::capabilities::Capability;
+
 #[prelude_import]
 pub use prelude::v1::*;
 
