@@ -89,7 +89,7 @@ impl Process {
                     0b100 => (User | Read).into_permissions(),
                     flags => unreachable!("flags: {:#b}", flags),
                 },
-                elf.program_segment_data(header),
+                elf.program_segment_data(&header),
             );
         }
 

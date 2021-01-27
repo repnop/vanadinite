@@ -6,7 +6,7 @@
 
 mod node;
 
-use common::byteorder::{BigEndianU32, BigEndianU64, FromBytes, IntegerStream};
+use bytestream::{BigEndianU32, BigEndianU64, ByteStream, FromBytes};
 use cstr_core::CStr;
 pub use node::{Compatible, MappedArea, MemoryNode, MemoryRegion, NodeProperty};
 
@@ -353,7 +353,7 @@ impl<'a> CpuIds<'a> {
     }
 
     pub fn all(self) -> impl Iterator<Item = usize> + 'a {
-        let mut vals = IntegerStream::new(self.reg.value);
+        let mut vals = ByteStream::new(self.reg.value);
         core::iter::from_fn(move || match vals.remaining() {
             [] => None,
             _ => Some(match self.address_cells {

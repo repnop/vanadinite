@@ -2,6 +2,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+#![no_std]
+
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct BigEndianU16(u16);
@@ -144,21 +146,11 @@ macro_rules! implFromBytes {
 
 implFromBytes!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, BigEndianU16 u16, BigEndianU32 u32, BigEndianU64 u64, BigEndianI16 i16, BigEndianI32 i32, BigEndianI64 i64,);
 
-pub trait SliceExt {
-    fn at<I: FromBytes>(&self, index: usize) -> Option<I>;
-}
-
-impl SliceExt for [u8] {
-    fn at<I: FromBytes>(&self, index: usize) -> Option<I> {
-        I::from_bytes(self.get(index..)?)
-    }
-}
-
-pub struct IntegerStream<'a> {
+pub struct ByteStream<'a> {
     bytes: &'a [u8],
 }
 
-impl<'a> IntegerStream<'a> {
+impl<'a> ByteStream<'a> {
     pub fn new(bytes: &'a [u8]) -> Self {
         Self { bytes }
     }
@@ -204,4 +196,34 @@ macro_rules! stream_ints {
     };
 
     (@internal $stream:ident) => {};
+}
+
+#[macro_export]
+macro_rules! streamable_struct {
+    ($(#[$attr:meta])* $v:vis struct $name:ident { $($(#[$fattr:meta])* $fv:vis $field:ident: $t:ty),*$(,)? } $(padding: $pad:literal)?) => {
+        $(#[$attr])*
+        $v struct $name {
+            $(
+                $(#[$fattr])*
+                $fv $field: $t,
+            )*
+        }
+
+        impl $crate::FromBytes for $name {
+            const SIZE: usize = core::mem::size_of::<Self>() $(+ $pad)?;
+
+            fn from_bytes(bytes: &[u8]) -> Option<Self> {
+                let mut stream = $crate::ByteStream::new(bytes);
+                $(
+                    let $field: $t = stream.next()?;
+                )*
+
+                Some(Self {
+                    $(
+                        $field,
+                    )*
+                })
+            }
+        }
+    };
 }

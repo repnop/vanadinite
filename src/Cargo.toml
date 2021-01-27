@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "common",
+    "bytestream",
     "elf64",
     "fat32",
     "fdt",

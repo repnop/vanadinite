@@ -3,7 +3,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{BigEndianU32, BigEndianU64, Fdt};
-use common::byteorder::FromBytes;
+use bytestream::FromBytes;
 
 const FDT_BEGIN_NODE: u32 = 1;
 const FDT_END_NODE: u32 = 2;
@@ -25,7 +25,7 @@ impl MemoryNode<'_> {
         let mut mapped_area = None;
 
         if let Some(init_mapped_area) = self.node.properties().find(|n| n.name == "initial_mapped_area") {
-            let mut stream = common::byteorder::IntegerStream::new(init_mapped_area.value);
+            let mut stream = bytestream::ByteStream::new(init_mapped_area.value);
             let effective_address: BigEndianU64 = stream.next().expect("effective address");
             let physical_address: BigEndianU64 = stream.next().expect("physical address");
             let size: BigEndianU32 = stream.next().expect("size");
@@ -150,7 +150,7 @@ impl<'a> FdtNode<'a> {
         let mut reg = None;
         for prop in self.properties() {
             if prop.name == "reg" {
-                let mut stream = common::byteorder::IntegerStream::new(prop.value);
+                let mut stream = bytestream::ByteStream::new(prop.value);
                 reg = Some(core::iter::from_fn(move || {
                     let starting_address = match sizes.address_cells {
                         1 => stream.next::<BigEndianU32>()?.get() as usize,
@@ -246,7 +246,7 @@ impl<'a> FdtNode<'a> {
         let mut interrupt = None;
         for prop in self.properties() {
             if prop.name == "interrupts" {
-                let mut stream = common::byteorder::IntegerStream::new(prop.value);
+                let mut stream = bytestream::ByteStream::new(prop.value);
                 interrupt = Some(core::iter::from_fn(move || {
                     let interrupt = match sizes {
                         1 => stream.next::<BigEndianU32>()?.get() as usize,

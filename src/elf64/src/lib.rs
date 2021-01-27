@@ -4,6 +4,8 @@
 
 #![no_std]
 
+use bytestream::{streamable_struct, ByteStream, FromBytes};
+
 pub type Addr = u64;
 pub type Off = u64;
 pub type Half = u16;
@@ -30,28 +32,15 @@ pub struct Elf<'a> {
 
 impl<'a> Elf<'a> {
     pub fn new(data: &'a [u8]) -> Option<Self> {
-        Some(Self { data, header: unsafe { data.as_ptr().cast::<Header>().read() } })
+        Some(Self { data, header: Header::from_bytes(data)? })
     }
 
-    pub fn program_headers(&self) -> impl Iterator<Item = &ProgramHeader> {
-        let mut ptr = unsafe { self.data.as_ptr().add(self.header.ph_offset as usize).cast::<ProgramHeader>() };
-        let end_ptr = unsafe {
-            self.data
-                .as_ptr()
-                .add(self.header.ph_count as usize * core::mem::size_of::<ProgramHeader>())
-                .cast::<ProgramHeader>()
-        };
+    pub fn program_headers(&self) -> impl Iterator<Item = ProgramHeader> + '_ {
+        let start = self.header.ph_offset as usize;
+        let end = start + (self.header.ph_count as usize * core::mem::size_of::<ProgramHeader>());
+        let mut phs = ByteStream::new(&self.data[start..end]);
 
-        core::iter::from_fn(move || {
-            if ptr >= end_ptr {
-                return None;
-            }
-
-            let header = unsafe { &*ptr };
-            ptr = unsafe { ptr.add(1) };
-
-            Some(header)
-        })
+        core::iter::from_fn(move || phs.next())
     }
 
     pub fn program_segment_data(&self, header: &ProgramHeader) -> &[u8] {
@@ -59,29 +48,25 @@ impl<'a> Elf<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct Header {
-    pub ident: Identification,
-    pub r#type: Half,
-    pub machine: Half,
-    pub version: Word,
-    pub entry: Addr,
-    pub ph_offset: Off,
-    pub sh_offset: Off,
-    pub flags: Word,
-    pub eh_size: Half,
-    pub ph_entry_size: Half,
-    pub ph_count: Half,
-    pub sh_entry_size: Half,
-    pub sh_count: Half,
-    pub sh_string_index: Half,
-}
-
-impl Header {
-    //pub fn parse(data: &[u8]) -> Option<Self> {
-    //    Some(Self { ident: Identification::parse(data)? })
-    //}
+streamable_struct! {
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub struct Header {
+        pub ident: Identification,
+        pub r#type: Half,
+        pub machine: Half,
+        pub version: Word,
+        pub entry: Addr,
+        pub ph_offset: Off,
+        pub sh_offset: Off,
+        pub flags: Word,
+        pub eh_size: Half,
+        pub ph_entry_size: Half,
+        pub ph_count: Half,
+        pub sh_entry_size: Half,
+        pub sh_count: Half,
+        pub sh_string_index: Half,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -94,11 +79,12 @@ pub struct Identification {
     pub version: u8,
     pub os_abi: u8,
     pub abi_version: u8,
-    pub _padding: [u8; 7],
 }
 
-impl Identification {
-    pub fn parse(data: &[u8]) -> Option<Self> {
+impl FromBytes for Identification {
+    const SIZE: usize = core::mem::size_of::<Self>() + 7;
+
+    fn from_bytes(data: &[u8]) -> Option<Self> {
         if data.len() < core::mem::size_of::<Header>() {
             return None;
         }
@@ -111,7 +97,6 @@ impl Identification {
                 version: data[6],
                 os_abi: data[7],
                 abi_version: data[8],
-                _padding: [0; 7],
             }),
             _ => None,
         }
@@ -146,30 +131,32 @@ pub enum ObjectFileType {
     HiProc = 0xFFFF,
 }
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct SectionHeader {
-    /// Offset in bytes into the section name string table
-    pub name: Word,
-    /// Section type
-    pub r#type: Word,
-    // Section attributes
-    pub flags: Xword,
-    /// Virtual address of the beginning of the section, zero if not allocated
-    pub addr: Addr,
-    /// Offset in bytes to the section contents
-    pub offset: Off,
-    /// Size of the section in bytes
-    pub size: Xword,
-    /// Section index of an associated section
-    pub link: Word,
-    /// Extra section information
-    pub info: Word,
-    /// Required alignment of the section
-    pub addr_align: Xword,
-    /// Size in bytes of each section entry if the sizes are fixed, otherwise
-    /// zero
-    pub entry_size: Xword,
+streamable_struct! {
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub struct SectionHeader {
+        /// Offset in bytes into the section name string table
+        pub name: Word,
+        /// Section type
+        pub r#type: Word,
+        // Section attributes
+        pub flags: Xword,
+        /// Virtual address of the beginning of the section, zero if not allocated
+        pub addr: Addr,
+        /// Offset in bytes to the section contents
+        pub offset: Off,
+        /// Size of the section in bytes
+        pub size: Xword,
+        /// Section index of an associated section
+        pub link: Word,
+        /// Extra section information
+        pub info: Word,
+        /// Required alignment of the section
+        pub addr_align: Xword,
+        /// Size in bytes of each section entry if the sizes are fixed, otherwise
+        /// zero
+        pub entry_size: Xword,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -203,28 +190,32 @@ pub enum SectionFlags {
     MaskProc = 0xF000_0000,
 }
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct SymbolTableEntry {
-    pub name: Word,
-    pub info: u8,
-    pub _reserved: u8,
-    pub section_table_index: Half,
-    pub value: Addr,
-    pub size: Xword,
+streamable_struct! {
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub struct SymbolTableEntry {
+        pub name: Word,
+        pub info: u8,
+        pub _reserved: u8,
+        pub section_table_index: Half,
+        pub value: Addr,
+        pub size: Xword,
+    }
 }
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct ProgramHeader {
-    pub r#type: Word,
-    pub flags: Word,
-    pub offset: Off,
-    pub vaddr: Addr,
-    pub paddr: Addr,
-    pub file_size: Xword,
-    pub memory_size: Xword,
-    pub align: Xword,
+streamable_struct! {
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub struct ProgramHeader {
+        pub r#type: Word,
+        pub flags: Word,
+        pub offset: Off,
+        pub vaddr: Addr,
+        pub paddr: Addr,
+        pub file_size: Xword,
+        pub memory_size: Xword,
+        pub align: Xword,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
