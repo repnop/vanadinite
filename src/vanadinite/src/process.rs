@@ -5,9 +5,9 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
+    cpu_local,
     mem::paging::VirtualAddress,
     mem::paging::{PageTableManager, EXECUTE, READ, USER, WRITE},
-    thread_local,
     trap::TrapFrame,
     utils::{StaticMut, Units},
 };
@@ -16,7 +16,7 @@ use libvanadinite::capabilities::Capability;
 
 pub static PID_COUNTER: PidCounter = PidCounter::new();
 
-thread_local! {
+cpu_local! {
     pub static THREAD_CONTROL_BLOCK: StaticMut<ThreadControlBlock> = StaticMut::new(ThreadControlBlock::new());
 }
 

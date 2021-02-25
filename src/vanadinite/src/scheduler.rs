@@ -1,15 +1,15 @@
 use crate::{
+    cpu_local,
     csr::satp::{self, Satp, SatpMode},
     interrupts::assert_interrupts_disabled,
     mem::{paging::VirtualAddress, sfence, virt2phys},
     process::{Process, ProcessState},
-    thread_local,
     trap::TrapFrame,
 };
 use alloc::collections::VecDeque;
 use core::{cell::RefCell, sync::atomic::Ordering};
 
-thread_local! {
+cpu_local! {
     pub static SCHEDULER: RefCell<Scheduler> = RefCell::new(Scheduler::new());
 }
 

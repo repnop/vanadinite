@@ -5,19 +5,19 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 #[macro_export]
-macro_rules! thread_local {
+macro_rules! cpu_local {
     ($($v:vis static $name:ident: $ty:ty = $val:expr;)+) => {
         $(
             #[thread_local]
             // FIXME: temporarily assert that alignment is 8 or lower, until we have a better heap allocator
-            $v static $name: crate::thread_local::ThreadLocal<$ty> = unsafe { const _: () = [()][!(core::mem::align_of::<$ty>() <= 8) as usize]; crate::thread_local::ThreadLocal::new(|| $val) };
+            $v static $name: crate::cpu_local::CpuLocal<$ty> = unsafe { const _: () = [()][!(core::mem::align_of::<$ty>() <= 8) as usize]; crate::cpu_local::CpuLocal::new(|| $val) };
         )+
     };
 }
 
-pub struct ThreadLocal<T: Send + 'static>(AtomicBool, core::cell::UnsafeCell<core::mem::MaybeUninit<T>>, fn() -> T);
+pub struct CpuLocal<T: Send + 'static>(AtomicBool, core::cell::UnsafeCell<core::mem::MaybeUninit<T>>, fn() -> T);
 
-impl<T: Send + 'static> ThreadLocal<T> {
+impl<T: Send + 'static> CpuLocal<T> {
     #[doc(hidden)]
     pub const unsafe fn new(init: fn() -> T) -> Self {
         Self(AtomicBool::new(false), core::cell::UnsafeCell::new(core::mem::MaybeUninit::uninit()), init)
@@ -27,6 +27,7 @@ impl<T: Send + 'static> ThreadLocal<T> {
         f(self.init_if_needed())
     }
 
+    // FIXME: use 3 states
     fn init_if_needed(&self) -> &T {
         let state = self.0.load(Ordering::Relaxed);
 
@@ -41,7 +42,7 @@ impl<T: Send + 'static> ThreadLocal<T> {
     }
 }
 
-impl<T: Send + 'static> core::ops::Deref for ThreadLocal<T> {
+impl<T: Send + 'static> core::ops::Deref for CpuLocal<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {

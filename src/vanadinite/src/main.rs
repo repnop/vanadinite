@@ -14,7 +14,7 @@
     maybe_uninit_ref,
     const_fn_fn_ptr_basics,
     const_fn,
-    inline_const,
+    inline_const
 )]
 #![no_std]
 #![no_main]
@@ -26,6 +26,7 @@ extern crate alloc;
 
 pub mod asm;
 pub mod boot;
+pub mod cpu_local;
 pub mod csr;
 pub mod drivers;
 pub mod interrupts;
@@ -35,7 +36,6 @@ pub mod platform;
 pub mod process;
 pub mod scheduler;
 pub mod sync;
-pub mod thread_local;
 pub mod trap;
 pub mod utils;
 
@@ -65,7 +65,7 @@ extern "C" {
 
 static TIMER_FREQ: AtomicUsize = AtomicUsize::new(0);
 
-thread_local! {
+cpu_local! {
     static HART_ID: core::cell::Cell<usize> = core::cell::Cell::new(0);
 }
 
@@ -88,7 +88,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     let heap_start = heap_frame_alloc.expect("moar memory").as_phys_address();
     unsafe { mem::heap::HEAP_ALLOCATOR.init(mem::phys2virt(heap_start).as_mut_ptr(), 64 * 4.kib()) };
 
-    unsafe { crate::thread_local::init_thread_locals() };
+    unsafe { crate::cpu_local::init_thread_locals() };
     HART_ID.set(hart_id);
 
     crate::io::logging::init_logging();
@@ -260,7 +260,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     unsafe {
         *process::THREAD_CONTROL_BLOCK.get() = process::ThreadControlBlock {
             kernel_stack: mem::alloc_kernel_stack(8.kib()),
-            kernel_thread_local: thread_local::tp(),
+            kernel_thread_local: cpu_local::tp(),
             saved_sp: 0,
             saved_tp: 0,
             kernel_stack_size: 8.kib(),
