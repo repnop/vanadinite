@@ -3,7 +3,6 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{drivers::CompatibleWith, drivers::InterruptServicable, io::ConsoleDevice};
-use core::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug)]
 #[repr(C)]
@@ -45,22 +44,9 @@ impl SifiveUart {
     }
 
     pub fn write(&self, n: u8) {
-        static LAST_WROTE_NEWLINE: AtomicBool = AtomicBool::new(false);
-
         while self.tx_data.is_full() {}
 
         self.tx_data.write(n);
-
-        if n == b'\n' {
-            LAST_WROTE_NEWLINE.store(true, Ordering::SeqCst);
-            self.write(b'\r');
-        } else if n == b'\r' {
-            if !LAST_WROTE_NEWLINE.load(Ordering::SeqCst) {
-                self.write(b'\n');
-            }
-
-            LAST_WROTE_NEWLINE.store(false, Ordering::SeqCst);
-        }
     }
 }
 

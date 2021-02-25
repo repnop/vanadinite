@@ -79,19 +79,6 @@ impl Uart16550 {
         }
 
         self.data_register.write(data);
-
-        // Normalize line endings into \r\n or \n\r
-        if data == b'\n' && self.scratch.read() != 1 {
-            self.scratch.write(1);
-            self.write(b'\r');
-            self.scratch.write(0);
-        } else if data == b'\r' && self.scratch.read() != 1 {
-            self.scratch.write(1);
-            self.write(b'\n');
-            self.scratch.write(0);
-        } else {
-            self.scratch.write(0);
-        }
     }
 
     pub fn write_str(&self, s: &str) {
