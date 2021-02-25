@@ -9,7 +9,7 @@ pub type IsrCallback = fn(usize, usize) -> Result<(), &'static str>;
 
 const ISR_LIMIT: usize = 128;
 
-pub(super) static ISR_REGISTRY: [IsrEntry; ISR_LIMIT] = [IsrEntry::new(); ISR_LIMIT];
+pub(super) static ISR_REGISTRY: [IsrEntry; ISR_LIMIT] = [const { IsrEntry::new() }; ISR_LIMIT];
 
 #[derive(Debug)]
 pub struct IsrEntry {

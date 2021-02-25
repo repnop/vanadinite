@@ -10,11 +10,11 @@
     alloc_error_handler,
     raw_ref_op,
     const_generics,
-    const_in_array_repeat_expressions,
     thread_local,
     maybe_uninit_ref,
     const_fn_fn_ptr_basics,
-    const_fn
+    const_fn,
+    inline_const,
 )]
 #![no_std]
 #![no_main]
