@@ -5,3 +5,9 @@ pub enum Capability {
     Driver = 1,
     Server = 2,
 }
+
+impl Default for Capability {
+    fn default() -> Self {
+        Capability::None
+    }
+}

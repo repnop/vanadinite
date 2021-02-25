@@ -43,6 +43,14 @@ impl<'a> Elf<'a> {
         core::iter::from_fn(move || phs.next())
     }
 
+    pub fn section_headers(&self) -> impl Iterator<Item = SectionHeader> + '_ {
+        let start = self.header.sh_offset as usize;
+        let end = start + (self.header.sh_count as usize * core::mem::size_of::<SectionHeader>());
+        let mut phs = ByteStream::new(&self.data[start..end]);
+
+        core::iter::from_fn(move || phs.next())
+    }
+
     pub fn program_segment_data(&self, header: &ProgramHeader) -> &[u8] {
         &self.data[header.offset as usize..][..header.file_size as usize]
     }

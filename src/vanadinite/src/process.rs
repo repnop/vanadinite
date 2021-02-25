@@ -6,12 +6,13 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
     mem::paging::VirtualAddress,
-    mem::paging::{Execute, PageTableManager, Read, ToPermissions, User, Write},
+    mem::paging::{PageTableManager, EXECUTE, READ, USER, WRITE},
     thread_local,
     trap::TrapFrame,
     utils::{StaticMut, Units},
 };
 use elf64::Elf;
+use libvanadinite::capabilities::Capability;
 
 pub static PID_COUNTER: PidCounter = PidCounter::new();
 
@@ -66,6 +67,7 @@ pub struct Process {
     pub page_table: PageTableManager,
     pub frame: TrapFrame,
     pub state: ProcessState,
+    pub capabilities: [Capability; 32],
 }
 
 impl Process {
@@ -76,6 +78,8 @@ impl Process {
             )
         };
 
+        let capabilities = Default::default();
+
         for header in elf.program_headers().filter(|header| header.r#type == elf64::ProgramSegmentType::Load) {
             page_table.alloc_virtual_range_with_data(
                 VirtualAddress::new(header.vaddr as usize),
@@ -83,10 +87,10 @@ impl Process {
                     0 => header.memory_size as usize,
                     n => (n as usize & !(4096 - 1)) + 4096,
                 },
-                match header.flags & 0b111 {
-                    0b101 => (User | Read | Execute).into_permissions(),
-                    0b110 => (User | Read | Write).into_permissions(),
-                    0b100 => (User | Read).into_permissions(),
+                match header.flags {
+                    0b101 => USER | READ | EXECUTE,
+                    0b110 => USER | READ | WRITE,
+                    0b100 => USER | READ,
                     flags => unreachable!("flags: {:#b}", flags),
                 },
                 elf.program_segment_data(&header),
@@ -94,7 +98,7 @@ impl Process {
         }
 
         page_table.copy_kernel_pages();
-        page_table.alloc_virtual_range(VirtualAddress::new(0x7fff0000), 16.kib(), User | Read | Write);
+        page_table.alloc_virtual_range(VirtualAddress::new(0x7fff0000), 16.kib(), USER | READ | WRITE);
 
         let mut frame = TrapFrame::default();
         frame.registers.sp = 0x7fff0000 + 16.kib();
@@ -105,6 +109,7 @@ impl Process {
             page_table,
             frame,
             state: ProcessState::Running,
+            capabilities,
         }
     }
 }

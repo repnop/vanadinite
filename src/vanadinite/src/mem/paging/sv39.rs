@@ -5,7 +5,7 @@
 use crate::{
     csr::satp,
     mem::{
-        paging::ToPermissions,
+        paging::Permissions,
         phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
         phys2virt,
     },
@@ -25,10 +25,8 @@ impl Sv39PageTable {
     }
 
     #[track_caller]
-    pub fn map<P>(&mut self, phys: PhysicalAddress, virt: VirtualAddress, size: PageSize, perms: P)
-    where
-        P: ToPermissions,
-    {
+    pub fn map(&mut self, phys: PhysicalAddress, virt: VirtualAddress, size: PageSize, perms: Permissions) {
+        assert!(perms.valid(), "invalid permissions");
         PageSize::assert_addr_aligned(size, phys.as_usize());
         PageSize::assert_addr_aligned(size, virt.as_usize());
 
@@ -174,13 +172,15 @@ impl PageTableEntry {
         self.0 & 1 == 1
     }
 
-    pub fn make_leaf(&mut self, phys: PhysicalAddress, permissions: impl ToPermissions) {
-        let permissions = (permissions.into_permissions() as usize) << 1;
+    pub fn make_leaf(&mut self, phys: PhysicalAddress, permissions: Permissions) {
+        assert!(permissions.valid(), "invalid permission bits");
+        let permissions = permissions.as_bits() << 1;
         self.0 = (phys.ppn() << 10) | permissions | 1;
     }
 
-    pub fn set_permissions(&mut self, permissions: impl ToPermissions) {
-        let permissions = (permissions.into_permissions() as usize) << 1;
+    pub fn set_permissions(&mut self, permissions: Permissions) {
+        assert!(permissions.valid(), "invalid permission bits");
+        let permissions = permissions.as_bits() << 1;
         self.0 = (self.0 & !(0b11110)) | permissions;
     }
 

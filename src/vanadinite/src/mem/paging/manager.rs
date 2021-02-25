@@ -6,12 +6,14 @@ use crate::{
     interrupts::InterruptDisabler,
     mem::phys2virt,
     mem::{
-        paging::{PageSize, PhysicalAddress, Sv39PageTable, ToPermissions, VirtualAddress},
+        paging::{PageSize, PhysicalAddress, Sv39PageTable, VirtualAddress},
         phys::PhysicalMemoryAllocator,
         sfence,
     },
     PHYSICAL_MEMORY_ALLOCATOR,
 };
+
+use super::Permissions;
 
 #[derive(Debug)]
 pub struct PageTableManager(&'static mut Sv39PageTable);
@@ -21,7 +23,7 @@ impl PageTableManager {
         Self(table)
     }
 
-    pub fn alloc_virtual_range<P: ToPermissions + Copy>(&mut self, start: VirtualAddress, size: usize, perms: P) {
+    pub fn alloc_virtual_range(&mut self, start: VirtualAddress, size: usize, perms: Permissions) {
         assert_eq!(size % 4096, 0, "bad map range size: {}", size);
 
         for idx in 0..size / 4096 {
@@ -29,7 +31,7 @@ impl PageTableManager {
         }
     }
 
-    pub fn alloc_virtual<P: ToPermissions>(&mut self, map_to: VirtualAddress, perms: P) {
+    pub fn alloc_virtual(&mut self, map_to: VirtualAddress, perms: Permissions) {
         let _disabler = InterruptDisabler::new();
         let phys = Self::new_phys_page();
 
@@ -39,11 +41,11 @@ impl PageTableManager {
         sfence(Some(map_to), None);
     }
 
-    pub fn alloc_virtual_range_with_data<P: ToPermissions + Copy>(
+    pub fn alloc_virtual_range_with_data(
         &mut self,
         start: VirtualAddress,
         size: usize,
-        perms: P,
+        perms: Permissions,
         data: &[u8],
     ) {
         assert_eq!(size % 4096, 0, "bad map range size: {}", size);
@@ -53,7 +55,7 @@ impl PageTableManager {
         }
     }
 
-    pub fn alloc_virtual_with_data<P: ToPermissions>(&mut self, map_to: VirtualAddress, perms: P, data: &[u8]) {
+    pub fn alloc_virtual_with_data(&mut self, map_to: VirtualAddress, perms: Permissions, data: &[u8]) {
         let _disabler = InterruptDisabler::new();
         let phys = Self::new_phys_page();
 
@@ -69,12 +71,12 @@ impl PageTableManager {
         sfence(Some(map_to), None);
     }
 
-    pub fn map_direct<P: ToPermissions>(
+    pub fn map_direct(
         &mut self,
         map_from: PhysicalAddress,
         map_to: VirtualAddress,
         size: PageSize,
-        perms: P,
+        perms: Permissions,
     ) {
         let _disabler = InterruptDisabler::new();
         self.0.map(map_from, map_to, size, perms);
@@ -82,7 +84,7 @@ impl PageTableManager {
         sfence(Some(map_to), None);
     }
 
-    pub fn modify_page_permissions(&mut self, virt: VirtualAddress, new_permissions: impl ToPermissions) {
+    pub fn modify_page_permissions(&mut self, virt: VirtualAddress, new_permissions: Permissions) {
         if let Some((entry, _)) = self.0.entry_mut(virt) {
             entry.set_permissions(new_permissions);
         }

@@ -6,7 +6,7 @@ use crate::{
     csr::satp::{self, Satp, SatpMode},
     mem::{
         kernel_patching,
-        paging::{Execute, PageSize, PhysicalAddress, Read, Sv39PageTable, VirtualAddress, Write},
+        paging::{PageSize, PhysicalAddress, Sv39PageTable, VirtualAddress, EXECUTE, READ, WRITE},
         phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
     },
     utils::{LinkerSymbol, StaticMut, Units},
@@ -81,7 +81,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     for address in (kernel_start..kernel_end).step_by(2.mib()) {
         let ident = VirtualAddress::new(address);
         let phys = PhysicalAddress::new(address);
-        let permissions = Read | Write | Execute;
+        let permissions = READ | WRITE | EXECUTE;
 
         (&mut *PAGE_TABLE_ROOT.get()).map(phys, ident, PageSize::Megapage, permissions);
     }
@@ -95,7 +95,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
             PageSize::Kilopage,
-            Read | Write,
+            READ | WRITE,
         );
     }
 
@@ -108,7 +108,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
             PageSize::Kilopage,
-            Read | Write,
+            READ | WRITE,
         );
     }
 
@@ -121,7 +121,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
             PageSize::Kilopage,
-            Read | Execute,
+            READ | EXECUTE,
         );
     }
 
@@ -134,7 +134,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
             PageSize::Kilopage,
-            Read,
+            READ,
         );
     }
 
@@ -143,7 +143,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             PhysicalAddress::new(addr * 1.gib()),
             VirtualAddress::new(PHYS_OFFSET_VALUE + addr * 1.gib()),
             PageSize::Gigapage,
-            Read | Write,
+            READ | WRITE,
         );
     }
 
