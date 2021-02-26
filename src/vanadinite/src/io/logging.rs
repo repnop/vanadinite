@@ -4,11 +4,12 @@
 
 use crate::sync::RwLock;
 use alloc::{collections::BTreeMap, string::String};
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use log::LevelFilter;
 
 static LOG_FILTER: RwLock<Option<BTreeMap<String, Option<LevelFilter>>>> = RwLock::new(None);
 static LOG_LEVEL: AtomicUsize = AtomicUsize::new(LevelFilter::Info as usize);
+pub static USE_COLOR: AtomicBool = AtomicBool::new(true);
 
 pub fn parse_log_filter(filter: Option<&str>) {
     if let Some(filter) = filter {
@@ -86,7 +87,26 @@ impl log::Log for Logger {
             let curr_time = crate::csr::time::read();
             let (secs, ms, _) = crate::utils::time_parts(crate::utils::micros(curr_time, freq));
 
-            crate::println!("[{:>5}.{:<03}] [ {:>5} ] [{}] {}", secs, ms, record.level(), mod_path, record.args());
+            let color = match record.level() {
+                log::Level::Trace => crate::io::terminal::WHITE,
+                log::Level::Debug => crate::io::terminal::GREEN,
+                log::Level::Info => crate::io::terminal::BLUE,
+                log::Level::Warn => crate::io::terminal::YELLOW,
+                log::Level::Error => crate::io::terminal::RED,
+            };
+
+            let clear = crate::io::terminal::CLEAR;
+
+            crate::println!(
+                "[{:>5}.{:<03}] [ {}{:>5}{} ] [{}] {}",
+                secs,
+                ms,
+                color,
+                record.level(),
+                clear,
+                mod_path,
+                record.args()
+            );
         }
     }
 

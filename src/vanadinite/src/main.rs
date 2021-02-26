@@ -59,6 +59,8 @@ use {
     utils::Units,
 };
 
+pub use vanadinite_macros::{debug, error, info, trace, warn};
+
 extern "C" {
     static stvec_trap_shim: utils::LinkerSymbol;
 }
@@ -135,6 +137,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
                     Some(path) => init_path = path,
                     None => log::warn!("No path provided for init process! Defaulting to `init`"),
                 },
+                "no-color" | "no-colour" => io::logging::USE_COLOR.store(false, Ordering::Relaxed),
                 "" => {}
                 _ => log::warn!("Unknown kernel argument: `{}`", option),
             }
@@ -176,17 +179,17 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         (version.major, version.minor)
     };
 
-    log::info!("vanadinite version {}", env!("CARGO_PKG_VERSION"));
-    log::info!("=== Machine Info ===");
-    log::info!(" Device Model: {}", model);
-    log::info!(" Booting Hart ID: {}", hart_id);
-    log::info!(" RAM: {} MiB @ {:#X}", mem_size, mem_start as usize);
-    log::info!(" Timer Clock: {}Hz", timebase_frequency);
-    log::info!("=== SBI Implementation ===");
-    log::info!(" Implementor: {:?} (version: {}.{})", sbi::base::impl_id(), impl_major, impl_minor);
-    log::info!(" Spec Version: {}.{}", spec_major, spec_minor);
+    info!("vanadinite version {#brightgreen}", env!("CARGO_PKG_VERSION"));
+    info!(blue, "=== Machine Info ===");
+    info!(" Device Model: {}", model);
+    info!(" Booting Hart ID: {}", hart_id);
+    info!(" RAM: {} MiB @ {:#X}", mem_size, mem_start as usize);
+    info!(" Timer Clock: {}Hz", timebase_frequency);
+    info!(blue, "=== SBI Implementation ===");
+    info!(" Implementor: {:?} (version: {#green'{}.{}})", sbi::base::impl_id(), impl_major, impl_minor);
+    info!(" Spec Version: {#green'{}.{}}", spec_major, spec_minor);
 
-    log::debug!("Installing trap handler at {:#p}", unsafe { stvec_trap_shim.as_ptr() });
+    debug!("Installing trap handler at {:#p}", unsafe { stvec_trap_shim.as_ptr() });
     csr::stvec::set(unsafe { core::mem::transmute(stvec_trap_shim.as_ptr()) });
 
     match fdt.find_compatible(Plic::compatible_with()) {
@@ -217,7 +220,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
             plic.init(ndevs, contexts);
 
-            log::debug!("Registering PLIC @ {:#p}", ic_virt);
+            debug!("Registering PLIC @ {:#p}", ic_virt);
             interrupts::register_plic(plic);
         }
         None => panic!("Can't find PLIC!"),
@@ -279,7 +282,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         &elf64::Elf::new(tar.file(init_path).unwrap().contents).unwrap(),
     ));
 
-    log::info!("Scheduling init process!");
+    info!(brightgreen, "Scheduling init process!");
 
     scheduler::Scheduler::schedule()
 }
@@ -288,7 +291,7 @@ static INIT_FS: &[u8] = include_bytes!("../../../initfs.tar");
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    log::error!("{}", info);
+    error!("{}", info);
     platform::exit(platform::ExitStatus::Error(info))
 }
 

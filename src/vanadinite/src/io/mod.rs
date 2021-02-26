@@ -5,6 +5,7 @@
 pub mod block_device;
 pub mod console;
 pub mod logging;
+pub mod terminal;
 
 pub use console::*;
 use core::fmt::Write;

@@ -8,6 +8,7 @@ members = [
     "sbi",
     "tar",
     "vanadinite",
+    "vanadinite_macros",
 ]
 
 [profile.release]
