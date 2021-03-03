@@ -59,6 +59,7 @@ use {
     utils::Units,
 };
 
+use fdt::Fdt;
 pub use vanadinite_macros::{debug, error, info, trace, warn};
 
 extern "C" {
@@ -95,9 +96,9 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     crate::io::logging::init_logging();
 
-    let fdt = match unsafe { fdt::Fdt::new(fdt) } {
-        Some(fdt) => fdt,
-        None => crate::platform::exit(crate::platform::ExitStatus::Error(&"magic's fucked, my dude")),
+    let fdt: Fdt<'static> = match unsafe { Fdt::from_ptr(fdt) } {
+        Ok(fdt) => fdt,
+        Err(e) => crate::platform::exit(crate::platform::ExitStatus::Error(&e)),
     };
 
     let current_cpu = fdt.cpus().find(|cpu| cpu.ids().first() == hart_id).unwrap();

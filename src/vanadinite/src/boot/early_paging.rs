@@ -2,6 +2,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use fdt::Fdt;
+
 use crate::{
     csr::satp::{self, Satp, SatpMode},
     mem::{
@@ -38,9 +40,9 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
         mv {}, {tmp}
     ", out(reg) kmain, tmp = out(reg) _);
 
-    let fdt_struct = match fdt::Fdt::new(fdt) {
-        Some(fdt) => fdt,
-        None => crate::platform::exit(crate::platform::ExitStatus::Error(&"magic's fucked, my dude")),
+    let fdt_struct: Fdt<'static> = match fdt::Fdt::from_ptr(fdt) {
+        Ok(fdt) => fdt,
+        Err(e) => crate::platform::exit(crate::platform::ExitStatus::Error(&e)),
     };
 
     let fdt_size = fdt_struct.total_size() as u64;
@@ -160,7 +162,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     crate::mem::PHYSICAL_OFFSET.store(PHYS_OFFSET_VALUE, core::sync::atomic::Ordering::Relaxed);
 
-    vmem_trampoline(hart_id, (fdt as usize + PHYS_OFFSET_VALUE) as *const u8, new_sp, new_gp, kmain)
+    vmem_trampoline(hart_id, crate::mem::phys2virt(PhysicalAddress::from_ptr(fdt)).as_ptr(), new_sp, new_gp, kmain)
 }
 
 #[naked]
