@@ -286,8 +286,6 @@ pub fn info(input: TokenStream) -> TokenStream {
 
     let extra_comma = if !named_colors.is_empty() && !args.is_empty() { quote!(,) } else { quote!() };
 
-    //panic!("{}", quote!(log::info!(#output_str, #(#args),* #extra_comma #(#named_colors),*)).to_string());
-
     TokenStream::from(quote!(log::info!(#output_str, #(#args),* #extra_comma #(#named_colors),*)))
 }
 
@@ -304,8 +302,6 @@ pub fn debug(input: TokenStream) -> TokenStream {
         .collect::<Vec<_>>();
 
     let extra_comma = if !named_colors.is_empty() && !args.is_empty() { quote!(,) } else { quote!() };
-
-    //panic!("{}", quote!(log::info!(#output_str, #(#args),* #extra_comma #(#named_colors),*)).to_string());
 
     TokenStream::from(quote!(log::debug!(#output_str, #(#args),* #extra_comma #(#named_colors),*)))
 }
@@ -324,8 +320,6 @@ pub fn trace(input: TokenStream) -> TokenStream {
 
     let extra_comma = if !named_colors.is_empty() && !args.is_empty() { quote!(,) } else { quote!() };
 
-    //panic!("{}", quote!(log::info!(#output_str, #(#args),* #extra_comma #(#named_colors),*)).to_string());
-
     TokenStream::from(quote!(log::trace!(#output_str, #(#args),* #extra_comma #(#named_colors),*)))
 }
 
@@ -343,8 +337,6 @@ pub fn warn(input: TokenStream) -> TokenStream {
 
     let extra_comma = if !named_colors.is_empty() && !args.is_empty() { quote!(,) } else { quote!() };
 
-    //panic!("{}", quote!(log::info!(#output_str, #(#args),* #extra_comma #(#named_colors),*)).to_string());
-
     TokenStream::from(quote!(log::warn!(#output_str, #(#args),* #extra_comma #(#named_colors),*)))
 }
 
@@ -361,8 +353,6 @@ pub fn error(input: TokenStream) -> TokenStream {
         .collect::<Vec<_>>();
 
     let extra_comma = if !named_colors.is_empty() && !args.is_empty() { quote!(,) } else { quote!() };
-
-    //panic!("{}", quote!(log::info!(#output_str, #(#args),* #extra_comma #(#named_colors),*)).to_string());
 
     TokenStream::from(quote!(log::error!(#output_str, #(#args),* #extra_comma #(#named_colors),*)))
 }

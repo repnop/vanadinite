@@ -11,7 +11,7 @@ pub struct FreeListAllocator {
 
 impl FreeListAllocator {
     pub const fn new() -> Self {
-        Self { inner: Mutex::new(FreeList { head: None, origin: core::ptr::null_mut(), size: 0 }) }
+        Self { inner: Mutex::new(FreeList { head: None }) }
     }
 
     /// # Safety
@@ -21,8 +21,6 @@ impl FreeListAllocator {
     pub unsafe fn init(&self, origin: *mut u8, size: usize) {
         let mut inner = self.inner.lock();
         inner.head = Some(NonNull::new(origin.cast()).expect("bad origin passed"));
-        inner.origin = origin;
-        inner.size = size;
 
         *inner.head.unwrap().as_ptr() = FreeListNode { next: None, size: size - FreeListNode::struct_size() };
     }
@@ -61,7 +59,7 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
 
                 match prev_node {
                     Some(prev_node) => (*prev_node).next = (*node).next,
-                    None => this.origin = (*node).next.expect("valid next").as_ptr().cast(),
+                    None => this.head = Some((*node).next.expect("valid next")),
                 }
 
                 break (&*node).data();
@@ -119,8 +117,6 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
 
 struct FreeList {
     head: Option<NonNull<FreeListNode>>,
-    origin: *mut u8,
-    size: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
