@@ -4,6 +4,8 @@
 
 #![no_std]
 
+use core::convert::TryInto;
+
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct BigEndianU16(u16);
@@ -146,6 +148,15 @@ macro_rules! implFromBytes {
 
 implFromBytes!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, BigEndianU16 u16, BigEndianU32 u32, BigEndianU64 u64, BigEndianI16 i16, BigEndianI32 i32, BigEndianI64 i64,);
 
+impl<const N: usize> FromBytes for [u8; N] {
+    const SIZE: usize = N;
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        bytes.get(..N)?.try_into().ok()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct ByteStream<'a> {
     bytes: &'a [u8],
 }
@@ -167,8 +178,16 @@ impl<'a> ByteStream<'a> {
         self.bytes = self.bytes.get(I::SIZE * n..).unwrap_or_default();
     }
 
-    pub fn remaining(&self) -> &[u8] {
+    pub fn remaining(&self) -> &'a [u8] {
         self.bytes
+    }
+
+    pub fn peek<T: FromBytes>(&self) -> Option<T> {
+        T::from_bytes(self.remaining())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.remaining().is_empty()
     }
 }
 
