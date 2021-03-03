@@ -5,16 +5,16 @@
 #![allow(clippy::match_bool, clippy::identity_op)]
 #![allow(incomplete_features)]
 #![feature(
-    asm,
-    naked_functions,
     alloc_error_handler,
-    raw_ref_op,
-    const_generics,
-    thread_local,
-    maybe_uninit_ref,
+    asm,
     const_fn_fn_ptr_basics,
     const_fn,
-    inline_const
+    const_generics,
+    inline_const,
+    maybe_uninit_ref,
+    naked_functions,
+    raw_ref_op,
+    thread_local
 )]
 #![no_std]
 #![no_main]

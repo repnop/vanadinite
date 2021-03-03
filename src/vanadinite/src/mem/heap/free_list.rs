@@ -68,25 +68,19 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
             if (*node).size >= size && enough_for_split {
                 log::debug!("FreeListAllocator::alloc: reusing node and splitting");
 
-                let new_node_ptr: *mut FreeListNode = (&*node).data().add(size).cast();
-                (*new_node_ptr).size = (*node).size - (size + FreeListNode::struct_size());
-                (*new_node_ptr).next = (*node).next;
-                (*node).size = size;
-                (*node).next = None;
+                let new_node = (&mut *node).split(size);
 
                 log::debug!(
                     "FreeListAllocator::alloc: created new node, current node={:?}, new node={:?}",
                     &*node,
-                    &*new_node_ptr
+                    &*new_node.as_ptr()
                 );
 
-                let next = Some(NonNull::new_unchecked(new_node_ptr));
-
                 match prev_node {
-                    Some(prev_node) => (*prev_node).next = next,
+                    Some(prev_node) => (*prev_node).next = Some(new_node),
                     None => {
-                        log::debug!("Setting head to {:?}", &*new_node_ptr);
-                        this.head = next;
+                        log::debug!("Setting head to {:?}", &*new_node.as_ptr());
+                        this.head = Some(new_node);
                     }
                 }
 
@@ -133,6 +127,20 @@ impl FreeListNode {
 
     fn struct_size() -> usize {
         core::mem::size_of::<Self>()
+    }
+
+    fn split(&mut self, mut new_size: usize) -> NonNull<FreeListNode> {
+        assert!(self.size > (new_size + Self::struct_size()), "trying to split off more than is available");
+
+        new_size = align_to_usize(new_size);
+
+        let other_size = self.size - new_size - Self::struct_size();
+        self.size = new_size;
+
+        let next_node: *mut Self = unsafe { (self as *mut _ as *mut u8).add(Self::struct_size() + self.size).cast() };
+        unsafe { *next_node = FreeListNode { next: self.next.take(), size: other_size } };
+
+        NonNull::new(next_node).unwrap()
     }
 }
 
