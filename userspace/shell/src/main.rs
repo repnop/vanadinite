@@ -1,5 +1,3 @@
-#![feature(str_split_once)]
-
 fn main() {
     let mut buf = [0; 256];
     loop {
