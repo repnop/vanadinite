@@ -3,7 +3,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{BigEndianU32, BigEndianU64, Fdt};
-use bytestream::FromBytes;
+use bytestream::{ByteStream, FromBytes};
 
 const FDT_BEGIN_NODE: u32 = 1;
 const FDT_END_NODE: u32 = 2;
@@ -12,11 +12,11 @@ const FDT_NOP: u32 = 4;
 const FDT_END: u32 = 5;
 
 #[derive(Debug, Clone, Copy)]
-pub struct MemoryNode<'a> {
-    pub(crate) node: FdtNode<'a>,
+pub struct MemoryNode<'b, 'a: 'b> {
+    pub(crate) node: FdtNode<'b, 'a>,
 }
 
-impl MemoryNode<'_> {
+impl MemoryNode<'_, '_> {
     pub fn regions(&self) -> impl Iterator<Item = MemoryRegion> + '_ {
         self.node.reg().unwrap()
     }
@@ -55,42 +55,39 @@ pub struct MappedArea {
     pub size: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-struct FdtProperty {
-    len: BigEndianU32,
-    name_offset: BigEndianU32,
+bytestream::streamable_struct! {
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    struct FdtProperty {
+        len: BigEndianU32,
+        name_offset: BigEndianU32,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct FdtNode<'a> {
+pub struct FdtNode<'b, 'a: 'b> {
     pub name: &'a str,
-    pub(crate) header: &'a Fdt,
-    props: *const BigEndianU32,
-    parent_props: Option<*const BigEndianU32>,
+    pub(crate) header: &'b Fdt<'a>,
+    props: &'a [u8],
+    parent_props: Option<&'a [u8]>,
 }
 
-impl<'a> FdtNode<'a> {
-    fn new(
-        name: &'a str,
-        header: &'a Fdt,
-        props: *const BigEndianU32,
-        parent_props: Option<*const BigEndianU32>,
-    ) -> Self {
+impl<'b, 'a: 'b> FdtNode<'b, 'a> {
+    fn new(name: &'a str, header: &'b Fdt<'a>, props: &'a [u8], parent_props: Option<&'a [u8]>) -> Self {
         Self { name, header, props, parent_props }
     }
 
-    pub fn properties(self) -> impl Iterator<Item = NodeProperty<'a>> {
-        let mut ptr = self.props;
+    pub fn properties(self) -> impl Iterator<Item = NodeProperty<'a>> + 'b {
+        let mut stream = ByteStream::new(self.props);
         let mut done = false;
 
         core::iter::from_fn(move || {
-            if done {
+            if stream.is_empty() || done {
                 return None;
             }
 
-            if unsafe { *ptr }.get() == FDT_PROP {
-                Some(NodeProperty::parse(&mut ptr, self.header))
+            if stream.peek::<BigEndianU32>().unwrap().get() == FDT_PROP {
+                Some(NodeProperty::parse(&mut stream, self.header))
             } else {
                 done = true;
                 None
@@ -98,39 +95,42 @@ impl<'a> FdtNode<'a> {
         })
     }
 
-    pub fn children(self) -> impl Iterator<Item = FdtNode<'a>> {
-        let mut ptr = self.props;
+    pub fn children(self) -> impl Iterator<Item = FdtNode<'b, 'a>> {
+        let mut stream = ByteStream::new(self.props);
 
-        while unsafe { *ptr }.get() == FDT_PROP {
-            NodeProperty::parse(&mut ptr, self.header);
+        while stream.peek::<BigEndianU32>().unwrap().get() == FDT_PROP {
+            NodeProperty::parse(&mut stream, self.header);
         }
 
         let mut done = false;
 
         core::iter::from_fn(move || {
-            if done {
+            if stream.is_empty() || done {
                 return None;
             }
 
-            while unsafe { *ptr }.get() == FDT_NOP {
-                unsafe { advance_ptr(&mut ptr, 4) };
+            while stream.peek::<BigEndianU32>()?.get() == FDT_NOP {
+                stream.skip_n::<BigEndianU32>(1);
             }
 
-            if unsafe { *ptr }.get() == FDT_BEGIN_NODE {
-                let origin = ptr;
-                let ret = unsafe {
-                    advance_ptr(&mut ptr, 4);
-                    let unit_name = cstr_core::CStr::from_ptr(ptr.cast()).to_str().expect("bad utf8");
-                    advance_ptr(&mut ptr, unit_name.as_bytes().len() + 1);
-                    let offset = ptr.cast::<u8>().align_offset(4);
-                    advance_ptr(&mut ptr, offset);
+            if stream.peek::<BigEndianU32>()?.get() == FDT_BEGIN_NODE {
+                let origin = stream.remaining();
+                let ret = {
+                    stream.skip_n::<BigEndianU32>(1);
+                    let unit_name = crate::cstr::CStr::new(stream.remaining()).as_str()?;
+                    let full_name_len = unit_name.len() + 1;
+                    stream.skip_n::<u8>(full_name_len);
 
-                    Some(Self::new(unit_name, self.header, ptr, Some(self.props)))
+                    if full_name_len % 4 != 0 {
+                        stream.skip_n::<u8>(4 - (full_name_len % 4));
+                    }
+
+                    Some(Self::new(unit_name, self.header, stream.remaining(), Some(self.props)))
                 };
 
-                ptr = origin;
+                stream = ByteStream::new(origin);
 
-                unsafe { skip_current_node(&mut ptr, self.header) };
+                skip_current_node(&mut stream, self.header);
 
                 ret
             } else {
@@ -219,7 +219,7 @@ impl<'a> FdtNode<'a> {
         CellSizes { address_cells: address_cells.unwrap_or(2), size_cells: size_cells.unwrap_or(1) }
     }
 
-    pub fn interrupt_parent(self) -> Option<FdtNode<'a>> {
+    pub fn interrupt_parent(self) -> Option<FdtNode<'b, 'a>> {
         self.properties()
             .find(|p| p.name == "interrupt-parent")
             .and_then(|p| self.header.find_phandle(BigEndianU32::from_bytes(p.value)?.get()))
@@ -312,128 +312,123 @@ impl<'a> Compatible<'a> {
     }
 }
 
-pub(crate) unsafe fn find_node<'a>(
-    ptr: &mut *const BigEndianU32,
+pub(crate) fn find_node<'b, 'a: 'b>(
+    stream: &mut ByteStream<'a>,
     name: &str,
-    header: &'a Fdt,
-    parent_props: Option<*const BigEndianU32>,
-) -> Option<FdtNode<'a>> {
+    header: &'b Fdt<'a>,
+    parent_props: Option<&'a [u8]>,
+) -> Option<FdtNode<'b, 'a>> {
     let mut parts = name.splitn(2, '/');
     let looking_for = parts.next()?;
 
-    while (**ptr).get() == FDT_NOP {
-        advance_ptr(ptr, 4);
+    log::debug!("looking for node: {:?}", looking_for);
+
+    while stream.peek::<BigEndianU32>()?.get() == FDT_NOP {
+        log::debug!("parsed nop");
+        stream.skip_n::<BigEndianU32>(1);
     }
 
-    let node_ptr = *ptr;
+    let curr_data = stream.remaining();
 
-    match (**ptr).get() {
-        FDT_BEGIN_NODE => advance_ptr(ptr, 4),
+    match stream.next::<BigEndianU32>()?.get() {
+        FDT_BEGIN_NODE => log::debug!("parsed begin_node"),
         _ => return None,
     }
 
-    let unit_name = cstr_core::CStr::from_ptr(ptr.cast()).to_str().ok()?;
+    let unit_name = crate::cstr::CStr::new(stream.remaining()).as_str()?;
 
-    advance_ptr(ptr, unit_name.as_bytes().len() + 1);
-    let offset = ptr.cast::<u8>().align_offset(4);
-    advance_ptr(ptr, offset);
+    log::debug!("found {:?}", unit_name);
+
+    let full_name_len = unit_name.len() + 1;
+    skip_4_aligned(stream, full_name_len);
 
     let addr_name_same = looking_for.contains('@') && unit_name == looking_for;
     let base_name_same = unit_name.split('@').next()? == looking_for;
 
     if !addr_name_same && !base_name_same {
-        *ptr = node_ptr;
-        skip_current_node(ptr, header);
+        log::debug!("skipping current node");
+        *stream = ByteStream::new(curr_data);
+        skip_current_node(stream, header);
 
         return None;
     }
 
+    log::debug!("{:?}", stream.peek::<[u8; 4]>().unwrap());
+
     let next_part = match parts.next() {
-        None | Some("") => return Some(FdtNode::new(unit_name, header, *ptr, parent_props)),
+        None | Some("") => return Some(FdtNode::new(unit_name, header, stream.remaining(), parent_props)),
         Some(part) => part,
     };
 
-    while *ptr < header.structs_limit().cast() {
-        let parent_props = Some(*ptr);
+    log::debug!("next_part: {:?}", next_part);
 
-        while (**ptr).get() == FDT_PROP {
-            let _ = NodeProperty::parse(ptr, header);
+    while !stream.remaining().is_empty() {
+        let parent_props = Some(stream.remaining());
+
+        while stream.peek::<BigEndianU32>()?.get() == FDT_PROP {
+            let _ = NodeProperty::parse(stream, header);
         }
 
-        while (**ptr).get() == FDT_BEGIN_NODE {
-            if let Some(p) = find_node(ptr, next_part, header, parent_props) {
+        while stream.peek::<BigEndianU32>()?.get() == FDT_BEGIN_NODE {
+            if let Some(p) = find_node(stream, next_part, header, parent_props) {
                 return Some(p);
             }
         }
 
-        while (**ptr).get() == FDT_NOP {
-            advance_ptr(ptr, 4);
+        while stream.peek::<BigEndianU32>()?.get() == FDT_NOP {
+            stream.skip_n::<BigEndianU32>(1);
         }
 
-        if (**ptr).get() != FDT_END_NODE {
+        if stream.next::<BigEndianU32>()?.get() != FDT_END_NODE {
             return None;
         }
-
-        advance_ptr(ptr, 4);
     }
 
     None
 }
 
 // FIXME: this probably needs refactored
-pub(crate) unsafe fn all_nodes(header: &Fdt) -> impl Iterator<Item = FdtNode<'_>> {
-    let mut ptr: *const BigEndianU32 = header.structs_ptr().cast();
+pub(crate) fn all_nodes<'b, 'a: 'b>(header: &'b Fdt<'a>) -> impl Iterator<Item = FdtNode<'b, 'a>> {
+    let mut stream = ByteStream::new(header.structs_block());
     let mut done = false;
-    let mut parents = [core::ptr::null(); 128];
+    let mut parents: [&[u8]; 64] = [&[]; 64];
     let mut parent_index = 0;
 
     core::iter::from_fn(move || {
-        if done {
+        if stream.is_empty() || done {
             return None;
         }
 
-        while (*ptr).get() == FDT_END_NODE {
+        while stream.peek::<BigEndianU32>()?.get() == FDT_END_NODE {
             parent_index -= 1;
-            advance_ptr(&mut ptr, 4);
+            stream.skip_n::<BigEndianU32>(1);
         }
 
-        if (*ptr).get() == FDT_END {
+        if stream.peek::<BigEndianU32>()?.get() == FDT_END {
             done = true;
             return None;
         }
 
-        while (*ptr).get() == FDT_NOP {
-            advance_ptr(&mut ptr, 4);
+        while stream.peek::<BigEndianU32>()?.get() == FDT_NOP {
+            stream.skip_n::<BigEndianU32>(1);
         }
 
-        match (*ptr).get() {
-            FDT_BEGIN_NODE => advance_ptr(&mut ptr, 4),
+        match stream.next::<BigEndianU32>()?.get() {
+            FDT_BEGIN_NODE => {}
             _ => return None,
         }
 
-        let unit_name = cstr_core::CStr::from_ptr(ptr.cast()).to_str().ok()?;
+        let unit_name = crate::cstr::CStr::new(stream.remaining()).as_str().unwrap();
+        let full_name_len = unit_name.len() + 1;
+        skip_4_aligned(&mut stream, full_name_len);
 
-        advance_ptr(&mut ptr, unit_name.as_bytes().len() + 1);
-        let offset = ptr.cast::<u8>().align_offset(4);
-        advance_ptr(&mut ptr, offset);
-
-        let node_ptr = ptr;
+        let curr_node = stream.remaining();
 
         parent_index += 1;
-        parents[parent_index] = ptr;
+        parents[parent_index] = curr_node;
 
-        log::debug!(
-            "hit node: {:?}, ptr: {:#p}, parent: {:?}",
-            unit_name,
-            ptr,
-            match parent_index {
-                1 => None,
-                _ => Some(parents[parent_index - 1]),
-            }
-        );
-
-        while (*ptr).get() == FDT_PROP {
-            NodeProperty::parse(&mut ptr, header);
+        while stream.peek::<BigEndianU32>()?.get() == FDT_PROP {
+            NodeProperty::parse(&mut stream, header);
         }
 
         Some(FdtNode {
@@ -443,34 +438,31 @@ pub(crate) unsafe fn all_nodes(header: &Fdt) -> impl Iterator<Item = FdtNode<'_>
                 1 => None,
                 _ => Some(parents[parent_index - 1]),
             },
-            props: node_ptr,
+            props: curr_node,
         })
     })
 }
 
-pub(crate) unsafe fn skip_current_node(ptr: &mut *const BigEndianU32, header: &Fdt) {
-    assert_eq!((**ptr).get(), FDT_BEGIN_NODE, "bad node");
-    advance_ptr(ptr, 4);
+pub(crate) fn skip_current_node<'a>(stream: &mut ByteStream<'a>, header: &Fdt<'a>) {
+    assert_eq!(stream.next::<BigEndianU32>().unwrap().get(), FDT_BEGIN_NODE, "bad node");
 
-    let unit_name = cstr_core::CStr::from_ptr(ptr.cast()).to_str().ok().unwrap();
-    advance_ptr(ptr, unit_name.as_bytes().len() + 1);
-    let offset = ptr.cast::<u8>().align_offset(4);
-    advance_ptr(ptr, offset);
+    let unit_name = crate::cstr::CStr::new(stream.remaining()).as_str().unwrap();
+    let full_name_len = unit_name.len() + 1;
+    skip_4_aligned(stream, full_name_len);
 
-    while (**ptr).get() == FDT_PROP {
-        NodeProperty::parse(ptr, header);
+    while stream.peek::<BigEndianU32>().unwrap().get() == FDT_PROP {
+        NodeProperty::parse(stream, header);
     }
 
-    while (**ptr).get() == FDT_BEGIN_NODE {
-        skip_current_node(ptr, header);
+    while stream.peek::<BigEndianU32>().unwrap().get() == FDT_BEGIN_NODE {
+        skip_current_node(stream, header);
     }
 
-    while (**ptr).get() == FDT_NOP {
-        advance_ptr(ptr, 4);
+    while stream.peek::<BigEndianU32>().unwrap().get() == FDT_NOP {
+        stream.skip_n::<BigEndianU32>(1);
     }
 
-    assert_eq!((**ptr).get(), FDT_END_NODE, "bad node");
-    advance_ptr(ptr, 4);
+    assert_eq!(stream.next::<BigEndianU32>().unwrap().get(), FDT_END_NODE, "bad node");
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -492,28 +484,24 @@ impl<'a> NodeProperty<'a> {
         core::str::from_utf8(self.value).ok()
     }
 
-    fn parse(ptr: &mut *const BigEndianU32, header: &Fdt) -> Self {
-        unsafe {
-            if (**ptr).get() != FDT_PROP {
-                panic!("bad prop");
-            }
-
-            advance_ptr(ptr, 4);
-
-            let prop: FdtProperty = *ptr.cast();
-            let data = ptr.cast::<u8>().add(core::mem::size_of::<FdtProperty>());
-            advance_ptr(ptr, core::mem::size_of::<FdtProperty>() + prop.len.get() as usize);
-            let offset = ptr.cast::<u8>().align_offset(4);
-            advance_ptr(ptr, offset);
-
-            NodeProperty {
-                name: header.str_at_offset(prop.name_offset.get() as usize),
-                value: core::slice::from_raw_parts(data, prop.len.get() as usize),
-            }
+    fn parse(stream: &mut bytestream::ByteStream<'a>, header: &Fdt<'a>) -> Self {
+        match stream.next::<BigEndianU32>().unwrap().get() {
+            FDT_PROP => {}
+            other => panic!("bad prop, tag: {}", other),
         }
+
+        let prop: FdtProperty = stream.next().unwrap();
+        log::debug!("prop: {:?}", prop);
+        let data_len = prop.len.get() as usize;
+
+        let data = &stream.remaining()[..data_len];
+
+        skip_4_aligned(stream, data_len);
+
+        NodeProperty { name: header.str_at_offset(prop.name_offset.get() as usize), value: data }
     }
 }
 
-pub(crate) unsafe fn advance_ptr<T>(ptr: &mut *const T, bytes: usize) {
-    *ptr = ptr.cast::<u8>().add(bytes).cast();
+fn skip_4_aligned(stream: &mut ByteStream<'_>, len: usize) {
+    stream.skip_n::<u8>((len + 3) & !0x3);
 }

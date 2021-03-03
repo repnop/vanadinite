@@ -4,98 +4,155 @@
 
 #![no_std]
 
+mod cstr;
 mod node;
 
 use bytestream::{BigEndianU32, BigEndianU64, ByteStream, FromBytes};
-use cstr_core::CStr;
 pub use node::{Compatible, MappedArea, MemoryNode, MemoryRegion, NodeProperty};
 
 #[derive(Debug)]
-#[repr(C)]
-pub struct Fdt {
-    /// FDT header magic
-    magic: BigEndianU32,
-    /// Total size in bytes of the FDT structure
-    totalsize: BigEndianU32,
-    /// Offset in bytes from the start of the header to the structure block
-    off_dt_struct: BigEndianU32,
-    /// Offset in bytes from the start of the header to the strings block
-    off_dt_strings: BigEndianU32,
-    /// Offset in bytes from the start of the header to the memory reservation
-    /// block
-    off_mem_rsvmap: BigEndianU32,
-    /// FDT version
-    version: BigEndianU32,
-    /// Last compatible FDT version
-    last_comp_version: BigEndianU32,
-    /// System boot CPU ID
-    boot_cpuid_phys: BigEndianU32,
-    /// Length in bytes of the strings block
-    size_dt_strings: BigEndianU32,
-    /// Length in bytes of the struct block
-    size_dt_struct: BigEndianU32,
+pub enum FdtError {
+    BadMagic,
+    BadPtr,
+    BufferTooSmall,
 }
 
-impl Fdt {
+impl core::fmt::Display for FdtError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            FdtError::BadMagic => write!(f, "bad FDT magic value"),
+            FdtError::BadPtr => write!(f, "an invalid pointer was passed"),
+            FdtError::BufferTooSmall => write!(f, "the given buffer was too small to contain a FDT header"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Fdt<'a> {
+    data: &'a [u8],
+    header: FdtHeader,
+}
+
+bytestream::streamable_struct! {
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub struct FdtHeader {
+        /// FDT header magic
+        magic: BigEndianU32,
+        /// Total size in bytes of the FDT structure
+        totalsize: BigEndianU32,
+        /// Offset in bytes from the start of the header to the structure block
+        off_dt_struct: BigEndianU32,
+        /// Offset in bytes from the start of the header to the strings block
+        off_dt_strings: BigEndianU32,
+        /// Offset in bytes from the start of the header to the memory reservation
+        /// block
+        off_mem_rsvmap: BigEndianU32,
+        /// FDT version
+        version: BigEndianU32,
+        /// Last compatible FDT version
+        last_comp_version: BigEndianU32,
+        /// System boot CPU ID
+        boot_cpuid_phys: BigEndianU32,
+        /// Length in bytes of the strings block
+        size_dt_strings: BigEndianU32,
+        /// Length in bytes of the struct block
+        size_dt_struct: BigEndianU32,
+    }
+}
+
+impl FdtHeader {
+    fn valid_magic(&self) -> bool {
+        self.magic.get() == 0xd00dfeed
+    }
+
+    fn struct_range(&self) -> core::ops::Range<usize> {
+        let start = self.off_dt_struct.get() as usize;
+        let end = start + self.size_dt_struct.get() as usize;
+
+        start..end
+    }
+
+    fn strings_range(&self) -> core::ops::Range<usize> {
+        let start = self.off_dt_strings.get() as usize;
+        let end = start + self.size_dt_strings.get() as usize;
+
+        start..end
+    }
+}
+
+impl<'a> Fdt<'a> {
     /// # Safety
     /// This function checks the pointer alignment and performs a read to verify
     /// the magic value. If the pointer is invalid this can result in undefined
     /// behavior.
-    pub unsafe fn new<'a>(ptr: *const u8) -> Option<&'a Self> {
-        if ptr.is_null() || ptr.align_offset(4) != 0 {
-            return None;
+    pub unsafe fn from_ptr(ptr: *const u8) -> Result<Self, FdtError> {
+        if ptr.is_null() {
+            return Err(FdtError::BadPtr);
         }
 
-        let this: &Self = &*ptr.cast();
+        let tmp_header = core::slice::from_raw_parts(ptr, core::mem::size_of::<FdtHeader>());
+        let real_size = Self::new(tmp_header)?.header.totalsize.get() as usize;
 
-        match this.validate_magic() {
-            true => Some(this),
-            false => None,
+        Self::new(core::slice::from_raw_parts(ptr, real_size))
+    }
+
+    pub fn new(data: &'a [u8]) -> Result<Self, FdtError> {
+        let mut stream = ByteStream::new(data);
+        let header: FdtHeader = stream.next().ok_or(FdtError::BufferTooSmall)?;
+
+        if !header.valid_magic() {
+            return Err(FdtError::BadMagic);
         }
+
+        Ok(Self { data, header })
     }
 
-    fn validate_magic(&self) -> bool {
-        self.magic.get() == 0xd00dfeed
-    }
-
-    pub fn strings(&self) -> impl Iterator<Item = &str> {
-        let mut ptr = self.strings_ptr();
+    pub fn strings(&self) -> impl Iterator<Item = &'a str> {
+        let mut block = self.strings_block();
 
         core::iter::from_fn(move || {
-            if ptr >= self.strings_limit() {
+            if block.is_empty() {
                 return None;
             }
 
-            let cstr = unsafe { CStr::from_ptr(ptr) };
-            ptr = unsafe { ptr.add(cstr.to_bytes().len() + 1) };
-            Some(cstr.to_str().ok()?)
+            let cstr = cstr::CStr::new(block);
+
+            block = &block[cstr.len() + 1..];
+
+            cstr.as_str()
         })
     }
 
-    pub fn memory_reservations<'a>(&self) -> &'a [MemoryReservation] {
-        let offset = self.off_mem_rsvmap.get() as usize;
-        let mut length = 0;
+    pub fn memory_reservations(&self) -> impl Iterator<Item = MemoryReservation> + 'a {
+        let mut stream = ByteStream::new(&self.data[self.header.off_mem_rsvmap.get() as usize..]);
+        let mut done = false;
 
-        let mut ptr = self.offset_bytes(offset).cast::<MemoryReservation>();
-        unsafe {
-            while (*ptr).address.get() != 0 && (*ptr).size.get() != 0 {
-                length += 1;
-                ptr = ptr.add(1);
+        core::iter::from_fn(move || {
+            if stream.is_empty() || done {
+                return None;
             }
-        }
 
-        unsafe { core::slice::from_raw_parts(self.offset_bytes(offset).cast(), length) }
+            let res = stream.next::<MemoryReservation>()?;
+
+            if res.address.get() == 0 && res.size.get() == 0 {
+                done = true;
+                return None;
+            }
+
+            Some(res)
+        })
     }
 
-    pub fn root(&self) -> Root<'_> {
+    pub fn root(&self) -> Root<'_, 'a> {
         Root { node: self.find_node("/").expect("/ is a required node") }
     }
 
-    pub fn aliases(&self) -> Aliases<'_> {
+    pub fn aliases(&self) -> Aliases<'_, 'a> {
         Aliases { node: self.find_node("/aliases").expect("/aliases is a required node"), header: self }
     }
 
-    pub fn cpus(&self) -> impl Iterator<Item = Cpu<'_>> + '_ {
+    pub fn cpus(&self) -> impl Iterator<Item = Cpu<'_, 'a>> {
         let parent = self.find_node("/cpus").expect("/cpus is a required node");
 
         parent
@@ -107,12 +164,12 @@ impl Fdt {
     /// Returns the first node that matches the node path, if you want all that
     /// match the path, use `find_all_nodes`. This will automatically attempt to
     /// resolve aliases if `path` is not found.
-    pub fn find_node(&self, path: &str) -> Option<node::FdtNode<'_>> {
-        let node = unsafe { node::find_node(&mut self.structs_ptr().cast(), path, self, None) };
+    pub fn find_node(&self, path: &str) -> Option<node::FdtNode<'_, 'a>> {
+        let node = node::find_node(&mut ByteStream::new(self.structs_block()), path, self, None);
         node.or_else(|| self.aliases().resolve_node(path))
     }
 
-    pub fn find_all_nodes<'a>(&'a self, path: &'a str) -> impl Iterator<Item = node::FdtNode<'a>> {
+    pub fn find_all_nodes(&self, path: &'a str) -> impl Iterator<Item = node::FdtNode<'_, 'a>> {
         let mut done = false;
         let only_root = path == "/";
         let valid_path = path.chars().fold(0, |acc, c| acc + if c == '/' { 1 } else { 0 }) >= 1;
@@ -123,7 +180,7 @@ impl Fdt {
             "" => "/",
             s => s,
         };
-        let parent = unsafe { node::find_node(&mut self.structs_ptr().cast(), parent_path, self, None) };
+        let parent = node::find_node(&mut ByteStream::new(self.structs_block()), parent_path, self, None);
         let (parent, bad_parent) = match parent {
             Some(parent) => (parent, false),
             None => (self.find_node("/").unwrap(), true),
@@ -155,11 +212,11 @@ impl Fdt {
         })
     }
 
-    pub fn all_nodes(&self) -> impl Iterator<Item = node::FdtNode<'_>> {
-        unsafe { node::all_nodes(self) }
+    pub fn all_nodes(&self) -> impl Iterator<Item = node::FdtNode<'_, 'a>> {
+        node::all_nodes(self)
     }
 
-    pub fn find_phandle(&self, phandle: u32) -> Option<node::FdtNode<'_>> {
+    pub fn find_phandle(&self, phandle: u32) -> Option<node::FdtNode<'_, 'a>> {
         self.all_nodes().find(|n| {
             n.properties()
                 .find(|p| p.name == "phandle")
@@ -168,67 +225,46 @@ impl Fdt {
         })
     }
 
-    pub fn chosen(&self) -> Option<Chosen<'_>> {
-        unsafe { node::find_node(&mut self.structs_ptr().cast(), "/chosen", self, None) }.map(|node| Chosen { node })
+    pub fn chosen(&self) -> Option<Chosen<'_, 'a>> {
+        node::find_node(&mut ByteStream::new(self.structs_block()), "/chosen", self, None).map(|node| Chosen { node })
     }
 
-    pub fn find_compatible(&self, with: &[&str]) -> Option<node::FdtNode<'_>> {
+    pub fn find_compatible(&self, with: &[&str]) -> Option<node::FdtNode<'_, 'a>> {
         self.all_nodes()
             .find(|n| n.compatible().and_then(|compats| compats.all().find(|c| with.contains(&c))).is_some())
     }
 
-    pub fn memory(&self) -> MemoryNode<'_> {
+    pub fn memory(&self) -> MemoryNode<'_, 'a> {
         MemoryNode { node: self.find_node("/memory").expect("requires memory node") }
     }
 
     pub fn total_size(&self) -> usize {
-        self.totalsize.get() as usize
+        self.header.totalsize.get() as usize
     }
 
-    fn limit(&self) -> *const u8 {
-        unsafe { (self as *const Self).cast::<u8>().add(self.total_size()) }
+    fn cstr_at_offset(&self, offset: usize) -> cstr::CStr<'a> {
+        cstr::CStr::new(&self.strings_block()[offset..])
     }
 
-    fn cstr_at_offset<'a>(&self, offset: usize) -> &'a CStr {
-        let ptr = unsafe { self.strings_ptr().add(offset) };
-        assert!(ptr < self.limit(), "cstr past limit");
-        unsafe { CStr::from_ptr(ptr) }
+    fn str_at_offset(&self, offset: usize) -> &'a str {
+        self.cstr_at_offset(offset).as_str().expect("not utf-8 cstr")
     }
 
-    fn str_at_offset<'a>(&self, offset: usize) -> &'a str {
-        self.cstr_at_offset(offset).to_str().expect("not utf-8 cstr")
+    fn strings_block(&self) -> &'a [u8] {
+        &self.data[self.header.strings_range()]
     }
 
-    fn strings_ptr(&self) -> *const u8 {
-        self.offset_bytes(self.off_dt_strings.get() as usize)
-    }
-
-    fn strings_limit(&self) -> *const u8 {
-        unsafe { self.offset_bytes(self.off_dt_strings.get() as usize).add(self.size_dt_strings.get() as usize) }
-    }
-
-    fn structs_ptr(&self) -> *const u8 {
-        self.offset_bytes(self.off_dt_struct.get() as usize)
-    }
-
-    fn structs_limit(&self) -> *const u8 {
-        unsafe { self.offset_bytes(self.off_dt_struct.get() as usize).add(self.size_dt_struct.get() as usize) }
-    }
-
-    fn offset_bytes(&self, n: usize) -> *const u8 {
-        let ptr = unsafe { (self as *const Self).cast::<u8>().add(n) };
-        assert!(ptr < self.limit(), "offset past limit");
-
-        ptr
+    fn structs_block(&self) -> &'a [u8] {
+        &self.data[self.header.struct_range()]
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Chosen<'a> {
-    node: node::FdtNode<'a>,
+pub struct Chosen<'b, 'a: 'b> {
+    node: node::FdtNode<'b, 'a>,
 }
 
-impl<'a> Chosen<'a> {
+impl<'b, 'a: 'b> Chosen<'b, 'a> {
     pub fn bootargs(self) -> Option<&'a str> {
         self.node
             .properties()
@@ -236,7 +272,7 @@ impl<'a> Chosen<'a> {
             .and_then(|n| core::str::from_utf8(&n.value[..n.value.len() - 1]).ok())
     }
 
-    pub fn stdout(self) -> Option<node::FdtNode<'a>> {
+    pub fn stdout(self) -> Option<node::FdtNode<'b, 'a>> {
         self.node
             .properties()
             .find(|n| n.name == "stdout-path")
@@ -244,7 +280,7 @@ impl<'a> Chosen<'a> {
             .and_then(|name| self.node.header.find_node(name))
     }
 
-    pub fn stdin(self) -> Option<node::FdtNode<'a>> {
+    pub fn stdin(self) -> Option<node::FdtNode<'b, 'a>> {
         self.node
             .properties()
             .find(|n| n.name == "stdin-path")
@@ -255,11 +291,11 @@ impl<'a> Chosen<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Root<'a> {
-    node: node::FdtNode<'a>,
+pub struct Root<'b, 'a: 'b> {
+    node: node::FdtNode<'b, 'a>,
 }
 
-impl<'a> Root<'a> {
+impl<'b, 'a: 'b> Root<'b, 'a> {
     pub fn cell_sizes(self) -> node::CellSizes {
         self.node.cell_sizes()
     }
@@ -274,32 +310,32 @@ impl<'a> Root<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Aliases<'a> {
-    header: &'a Fdt,
-    node: node::FdtNode<'a>,
+pub struct Aliases<'b, 'a: 'b> {
+    header: &'b Fdt<'a>,
+    node: node::FdtNode<'b, 'a>,
 }
 
-impl<'a> Aliases<'a> {
+impl<'b, 'a: 'b> Aliases<'b, 'a> {
     pub fn resolve(self, alias: &str) -> Option<&'a str> {
         self.node.properties().find(|p| p.name == alias).and_then(|p| core::str::from_utf8(p.value).ok())
     }
 
-    pub fn resolve_node(self, alias: &str) -> Option<node::FdtNode<'a>> {
+    pub fn resolve_node(self, alias: &str) -> Option<node::FdtNode<'b, 'a>> {
         self.resolve(alias).and_then(|name| self.header.find_node(name))
     }
 
-    pub fn all(self) -> impl Iterator<Item = (&'a str, &'a str)> + 'a {
+    pub fn all(self) -> impl Iterator<Item = (&'a str, &'a str)> + 'b {
         self.node.properties().filter_map(|p| Some((p.name, core::str::from_utf8(p.value).ok()?)))
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Cpu<'a> {
-    parent: node::FdtNode<'a>,
-    node: node::FdtNode<'a>,
+pub struct Cpu<'b, 'a: 'b> {
+    parent: node::FdtNode<'b, 'a>,
+    node: node::FdtNode<'b, 'a>,
 }
 
-impl<'a> Cpu<'a> {
+impl<'b, 'a: 'b> Cpu<'b, 'a> {
     pub fn ids(self) -> CpuIds<'a> {
         let address_cells = self.node.cell_sizes().address_cells;
 
@@ -332,7 +368,7 @@ impl<'a> Cpu<'a> {
             .unwrap()
     }
 
-    pub fn properties(self) -> impl Iterator<Item = NodeProperty<'a>> {
+    pub fn properties(self) -> impl Iterator<Item = NodeProperty<'a>> + 'b {
         self.node.properties()
     }
 }
@@ -365,11 +401,13 @@ impl<'a> CpuIds<'a> {
     }
 }
 
-#[derive(Debug)]
-#[repr(C)]
-pub struct MemoryReservation {
-    address: BigEndianU64,
-    size: BigEndianU64,
+bytestream::streamable_struct! {
+    #[derive(Debug)]
+    #[repr(C)]
+    pub struct MemoryReservation {
+        address: BigEndianU64,
+        size: BigEndianU64,
+    }
 }
 
 impl MemoryReservation {
@@ -382,15 +420,5 @@ impl MemoryReservation {
     }
 }
 
-trait PtrHelpers {
-    type Output;
-    unsafe fn offset_bytes(&mut self, bytes: usize) -> Self::Output;
-}
-
-impl<T> PtrHelpers for *const T {
-    type Output = *const T;
-    unsafe fn offset_bytes(&mut self, bytes: usize) -> Self::Output {
-        *self = (*self).cast::<u8>().add(bytes).cast();
-        *self
-    }
-}
+#[cfg(test)]
+mod tests;

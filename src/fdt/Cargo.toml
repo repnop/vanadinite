@@ -8,5 +8,4 @@ edition = "2018"
 
 [dependencies]
 bytestream = { path = "../bytestream" }
-cstr_core = "0.2.2"
 log = "0.4.11"
