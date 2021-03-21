@@ -3,6 +3,8 @@ use libvanadinite::{
     KResult,
 };
 
+use crate::prelude::rust_2018::{AsRef, Sized};
+
 #[inline(always)]
 pub fn exit() -> ! {
     unsafe {
@@ -16,7 +18,7 @@ pub fn exit() -> ! {
 }
 
 #[inline]
-pub fn print<T: crate::prelude::v1::AsRef<[u8]> + ?crate::prelude::v1::Sized>(value: &T) -> KResult<(), PrintErr> {
+pub fn print<T: AsRef<[u8]> + ?Sized>(value: &T) -> KResult<(), PrintErr> {
     let value = value.as_ref();
     let mut ret: core::mem::MaybeUninit<KResult<(), PrintErr>> = core::mem::MaybeUninit::uninit();
 

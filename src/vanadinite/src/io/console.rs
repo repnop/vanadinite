@@ -91,7 +91,7 @@ pub enum ConsoleDevices {
 }
 
 impl ConsoleDevices {
-    pub fn from_compatible(compatible: fdt::Compatible<'_>) -> Option<Self> {
+    pub fn from_compatible(compatible: fdt::standard_nodes::Compatible<'_>) -> Option<Self> {
         if compatible.all().any(|s| Uart16550::compatible_with().contains(&s)) {
             Some(ConsoleDevices::Uart16550)
         } else if compatible.all().any(|s| SifiveUart::compatible_with().contains(&s)) {

@@ -10,7 +10,7 @@ pub mod syscalls;
 pub use libvanadinite::capabilities::Capability;
 
 #[prelude_import]
-pub use prelude::v1::*;
+pub use prelude::rust_2018::*;
 
 #[macro_export]
 macro_rules! print {
