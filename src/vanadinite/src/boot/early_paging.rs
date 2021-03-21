@@ -3,9 +3,10 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use fdt::Fdt;
+use kernel_patching::kernel_section_p2v;
 
 use crate::{
-    csr::satp::{self, Satp, SatpMode},
+    csr::satp::{Satp, SatpMode},
     mem::{
         kernel_patching,
         paging::{PageSize, PhysicalAddress, Sv39PageTable, VirtualAddress, EXECUTE, READ, WRITE},
@@ -33,13 +34,6 @@ pub static PAGE_TABLE_ROOT: StaticMut<Sv39PageTable> = StaticMut::new(Sv39PageTa
 /// no
 #[no_mangle]
 pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load: usize) -> ! {
-    let kmain: usize;
-    asm!("
-        lla {tmp}, kmain_addr_virt
-        ld {tmp}, ({tmp})
-        mv {}, {tmp}
-    ", out(reg) kmain, tmp = out(reg) _);
-
     let fdt_struct: Fdt<'static> = match fdt::Fdt::from_ptr(fdt) {
         Ok(fdt) => fdt,
         Err(e) => crate::platform::exit(crate::platform::ExitStatus::Error(&e)),
@@ -79,14 +73,6 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     }
 
     drop(pf_alloc);
-
-    for address in (kernel_start..kernel_end).step_by(2.mib()) {
-        let ident = VirtualAddress::new(address);
-        let phys = PhysicalAddress::new(address);
-        let permissions = READ | WRITE | EXECUTE;
-
-        (&mut *PAGE_TABLE_ROOT.get()).map(phys, ident, PageSize::Megapage, permissions);
-    }
 
     let bss_start = __bss_start.as_usize();
     let bss_end = __bss_end.as_usize();
@@ -149,6 +135,10 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
         );
     }
 
+    // This ***must*** go after all of the above initial paging code so that
+    // addresses are identity mapped for page frame allocation
+    crate::mem::PHYSICAL_OFFSET.store(PHYS_OFFSET_VALUE, core::sync::atomic::Ordering::Relaxed);
+
     let sp: usize;
     let gp: usize;
     asm!("lla {}, __tmp_stack_top", out(reg) sp);
@@ -157,22 +147,32 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let new_sp = (sp - phys_load) + page_offset_value;
     let new_gp = (gp - phys_load) + page_offset_value;
 
-    satp::write(Satp { mode: SatpMode::Sv39, asid: 0, root_page_table: PhysicalAddress::from_ptr(&PAGE_TABLE_ROOT) });
-    crate::mem::sfence(None, None);
+    let kmain_virt = kernel_section_p2v(PhysicalAddress::from_ptr(crate::kmain as *const u8));
+    crate::csr::stvec::set(core::mem::transmute(kmain_virt.as_usize()));
 
-    crate::mem::PHYSICAL_OFFSET.store(PHYS_OFFSET_VALUE, core::sync::atomic::Ordering::Relaxed);
+    let satp = Satp { mode: SatpMode::Sv39, asid: 0, root_page_table: PhysicalAddress::from_ptr(&PAGE_TABLE_ROOT) };
+    let fdt = crate::mem::phys2virt(PhysicalAddress::from_ptr(fdt)).as_ptr();
 
-    vmem_trampoline(hart_id, crate::mem::phys2virt(PhysicalAddress::from_ptr(fdt)).as_ptr(), new_sp, new_gp, kmain)
-}
-
-#[naked]
-#[no_mangle]
-unsafe extern "C" fn vmem_trampoline(_hart_id: usize, _fdt: *const u8, _sp: usize, _gp: usize, _dest: usize) -> ! {
     #[rustfmt::skip]
     asm!(
-        "mv sp, a2",
-        "mv gp, a3",
-        "jr a4",
-        options(noreturn),
+        "
+            # Set up stack pointer and global pointer
+            mv sp, {new_sp}
+            mv gp, {new_gp}
+
+            # Load new `satp` value
+            csrw satp, {satp}
+            sfence.vma
+            nop                 # we trap here and bounce to `kmain`!
+        ",
+
+        satp = in(reg) satp.to_usize(),
+        new_sp = in(reg) new_sp,
+        new_gp = in(reg) new_gp,
+
+        // `kmain` arguments
+        in("a0") hart_id,
+        in("a1") fdt,
+        options(noreturn, nostack),
     );
 }

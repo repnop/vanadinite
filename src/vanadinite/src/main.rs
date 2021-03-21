@@ -51,9 +51,9 @@ use {
     interrupts::PLIC,
     mem::{
         kernel_patching,
-        paging::{PhysicalAddress, Sv39PageTable, VirtualAddress},
+        paging::{PhysicalAddress, VirtualAddress},
         phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
-        phys2virt, virt2phys,
+        phys2virt,
     },
     sync::Mutex,
     utils::Units,
@@ -61,10 +61,6 @@ use {
 
 use fdt::Fdt;
 pub use vanadinite_macros::{debug, error, info, trace, warn};
-
-extern "C" {
-    static stvec_trap_shim: utils::LinkerSymbol;
-}
 
 static TIMER_FREQ: AtomicUsize = AtomicUsize::new(0);
 
@@ -76,16 +72,7 @@ static BLOCK_DEV: Mutex<Option<drivers::virtio::block::BlockDevice>> = Mutex::ne
 
 #[no_mangle]
 extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
-    // Remove identity mapping after paging initialization
-    let kernel_start = kernel_patching::kernel_start() as usize;
-    let kernel_end = kernel_patching::kernel_end() as usize;
-    for address in (kernel_start..kernel_end).step_by(2.mib()) {
-        // `kernel_start()` and `kernel_end()` now refer to virtual addresses so
-        // we need to patch them back to physical "virtual" addresses to be
-        // unmapped
-        let patched = VirtualAddress::new(virt2phys(VirtualAddress::new(address)).as_usize());
-        unsafe { (&mut *Sv39PageTable::current()).unmap(patched) };
-    }
+    unsafe { asm!(".align 4") };
 
     let heap_frame_alloc = unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(64) };
     let heap_start = heap_frame_alloc.expect("moar memory").as_phys_address();
@@ -106,7 +93,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     TIMER_FREQ.store(timebase_frequency, Ordering::Relaxed);
 
     let mut stdout_interrupts = None;
-    let stdout = fdt.chosen().and_then(|n| n.stdout());
+    let stdout = fdt.chosen().stdout();
     if let Some((node, reg, compatible)) = stdout.and_then(|n| Some((n, n.reg()?.next()?, n.compatible()?))) {
         let stdout_addr = reg.starting_address as *mut u8;
 
@@ -125,7 +112,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     }
 
     let mut init_path = "init";
-    if let Some(args) = fdt.chosen().and_then(|c| c.bootargs()) {
+    if let Some(args) = fdt.chosen().bootargs() {
         let split_args = args.split(' ').map(|s| {
             let mut parts = s.splitn(2, '=');
             (parts.next().unwrap(), parts.next())
@@ -145,13 +132,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
-    let model = fdt
-        .find_node("/")
-        .unwrap()
-        .properties()
-        .find(|p| p.name == "model")
-        .map(|p| core::str::from_utf8(&p.value[..p.value.len() - 1]).unwrap())
-        .unwrap();
+    let model = fdt.root().property("model").and_then(|p| p.as_str()).unwrap();
 
     let (mem_size, mem_start) = {
         let memory = fdt
@@ -190,8 +171,8 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     info!(" Implementor: {:?} (version: {#green'{}.{}})", sbi::base::impl_id(), impl_major, impl_minor);
     info!(" Spec Version: {#green'{}.{}}", spec_major, spec_minor);
 
-    debug!("Installing trap handler at {:#p}", unsafe { stvec_trap_shim.as_ptr() });
-    csr::stvec::set(unsafe { core::mem::transmute(stvec_trap_shim.as_ptr()) });
+    debug!("Installing trap handler at {:#p}", trap::stvec_trap_shim as *const u8);
+    csr::stvec::set(trap::stvec_trap_shim);
 
     match fdt.find_compatible(Plic::compatible_with()) {
         Some(ic) => {

@@ -4,7 +4,7 @@
 
 pub mod stvec {
     #[inline(always)]
-    pub fn set(ptr: extern "C" fn()) {
+    pub fn set(ptr: unsafe extern "C" fn() -> !) {
         unsafe { asm!("csrw stvec, {}", in(reg) ptr) };
     }
 }
@@ -138,6 +138,12 @@ pub mod satp {
         pub root_page_table: PhysicalAddress,
     }
 
+    impl Satp {
+        pub fn to_usize(self) -> usize {
+            ((self.mode as usize) << 60) | ((self.asid as usize) << 44) | self.root_page_table.ppn()
+        }
+    }
+
     #[inline(always)]
     pub fn read() -> Satp {
         let value: usize;
@@ -157,8 +163,7 @@ pub mod satp {
 
     #[inline(always)]
     pub fn write(value: Satp) {
-        let Satp { mode, asid, root_page_table } = value;
-        let value = ((mode as usize) << 60) | ((asid as usize) << 44) | root_page_table.ppn();
+        let value = value.to_usize();
         unsafe { asm!("csrw satp, {}", in(reg) value) };
     }
 

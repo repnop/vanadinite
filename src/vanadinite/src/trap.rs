@@ -233,9 +233,11 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
     sepc
 }
 
+/// # Safety
+/// nice try
 #[naked]
 #[no_mangle]
-unsafe extern "C" fn stvec_trap_shim() -> ! {
+pub unsafe extern "C" fn stvec_trap_shim() -> ! {
     #[rustfmt::skip]
     asm!("
         .align 4

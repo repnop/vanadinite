@@ -39,8 +39,6 @@ pub unsafe extern "C" fn _boot() -> ! {
         j early_paging
 
         .section .data
-        .globl kmain_addr_virt
-        kmain_addr_virt: .dword kmain
         .globl PAGE_OFFSET_VALUE
         PAGE_OFFSET_VALUE: .dword PAGE_OFFSET
         .globl PHYS_OFFSET_VALUE
