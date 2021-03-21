@@ -3,7 +3,6 @@ members = [
     "bytestream",
     "elf64",
     "fat32",
-    "fdt",
     "libvanadinite",
     "sbi",
     "tar",
