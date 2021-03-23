@@ -119,4 +119,14 @@ pub mod kernel_patching {
         assert!(phys_offset != 0);
         VirtualAddress::new(phys.as_usize() - phys_offset + page_offset())
     }
+
+    /// # Safety
+    ///
+    /// The virtual address passed in must be inside the kernel sections,
+    /// otherwise the resulting [`PhysicalAddress`] will be invalid
+    pub unsafe fn kernel_section_v2p(virt: VirtualAddress) -> PhysicalAddress {
+        let phys_offset = *KERNEL_PHYS_LOAD_LOCATION.0.get();
+        assert!(phys_offset != 0);
+        PhysicalAddress::new(virt.as_usize() - page_offset() + phys_offset)
+    }
 }

@@ -60,15 +60,17 @@ use {
 };
 
 use fdt::Fdt;
+use mem::kernel_patching::kernel_section_v2p;
+use sbi::hart_state_management::hart_start;
 pub use vanadinite_macros::{debug, error, info, trace, warn};
 
 static TIMER_FREQ: AtomicUsize = AtomicUsize::new(0);
+static INIT_FS: &[u8] = include_bytes!("../../../initfs.tar");
+static BLOCK_DEV: Mutex<Option<drivers::virtio::block::BlockDevice>> = Mutex::new(None);
 
 cpu_local! {
     static HART_ID: core::cell::Cell<usize> = core::cell::Cell::new(0);
 }
-
-static BLOCK_DEV: Mutex<Option<drivers::virtio::block::BlockDevice>> = Mutex::new(None);
 
 #[no_mangle]
 extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
@@ -161,10 +163,12 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         (version.major, version.minor)
     };
 
+    let n_cpus = fdt.cpus().count();
+
     info!("vanadinite version {#brightgreen}", env!("CARGO_PKG_VERSION"));
     info!(blue, "=== Machine Info ===");
     info!(" Device Model: {}", model);
-    info!(" Booting Hart ID: {}", hart_id);
+    info!(" Total CPUs: {}", n_cpus);
     info!(" RAM: {} MiB @ {:#X}", mem_size, mem_start as usize);
     info!(" Timer Clock: {}Hz", timebase_frequency);
     info!(blue, "=== SBI Implementation ===");
@@ -242,6 +246,17 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
+    let other_hart_boot_phys = unsafe { kernel_section_v2p(VirtualAddress::from_ptr(other_hart_boot as *const u8)) };
+
+    for cpu in fdt.cpus().filter(|cpu| cpu.ids().first() != hart_id) {
+        let hart_id = cpu.ids().first();
+        let hart_sp = mem::alloc_kernel_stack(8.kib()) as usize;
+
+        if let Err(e) = hart_start(hart_id, other_hart_boot_phys.as_usize(), hart_sp) {
+            error!(red, "Failed to start hart {}: {:?}", hart_id, e);
+        }
+    }
+
     unsafe {
         *process::THREAD_CONTROL_BLOCK.get() = process::ThreadControlBlock {
             kernel_stack: mem::alloc_kernel_stack(8.kib()),
@@ -269,7 +284,72 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     scheduler::Scheduler::schedule()
 }
 
-static INIT_FS: &[u8] = include_bytes!("../../../initfs.tar");
+extern "C" fn kalt(hart_id: usize) -> ! {
+    unsafe { asm!(".align 4") };
+    unsafe { crate::cpu_local::init_thread_locals() };
+    HART_ID.set(hart_id);
+
+    info!(brightgreen, "Hello from hart ID: {}", hart_id);
+
+    loop {
+        unsafe { asm!("wfi") };
+    }
+}
+
+#[naked]
+#[no_mangle]
+unsafe extern "C" fn other_hart_boot() -> ! {
+    #[rustfmt::skip]
+    asm!(
+        "
+            # We start here with only two registers in a defined state:
+            #  a0: hart id
+            #  a1: stack pointer (virtual)
+            #
+            # We need to initialize the following things:
+            #   satp: to the physical address of the root page table
+            #  stvec: to the virtual address we'll trap-trick to
+            #     sp: to the stack region we receive in a1
+            #     gp: to the virtual GP pointer
+            
+
+            # Translate phys `__global_pointer$` addr to virtual
+            lla t0, __global_pointer$
+
+            lla t1, PAGE_OFFSET_VALUE
+            ld t1, (t1)
+
+            lla t2, PAGE_OFFSET
+
+            sub t0, t0, t2
+            add t0, t0, t1
+
+            # Set up gp and sp
+            mv gp, t0
+            mv sp, a1
+
+            # Translate phys `kalt` addr to virtual
+            lla t0, {}
+            sub t0, t0, t2
+            add t0, t0, t1
+            csrw stvec, t0
+
+            # Load root page table physical address
+            lla t0, {}
+            srli t0, t0, 12
+            li t1, 8
+            slli t1, t1, 60
+            or t0, t1, t0
+
+            csrw satp, t0
+            sfence.vma
+            nop             # We fault here and fall into `kalt`
+        ",
+        sym kalt,
+        sym boot::early_paging::PAGE_TABLE_ROOT,
+        options(noreturn),
+    );
+}
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {

@@ -98,12 +98,13 @@ impl log::Log for Logger {
             let clear = crate::io::terminal::CLEAR;
 
             crate::println!(
-                "[{:>5}.{:<03}] [ {}{:>5}{} ] [{}] {}",
+                "[{:>5}.{:<03}] [ {}{:>5}{} ] [HART {}] [{}] {}",
                 secs,
                 ms,
                 color,
                 record.level(),
                 clear,
+                crate::HART_ID.get(),
                 mod_path,
                 record.args()
             );
