@@ -2,6 +2,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::{mem::phys::PhysicalMemoryAllocator, Units};
 use core::sync::atomic::{AtomicBool, Ordering};
 
 #[macro_export]
@@ -10,7 +11,7 @@ macro_rules! cpu_local {
         $(
             #[thread_local]
             // FIXME: temporarily assert that alignment is 8 or lower, until we have a better heap allocator
-            $v static $name: crate::cpu_local::CpuLocal<$ty> = unsafe { const _: () = [()][!(core::mem::align_of::<$ty>() <= 8) as usize]; crate::cpu_local::CpuLocal::new(|| $val) };
+            $v static $name: crate::cpu_local::CpuLocal<$ty> = unsafe { crate::cpu_local::CpuLocal::new(|| $val) };
         )+
     };
 }
@@ -29,7 +30,7 @@ impl<T: Send + 'static> CpuLocal<T> {
 
     // FIXME: use 3 states
     fn init_if_needed(&self) -> &T {
-        let state = self.0.load(Ordering::Relaxed);
+        let state = self.0.load(Ordering::Acquire);
 
         match state {
             true => unsafe { (&*self.1.get()).assume_init_ref() },
@@ -65,7 +66,14 @@ pub unsafe fn init_thread_locals() {
     let size = __tdata_end.as_usize() - __tdata_start.as_usize();
 
     let original_thread_locals = core::slice::from_raw_parts(__tdata_start.as_ptr(), size);
-    let new_thread_locals = alloc::alloc::alloc_zeroed(alloc::alloc::Layout::from_size_align(size, 8).unwrap());
+    let new_thread_locals = crate::mem::phys2virt(
+        crate::mem::phys::PHYSICAL_MEMORY_ALLOCATOR
+            .lock()
+            .alloc_contiguous(size / 4.kib() + 1)
+            .unwrap()
+            .as_phys_address(),
+    )
+    .as_mut_ptr();
 
     core::slice::from_raw_parts_mut(new_thread_locals, size)[..].copy_from_slice(original_thread_locals);
 

@@ -72,6 +72,12 @@ impl Scheduler {
 
             let active = this.processes.front_mut().expect("no active process?");
 
+            log::trace!(
+                "Switching page table to the one at: {:#p}, contents: {:?}",
+                virt2phys(VirtualAddress::from_ptr(active.page_table.table())),
+                active.page_table.debug_print(),
+            );
+
             satp::write(Satp {
                 mode: SatpMode::Sv39,
                 asid: active.pid as u16,

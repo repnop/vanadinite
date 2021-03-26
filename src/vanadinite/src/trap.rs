@@ -176,8 +176,8 @@ impl Trap {
 
 #[no_mangle]
 pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize, stval: usize) -> usize {
-    log::debug!("we trappin' on hart {}: {:x?}", crate::HART_ID.get(), regs);
-    log::debug!("TCB: {:?}", unsafe { &*crate::process::THREAD_CONTROL_BLOCK.get() });
+    log::trace!("we trappin' on hart {}: {:x?}", crate::HART_ID.get(), regs);
+    log::trace!("TCB: {:?}", unsafe { &*crate::process::THREAD_CONTROL_BLOCK.get() });
     log::debug!("scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
 
     let trap_kind = Trap::from_cause(scause);
@@ -187,11 +187,33 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
             let stval = VirtualAddress::new(stval);
 
             match sepc.is_kernel_region() {
-                true => panic!("kernel {:?} at address {:#p}", trap_kind, stval),
+                true => panic!("[KERNEL BUG] {:?}: {:#p} attempted accessing {:#p}", trap_kind, sepc, stval),
                 false => {
+                    let mapping = Scheduler::with_mut_self(|s| s.processes.front().unwrap().page_table.resolve(stval));
                     let pid = Scheduler::active_pid();
-                    log::error!("Active process (pid: {}) {:?} at address {:#p}, killing", pid, trap_kind, stval);
+                    log::error!(
+                        "Active process (pid: {}) {:?} @ {:#p} attempted accessing address {:#p} (=> {:?} phys), killing",
+                        pid,
+                        trap_kind,
+                        sepc,
+                        stval,
+                        mapping,
+                    );
+                    log::error!(
+                        "Registers at death: {:x?}",
+                        Scheduler::with_mut_self(|s| s.processes.front().unwrap().frame.registers)
+                    );
+                    log::error!(
+                        "Page table address: {:#p}",
+                        Scheduler::with_mut_self(|s| s.processes.front().unwrap().page_table.table())
+                    );
+                    log::error!(
+                        "Page table contents: {:?}",
+                        Scheduler::with_mut_self(|s| s.processes.front().unwrap().page_table.debug_print())
+                    );
+
                     Scheduler::mark_active_dead();
+                    Scheduler::schedule();
                 }
             }
         }

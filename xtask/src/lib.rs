@@ -32,6 +32,9 @@ pub struct Env {
 
     #[clap(long, env = "DRIVE_FILE")]
     drive_file: Option<PathBuf>,
+
+    #[clap(long, env = "QEMU_DEBUG_LOG")]
+    debug_log: Option<PathBuf>,
 }
 
 impl Default for Env {
@@ -43,6 +46,7 @@ impl Default for Env {
             kernel_args: String::new(),
             additional_features: String::new(),
             drive_file: None,
+            debug_log: None,
         }
     }
 }

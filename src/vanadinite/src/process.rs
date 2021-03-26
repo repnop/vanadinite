@@ -72,11 +72,9 @@ pub struct Process {
 
 impl Process {
     pub fn load(elf: &Elf) -> Self {
-        let mut page_table = unsafe {
-            PageTableManager::new(
-                &mut *crate::mem::phys2virt(crate::mem::phys::zalloc_page().as_phys_address()).as_mut_ptr().cast(),
-            )
-        };
+        let mut page_table = PageTableManager::new(
+            crate::mem::phys2virt(crate::mem::phys::zalloc_page().as_phys_address()).as_mut_ptr().cast(),
+        );
 
         let capabilities = Default::default();
 
@@ -105,7 +103,7 @@ impl Process {
 
         Self {
             pid: PID_COUNTER.next(),
-            pc: unsafe { core::mem::transmute(elf.header.entry as usize) },
+            pc: elf.header.entry as usize,
             page_table,
             frame,
             state: ProcessState::Running,

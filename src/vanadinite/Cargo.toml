@@ -15,6 +15,7 @@ lock_api = "0.4.1"
 sbi = { path = "../sbi" }
 tar = { path = "../tar" }
 vanadinite_macros = { path = "../vanadinite_macros" }
+spin = { version = "0.9.0", features = ["rwlock", "mutex"] }
 
 [features]
 default = ["virt"]

@@ -76,9 +76,10 @@ cpu_local! {
 extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     unsafe { asm!(".align 4") };
 
+    csr::stvec::set(trap::stvec_trap_shim);
     let heap_frame_alloc = unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(64) };
-    let heap_start = heap_frame_alloc.expect("moar memory").as_phys_address();
-    unsafe { mem::heap::HEAP_ALLOCATOR.init(mem::phys2virt(heap_start).as_mut_ptr(), 64 * 4.kib()) };
+    let heap_start = mem::phys2virt(heap_frame_alloc.expect("moar memory").as_phys_address());
+    unsafe { mem::heap::HEAP_ALLOCATOR.init(heap_start.as_mut_ptr(), 64 * 4.kib()) };
 
     unsafe { crate::cpu_local::init_thread_locals() };
     HART_ID.set(hart_id);
@@ -175,8 +176,9 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     info!(" Implementor: {:?} (version: {#green'{}.{}})", sbi::base::impl_id(), impl_major, impl_minor);
     info!(" Spec Version: {#green'{}.{}}", spec_major, spec_minor);
 
-    debug!("Installing trap handler at {:#p}", trap::stvec_trap_shim as *const u8);
-    csr::stvec::set(trap::stvec_trap_shim);
+    info!(blue, "=== Vanadinite Info ===");
+    info!(" stvec_trap_shim: {:#p}", trap::stvec_trap_shim as *const u8);
+    info!(" Heap region: {:#p}-{:#p}", heap_start, heap_start.offset(64 * 4.kib() - 1));
 
     match fdt.find_compatible(Plic::compatible_with()) {
         Some(ic) => {
@@ -246,17 +248,6 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
-    let other_hart_boot_phys = unsafe { kernel_section_v2p(VirtualAddress::from_ptr(other_hart_boot as *const u8)) };
-
-    for cpu in fdt.cpus().filter(|cpu| cpu.ids().first() != hart_id) {
-        let hart_id = cpu.ids().first();
-        let hart_sp = mem::alloc_kernel_stack(8.kib()) as usize;
-
-        if let Err(e) = hart_start(hart_id, other_hart_boot_phys.as_usize(), hart_sp) {
-            error!(red, "Failed to start hart {}: {:?}", hart_id, e);
-        }
-    }
-
     unsafe {
         *process::THREAD_CONTROL_BLOCK.get() = process::ThreadControlBlock {
             kernel_stack: mem::alloc_kernel_stack(8.kib()),
@@ -279,21 +270,53 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         &elf64::Elf::new(tar.file(init_path).unwrap().contents).unwrap(),
     ));
 
-    info!(brightgreen, "Scheduling init process!");
+    let other_hart_boot_phys = unsafe { kernel_section_v2p(VirtualAddress::from_ptr(other_hart_boot as *const u8)) };
 
+    for cpu in fdt.cpus().filter(|cpu| cpu.ids().first() != hart_id) {
+        let hart_id = cpu.ids().first();
+        let hart_sp = mem::alloc_kernel_stack(8.kib()) as usize;
+
+        if let Err(e) = hart_start(hart_id, other_hart_boot_phys.as_usize(), hart_sp) {
+            error!(red, "Failed to start hart {}: {:?}", hart_id, e);
+        }
+    }
+
+    info!(brightgreen, "Scheduling init process!");
     scheduler::Scheduler::schedule()
 }
 
+#[no_mangle]
 extern "C" fn kalt(hart_id: usize) -> ! {
     unsafe { asm!(".align 4") };
+    csr::sstatus::disable_interrupts();
+    csr::stvec::set(trap::stvec_trap_shim);
     unsafe { crate::cpu_local::init_thread_locals() };
     HART_ID.set(hart_id);
 
-    info!(brightgreen, "Hello from hart ID: {}", hart_id);
+    info!(brightgreen, "Hart {} successfully booted", HART_ID.get());
 
-    loop {
-        unsafe { asm!("wfi") };
+    PLIC.lock().set_context_threshold(platform::current_plic_context(), 0);
+
+    unsafe {
+        *process::THREAD_CONTROL_BLOCK.get() = process::ThreadControlBlock {
+            kernel_stack: mem::alloc_kernel_stack(8.kib()),
+            kernel_thread_local: cpu_local::tp(),
+            saved_sp: 0,
+            saved_tp: 0,
+            kernel_stack_size: 8.kib(),
+            current_process: None,
+        };
+
+        csr::sscratch::write(process::THREAD_CONTROL_BLOCK.get() as usize);
     }
+
+    csr::sstatus::set_fs(csr::sstatus::FloatingPointStatus::Initial);
+    csr::sie::enable();
+
+    let tar = tar::Archive::new(INIT_FS).unwrap();
+
+    scheduler::Scheduler::push(process::Process::load(&elf64::Elf::new(tar.file("hax").unwrap().contents).unwrap()));
+    scheduler::Scheduler::schedule()
 }
 
 #[naked]
@@ -354,7 +377,9 @@ unsafe extern "C" fn other_hart_boot() -> ! {
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     error!("{}", info);
-    platform::exit(platform::ExitStatus::Error(info))
+    error!("Shutting hart down");
+
+    sbi::hart_state_management::hart_stop().unwrap()
 }
 
 #[no_mangle]
@@ -363,6 +388,7 @@ pub extern "C" fn abort() -> ! {
 }
 
 #[alloc_error_handler]
-fn alloc_error_handler(_: alloc::alloc::Layout) -> ! {
-    panic!("out of memory")
+#[track_caller]
+fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
+    panic!("out of memory: {:?}", layout)
 }

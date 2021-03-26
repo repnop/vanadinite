@@ -70,6 +70,11 @@ pub fn run(target: Target, env: &Env) -> Result<()> {
             ").run()?;
         }
         Target::Run => {
+            let debug_log = match &env.debug_log {
+                Some(path) => vec![String::from("-d"), String::from("guest_errors,trace:riscv_trap,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int"), String::from("-D"), format!("{}", path.display())],
+                None => vec![String::new()],
+            };
+
             cmd!("
                 qemu-system-riscv64
                     -machine {machine}
@@ -82,6 +87,7 @@ pub fn run(target: Target, env: &Env) -> Result<()> {
                     -kernel src/target/riscv64gc-unknown-none-elf/release/vanadinite
                     -serial mon:stdio
                     -nographic
+                    {debug_log...}
             ").run()?;
         }
     };

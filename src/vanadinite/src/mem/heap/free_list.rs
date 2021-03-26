@@ -23,6 +23,7 @@ impl FreeListAllocator {
         inner.head = Some(NonNull::new(origin.cast()).expect("bad origin passed"));
 
         *inner.head.unwrap().as_ptr() = FreeListNode { next: None, size: size - FreeListNode::struct_size() };
+        log::info!("Heap allocator initialized, using memory block: {:#p}-{:#p}", origin, origin.add(size));
     }
 }
 

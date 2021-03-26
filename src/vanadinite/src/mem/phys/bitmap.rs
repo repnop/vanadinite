@@ -37,6 +37,7 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
 
             if page_ptr <= self.mem_end {
                 *entry |= 1 << bit_index;
+                log::debug!("Allocated page at: {:#p}", page_ptr);
                 return Some(PhysicalPage(page_ptr));
             }
         }
@@ -49,6 +50,18 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
         assert!(n <= 64, "> 64 page allocations are currently not supported");
         let mask = u64::max_value() << n;
         for (index, entry) in self.bitmap.iter_mut().enumerate().filter(|(_, e)| e.count_zeros() as usize >= n) {
+            if n == 64 {
+                *entry = u64::max_value();
+                let page_ptr = self.mem_start as usize + index * SINGLE_ENTRY_SIZE_BYTES;
+                let page_ptr = page_ptr as *mut u8;
+
+                if page_ptr >= self.mem_end {
+                    return None;
+                }
+
+                return Some(PhysicalPage(page_ptr));
+            }
+
             let mut bit_index = None;
             for i in 0..=(64 - n as u64) {
                 let selected = *entry | mask.rotate_left(i as u32);
