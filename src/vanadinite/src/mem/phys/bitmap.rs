@@ -2,34 +2,60 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{PhysicalMemoryAllocator, PhysicalPage};
+use super::{PhysicalAddress, PhysicalMemoryAllocator, PhysicalPage};
+use crate::Units;
 
 const SINGLE_ENTRY_SIZE_BYTES: usize = 64 * 4096;
 const FULL_ENTRY: u64 = 0xFFFF_FFFF_FFFF_FFFF;
 
 pub struct BitmapAllocator {
-    bitmap: [u64; 4096],
+    bitmap: *mut u64,
+    size: usize,
     mem_start: *mut u8,
     mem_end: *mut u8,
 }
 
 impl BitmapAllocator {
     pub const fn new() -> Self {
-        Self { bitmap: [0; 4096], mem_start: core::ptr::null_mut(), mem_end: core::ptr::null_mut() }
+        Self {
+            bitmap: core::ptr::null_mut(),
+            size: 0,
+            mem_start: core::ptr::null_mut(),
+            mem_end: core::ptr::null_mut(),
+        }
+    }
+
+    fn bitmap_slice(&mut self) -> &'static mut [u64] {
+        unsafe {
+            core::slice::from_raw_parts_mut(
+                crate::mem::phys2virt(PhysicalAddress::from_ptr(self.bitmap)).as_mut_ptr().cast(),
+                self.size,
+            )
+        }
     }
 }
 
 unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
-    #[track_caller]
     unsafe fn init(&mut self, start: *mut u8, end: *mut u8) {
+        assert!(!start.is_null(), "null start pointer!");
         assert_eq!(start as usize % 4096, 0, "unaligned memory start page");
         self.mem_start = start;
         self.mem_end = end;
+
+        let n_pages = (end as usize - start as usize) / 4.kib();
+        self.bitmap = self.mem_start.cast();
+        self.size = n_pages / 64 + 1;
+
+        self.bitmap_slice().fill_with(|| 0);
+
+        for page in 0..(self.size / 4.kib() + 1) {
+            self.set_used(PhysicalPage::from_ptr(self.mem_start.add(4.kib() * page)));
+        }
     }
 
     #[track_caller]
     unsafe fn alloc(&mut self) -> Option<PhysicalPage> {
-        if let Some((index, entry)) = self.bitmap.iter_mut().enumerate().find(|(_, e)| **e != FULL_ENTRY) {
+        if let Some((index, entry)) = self.bitmap_slice().iter_mut().enumerate().find(|(_, e)| **e != FULL_ENTRY) {
             let bit_index = entry.trailing_ones() as usize;
 
             let page_ptr = (self.mem_start as usize + index * SINGLE_ENTRY_SIZE_BYTES) + (bit_index * 4096);
@@ -49,7 +75,8 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
     unsafe fn alloc_contiguous(&mut self, n: usize) -> Option<PhysicalPage> {
         assert!(n <= 64, "> 64 page allocations are currently not supported");
         let mask = u64::max_value() << n;
-        for (index, entry) in self.bitmap.iter_mut().enumerate().filter(|(_, e)| e.count_zeros() as usize >= n) {
+        for (index, entry) in self.bitmap_slice().iter_mut().enumerate().filter(|(_, e)| e.count_zeros() as usize >= n)
+        {
             if n == 64 {
                 *entry = u64::max_value();
                 let page_ptr = self.mem_start as usize + index * SINGLE_ENTRY_SIZE_BYTES;
@@ -99,7 +126,7 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
         let index = (page.as_phys_address().as_usize() - self.mem_start as usize) / SINGLE_ENTRY_SIZE_BYTES;
         let bit = ((page.as_phys_address().as_usize() - self.mem_start as usize) / 4096) % 64;
 
-        let entry = &mut self.bitmap[index];
+        let entry = &mut self.bitmap_slice()[index];
 
         if (*entry >> bit) & 1 != 1 {
             panic!(
@@ -117,7 +144,7 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
         let bit = ((page.as_phys_address().as_usize() - self.mem_start as usize) / 4096) % 64;
         let mask = u64::max_value() << n;
 
-        let entry = &mut self.bitmap[index];
+        let entry = &mut self.bitmap_slice()[index];
 
         if (*entry >> bit) & !mask != !mask {
             panic!(
@@ -134,7 +161,7 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
         let index = (page.as_phys_address().as_usize() - self.mem_start as usize) / SINGLE_ENTRY_SIZE_BYTES;
         let bit = ((page.as_phys_address().as_usize() - self.mem_start as usize) / 4096) % 64;
 
-        let entry = &mut self.bitmap[index];
+        let entry = &mut self.bitmap_slice()[index];
 
         *entry |= 1 << bit;
     }
@@ -144,7 +171,7 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
         let index = (page.as_phys_address().as_usize() - self.mem_start as usize) / SINGLE_ENTRY_SIZE_BYTES;
         let bit = ((page.as_phys_address().as_usize() - self.mem_start as usize) / 4096) % 64;
 
-        let entry = &mut self.bitmap[index];
+        let entry = &mut self.bitmap_slice()[index];
 
         *entry &= !(1 << bit);
     }
