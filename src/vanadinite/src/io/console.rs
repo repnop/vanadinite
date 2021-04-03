@@ -4,9 +4,9 @@
 
 use crate::{
     drivers::{generic::uart16550::Uart16550, sifive::fu540_c000::uart::SifiveUart, CompatibleWith},
+    interrupts::isr::register_isr,
     sync::Mutex,
 };
-use core::cell::UnsafeCell;
 
 pub trait ConsoleDevice: 'static {
     fn init(&mut self);
@@ -24,24 +24,11 @@ impl core::fmt::Write for dyn ConsoleDevice {
     }
 }
 
-pub struct StaticConsoleDevice(Option<&'static UnsafeCell<dyn ConsoleDevice>>);
-
-impl StaticConsoleDevice {
-    unsafe fn new<T: ConsoleDevice>(inner: *mut T) -> Self {
-        let inner = {
-            let mut_ref = (&mut *inner) as &'static mut dyn ConsoleDevice;
-            mut_ref.init();
-
-            &*(mut_ref as *mut _ as *mut _)
-        };
-        Self(Some(inner))
-    }
-}
+pub struct StaticConsoleDevice(Option<&'static mut dyn ConsoleDevice>);
 
 impl core::fmt::Write for StaticConsoleDevice {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        if let Some(console) = self.0 {
-            let console = unsafe { &mut *console.get() };
+        if let Some(console) = &mut self.0 {
             for byte in s.as_bytes() {
                 console.write(*byte);
             }
@@ -54,13 +41,13 @@ impl core::fmt::Write for StaticConsoleDevice {
 impl ConsoleDevice for StaticConsoleDevice {
     fn init(&mut self) {
         if let Some(inner) = &mut self.0 {
-            unsafe { &mut *inner.get() }.init();
+            inner.init();
         }
     }
 
     fn read(&self) -> u8 {
         if let Some(inner) = &self.0 {
-            return unsafe { &*inner.get() }.read();
+            return inner.read();
         }
 
         0
@@ -68,7 +55,7 @@ impl ConsoleDevice for StaticConsoleDevice {
 
     fn write(&mut self, n: u8) {
         if let Some(inner) = &mut self.0 {
-            unsafe { &mut *inner.get() }.write(n);
+            inner.write(n);
         }
     }
 }
@@ -80,9 +67,20 @@ pub static CONSOLE: Mutex<StaticConsoleDevice> = Mutex::new(StaticConsoleDevice(
 
 /// # Safety
 ///
-/// The given pointer must be a valid object in memory
-pub unsafe fn set_console<T: ConsoleDevice>(device: *mut T) {
-    *CONSOLE.lock() = StaticConsoleDevice::new(device);
+/// 1. The given pointer must be a valid object in memory
+/// 2. Be valid for the entirety of runtime
+/// 3. Never be used outside of the `CONSOLE`
+pub unsafe fn set_raw_console<T: ConsoleDevice>(device: *mut T) {
+    let device = &mut *device;
+    device.init();
+
+    *CONSOLE.lock() = StaticConsoleDevice(Some(device));
+}
+
+pub fn set_console(device: &'static mut dyn ConsoleDevice) {
+    device.init();
+
+    *CONSOLE.lock() = StaticConsoleDevice(Some(device));
 }
 
 pub enum ConsoleDevices {
@@ -101,21 +99,28 @@ impl ConsoleDevices {
         }
     }
 
-    pub fn set_console(&self, ptr: *mut u8) {
+    /// # Safety
+    ///
+    /// `ptr` must be a valid instance of the device described by the variant in `self`
+    pub unsafe fn set_raw_console(&self, ptr: *mut u8) {
         match self {
-            ConsoleDevices::Uart16550 => unsafe { set_console(ptr as *mut Uart16550) },
-            ConsoleDevices::SifiveUart => unsafe { set_console(ptr as *mut SifiveUart) },
+            ConsoleDevices::Uart16550 => set_raw_console(ptr as *mut Uart16550),
+            ConsoleDevices::SifiveUart => set_raw_console(ptr as *mut SifiveUart),
         }
     }
 
     pub fn register_isr(&self, interrupt_id: usize, private: usize) {
         match self {
-            ConsoleDevices::Uart16550 => crate::interrupts::isr::register_isr::<Uart16550>(interrupt_id, private),
-            ConsoleDevices::SifiveUart => crate::interrupts::isr::register_isr::<SifiveUart>(interrupt_id, private),
+            ConsoleDevices::Uart16550 => register_isr(interrupt_id, private, console_interrupt),
+            ConsoleDevices::SifiveUart => register_isr(interrupt_id, private, console_interrupt),
         }
 
         let plic = crate::interrupts::PLIC.lock();
         plic.enable_interrupt(crate::platform::current_plic_context(), interrupt_id);
         plic.set_interrupt_priority(interrupt_id, 1);
     }
+}
+
+fn console_interrupt(_: usize, _: usize) -> Result<(), &'static str> {
+    super::INPUT_QUEUE.push(CONSOLE.lock().read()).map_err(|_| "failed to write to input queue")
 }

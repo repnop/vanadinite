@@ -243,7 +243,9 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
             let plic = PLIC.lock();
             if let Some(claimed) = plic.claim(crate::platform::current_plic_context()) {
                 if let Some((callback, private)) = isr_entry(claimed.interrupt_id()) {
-                    callback(claimed.interrupt_id(), private).unwrap();
+                    if let Err(e) = callback(claimed.interrupt_id(), private) {
+                        log::error!("Error during ISR: {}", e);
+                    }
                 }
 
                 claimed.complete();

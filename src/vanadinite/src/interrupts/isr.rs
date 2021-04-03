@@ -2,10 +2,9 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::drivers::InterruptServicable;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-pub type IsrCallback = fn(usize, usize) -> Result<(), &'static str>;
+pub type IsrCallback = fn(interrupt_id: usize, private: usize) -> Result<(), &'static str>;
 
 const ISR_LIMIT: usize = 128;
 
@@ -24,13 +23,13 @@ impl IsrEntry {
     }
 }
 
-pub fn register_isr<T: InterruptServicable>(interrupt_id: usize, private: usize) {
-    log::debug!("Registering ISR for {} on ID {}", core::any::type_name::<T>(), interrupt_id);
+pub fn register_isr(interrupt_id: usize, private: usize, f: IsrCallback) {
+    log::debug!("Registering ISR for interrupt ID {}", interrupt_id);
     let _disabler = super::InterruptDisabler::new();
     let slot = &ISR_REGISTRY[interrupt_id];
 
     slot.active.store(true, Ordering::SeqCst);
-    slot.f.store(<T as InterruptServicable>::isr as usize, Ordering::SeqCst);
+    slot.f.store(f as usize, Ordering::SeqCst);
     slot.private.store(private, Ordering::SeqCst);
 }
 

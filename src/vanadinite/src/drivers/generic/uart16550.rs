@@ -114,12 +114,3 @@ impl CompatibleWith for Uart16550 {
         &["ns16550", "ns16550a"]
     }
 }
-
-impl InterruptServicable for Uart16550 {
-    fn isr(_: usize, private: usize) -> Result<(), &'static str> {
-        let this: &'static Self = unsafe { &*(private as *const _) };
-        let _ = crate::io::INPUT_QUEUE.push(this.read());
-
-        Ok(())
-    }
-}

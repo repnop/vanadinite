@@ -10,6 +10,7 @@
     const_fn_fn_ptr_basics,
     const_fn,
     const_generics,
+    extern_types,
     inline_const,
     maybe_uninit_ref,
     naked_functions,
@@ -59,6 +60,7 @@ use {
     utils::Units,
 };
 
+use drivers::InterruptServicable;
 use fdt::Fdt;
 use mem::kernel_patching::kernel_section_v2p;
 use sbi::hart_state_management::hart_start;
@@ -104,7 +106,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             let stdout_phys = PhysicalAddress::from_ptr(stdout_addr);
             let ptr = phys2virt(stdout_phys);
 
-            device.set_console(ptr.as_mut_ptr());
+            unsafe { device.set_raw_console(ptr.as_mut_ptr()) };
 
             if let Some(interrupts) = node.interrupts() {
                 // Try to get stdout loaded ASAP, so register interrupts later
@@ -243,7 +245,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             for interrupt in child.interrupts().unwrap() {
                 plic.enable_interrupt(platform::current_plic_context(), interrupt);
                 plic.set_interrupt_priority(interrupt, 1);
-                interrupts::isr::register_isr::<drivers::virtio::block::BlockDevice>(interrupt, 0);
+                interrupts::isr::register_isr(interrupt, 0, drivers::virtio::block::BlockDevice::isr);
             }
         }
     }
@@ -376,6 +378,68 @@ unsafe extern "C" fn other_hart_boot() -> ! {
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
+    // this is pretty awful but it seems to work well enough for the moment...
+    // debugging the early paging code is not fun when you don't know where you
+    // die at :)
+    #[cfg(feature = "virt")]
+    if let csr::satp::SatpMode::Bare = csr::satp::read().mode {
+        let uart = 0x1000_0000 as *mut u8;
+        let location = info.location().unwrap();
+        let msg = "EARLY PANIC AT ".as_bytes().iter();
+        let file = unsafe {
+            let file = location.file();
+            let new_ptr = kernel_patching::kernel_section_v2p(VirtualAddress::from_ptr(file.as_ptr())).as_ptr();
+            core::slice::from_raw_parts(new_ptr, file.len())
+        };
+
+        for b in msg.chain(file) {
+            unsafe { uart.write_volatile(*b) };
+        }
+
+        unsafe { uart.write_volatile(b':') };
+
+        let mut n_buf = [0u8; 32];
+        let mut n = location.line();
+        for b in n_buf.iter_mut().rev() {
+            let digit = n % 10;
+            n /= 10;
+
+            *b = digit as u8 + b'0';
+
+            if n == 0 {
+                break;
+            }
+        }
+
+        for b in n_buf.iter().copied().skip_while(|n| *n == 0) {
+            unsafe { uart.write_volatile(b) };
+        }
+
+        unsafe { uart.write_volatile(b':') };
+
+        n_buf = [0u8; 32];
+        let mut n = location.column();
+        for b in n_buf.iter_mut().rev() {
+            let digit = n % 10;
+            n /= 10;
+
+            *b = digit as u8 + b'0';
+
+            if n == 0 {
+                break;
+            }
+        }
+
+        for b in n_buf.iter().copied().skip_while(|n| *n == 0) {
+            unsafe { uart.write_volatile(b) };
+        }
+
+        unsafe { uart.write_volatile(b'\n') };
+        loop {
+            unsafe { asm!("wfi") };
+        }
+    }
+
     error!("{}", info);
     error!("Shutting hart down");
 
@@ -388,7 +452,6 @@ pub extern "C" fn abort() -> ! {
 }
 
 #[alloc_error_handler]
-#[track_caller]
 fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
     panic!("out of memory: {:?}", layout)
 }
