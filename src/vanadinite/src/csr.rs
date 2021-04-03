@@ -139,7 +139,7 @@ pub mod satp {
     }
 
     impl Satp {
-        pub fn to_usize(self) -> usize {
+        pub fn as_usize(self) -> usize {
             ((self.mode as usize) << 60) | ((self.asid as usize) << 44) | self.root_page_table.ppn()
         }
     }
@@ -163,7 +163,7 @@ pub mod satp {
 
     #[inline(always)]
     pub fn write(value: Satp) {
-        let value = value.to_usize();
+        let value = value.as_usize();
         unsafe { asm!("csrw satp, {}", in(reg) value) };
     }
 

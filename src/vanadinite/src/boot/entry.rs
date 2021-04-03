@@ -22,6 +22,7 @@ pub unsafe extern "C" fn _boot() -> ! {
         lla t0, __bss_start
         lla t1, __bss_end
 
+        # We must clear the .bss section here since its assumed to be zero on first access
         clear_bss:
             beq t0, t1, done_clear_bss
             sd zero, (t0)

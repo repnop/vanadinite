@@ -166,7 +166,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             nop                 # we trap here and bounce to `kmain`!
         ",
 
-        satp = in(reg) satp.to_usize(),
+        satp = in(reg) satp.as_usize(),
         new_sp = in(reg) new_sp,
         new_gp = in(reg) new_gp,
 

@@ -77,14 +77,13 @@ pub fn build(target: Target, env: &Env) -> Result<()> {
             archive.finish()?;
         }
         Target::Vanadinite => {
-            let manifest = root().join("src/vanadinite/Cargo.toml");
+            let _dir = pushd("./src");
             #[rustfmt::skip]
             cmd!("
                 cargo build
                     -p vanadinite
                     --release
                     --target riscv64gc-unknown-none-elf
-                    --manifest-path {manifest}
                     --no-default-features
                     --features {features}
             ").run()?;
