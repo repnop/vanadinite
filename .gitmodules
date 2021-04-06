@@ -13,3 +13,6 @@
 [submodule "submodules/opensbi"]
 	path = submodules/opensbi
 	url = https://github.com/riscv/opensbi
+[submodule "submodules/riscv-isa-sim"]
+	path = submodules/riscv-isa-sim
+	url = https://github.com/riscv/riscv-isa-sim

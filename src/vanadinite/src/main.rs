@@ -60,10 +60,11 @@ use {
     utils::Units,
 };
 
+use alloc::boxed::Box;
 use drivers::InterruptServicable;
 use fdt::Fdt;
 use mem::kernel_patching::kernel_section_v2p;
-use sbi::hart_state_management::hart_start;
+use sbi::{hart_state_management::hart_start, probe_extension, ExtensionAvailability};
 pub use vanadinite_macros::{debug, error, info, trace, warn};
 
 static TIMER_FREQ: AtomicUsize = AtomicUsize::new(0);
@@ -131,6 +132,35 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
                     None => log::warn!("No path provided for init process! Defaulting to `init`"),
                 },
                 "no-color" | "no-colour" => io::logging::USE_COLOR.store(false, Ordering::Relaxed),
+                "console" => match value {
+                    Some("sbi") => {
+                        if let ExtensionAvailability::Available(_) = probe_extension(sbi::legacy::CONSOLE_PUTCHAR_EID) {
+                            let this_is_awful = Box::leak(Box::new(io::LegacySbiConsoleOut));
+                            io::set_console(this_is_awful);
+                        }
+                    }
+                    Some(fdt_node) => {
+                        if let Some((node, reg, compatible)) =
+                            fdt.find_node(fdt_node).and_then(|n| Some((n, n.reg()?.next()?, n.compatible()?)))
+                        {
+                            let stdout_addr = reg.starting_address as *mut u8;
+
+                            if let Some(device) = crate::io::ConsoleDevices::from_compatible(compatible) {
+                                let stdout_phys = PhysicalAddress::from_ptr(stdout_addr);
+                                let ptr = phys2virt(stdout_phys);
+
+                                unsafe { device.set_raw_console(ptr.as_mut_ptr()) };
+
+                                if let Some(interrupts) = node.interrupts() {
+                                    // Try to get stdout loaded ASAP, so register interrupts later
+                                    // on if there are any
+                                    stdout_interrupts = Some((device, interrupts, ptr));
+                                }
+                            }
+                        }
+                    }
+                    None => {}
+                },
                 "" => {}
                 _ => log::warn!("Unknown kernel argument: `{}`", option),
             }
@@ -182,38 +212,36 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     info!(" stvec_trap_shim: {:#p}", trap::stvec_trap_shim as *const u8);
     info!(" Heap region: {:#p}-{:#p}", heap_start, heap_start.offset(64 * 4.kib() - 1));
 
-    match fdt.find_compatible(Plic::compatible_with()) {
-        Some(ic) => {
-            let reg = ic.reg().unwrap().next().unwrap();
-            let ic_phys = PhysicalAddress::from_ptr(reg.starting_address);
-            let ic_virt = phys2virt(ic_phys);
+    if let Some(ic) = fdt.find_compatible(Plic::compatible_with()) {
+        let reg = ic.reg().unwrap().next().unwrap();
+        let ic_phys = PhysicalAddress::from_ptr(reg.starting_address);
+        let ic_virt = phys2virt(ic_phys);
 
-            // Number of interrupts available
-            let ndevs = ic
-                .properties()
-                .find(|p| p.name == "riscv,ndev")
-                .and_then(|p| p.as_usize())
-                .expect("missing number of interrupts");
+        // Number of interrupts available
+        let ndevs = ic
+            .properties()
+            .find(|p| p.name == "riscv,ndev")
+            .and_then(|p| p.as_usize())
+            .expect("missing number of interrupts");
 
-            // Find harts which have S-mode available
-            let contexts = fdt
-                .cpus()
-                .filter(|cpu| {
-                    cpu.properties()
-                        .find(|p| p.name == "riscv,isa")
-                        .and_then(|p| p.as_str()?.chars().find(|c| *c == 's'))
-                        .is_some()
-                })
-                .map(|cpu| platform::plic_context_for(cpu.ids().first()));
+        // Find harts which have S-mode available
+        let contexts = fdt
+            .cpus()
+            .filter(|cpu| {
+                cpu.properties()
+                    .find(|p| p.name == "riscv,isa")
+                    .and_then(|p| p.as_str()?.chars().find(|c| *c == 's'))
+                    .is_some()
+            })
+            .map(|cpu| platform::plic_context_for(cpu.ids().first()));
 
-            let plic = unsafe { &*ic_virt.as_ptr().cast::<Plic>() };
+        let plic = unsafe { &*ic_virt.as_ptr().cast::<Plic>() };
 
-            plic.init(ndevs, contexts);
+        plic.init(ndevs, contexts);
+        plic.set_context_threshold(platform::current_plic_context(), 0);
 
-            debug!("Registering PLIC @ {:#p}", ic_virt);
-            interrupts::register_plic(plic);
-        }
-        None => panic!("Can't find PLIC!"),
+        debug!("Registering PLIC @ {:#p}", ic_virt);
+        interrupts::register_plic(plic);
     }
 
     if let Some((device, interrupts, ptr)) = stdout_interrupts {
@@ -221,8 +249,6 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             device.register_isr(interrupt, ptr.as_usize());
         }
     }
-
-    PLIC.lock().set_context_threshold(platform::current_plic_context(), 0);
 
     for child in fdt.find_all_nodes("/soc/virtio_mmio") {
         use drivers::virtio::mmio::{
@@ -241,11 +267,12 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
             *BLOCK_DEV.lock() = Some(drivers::virtio::block::BlockDevice::new(block_device).unwrap());
 
-            let plic = PLIC.lock();
-            for interrupt in child.interrupts().unwrap() {
-                plic.enable_interrupt(platform::current_plic_context(), interrupt);
-                plic.set_interrupt_priority(interrupt, 1);
-                interrupts::isr::register_isr(interrupt, 0, drivers::virtio::block::BlockDevice::isr);
+            if let Some(plic) = &*PLIC.lock() {
+                for interrupt in child.interrupts().unwrap() {
+                    plic.enable_interrupt(platform::current_plic_context(), interrupt);
+                    plic.set_interrupt_priority(interrupt, 1);
+                    interrupts::isr::register_isr(interrupt, 0, drivers::virtio::block::BlockDevice::isr);
+                }
             }
         }
     }
@@ -297,7 +324,9 @@ extern "C" fn kalt(hart_id: usize) -> ! {
 
     info!(brightgreen, "Hart {} successfully booted", HART_ID.get());
 
-    PLIC.lock().set_context_threshold(platform::current_plic_context(), 0);
+    if let Some(plic) = &*PLIC.lock() {
+        plic.set_context_threshold(platform::current_plic_context(), 0);
+    }
 
     unsafe {
         *process::THREAD_CONTROL_BLOCK.get() = process::ThreadControlBlock {

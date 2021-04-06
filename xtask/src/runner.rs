@@ -1,6 +1,6 @@
 use crate::{
     build::{self, Target as BuildTarget},
-    Env, Machine, Result,
+    Env, Machine, Result, Simulator,
 };
 use xshell::cmd;
 
@@ -12,16 +12,19 @@ pub enum Target {
 }
 
 impl Target {
-    const fn dependencies(self) -> &'static [BuildTarget] {
-        match self {
-            Target::Debug | Target::Run => &[BuildTarget::Userspace, BuildTarget::Vanadinite],
-            Target::Gdb => &[],
+    const fn dependencies(self, env: &Env) -> &'static [BuildTarget] {
+        match (self, env.with) {
+            (Target::Debug | Target::Run, Simulator::Qemu) => &[BuildTarget::Userspace, BuildTarget::Vanadinite],
+            (Target::Debug | Target::Run, Simulator::Spike) => {
+                &[BuildTarget::Userspace, BuildTarget::Vanadinite, BuildTarget::OpenSBI]
+            }
+            (Target::Gdb, _) => &[],
         }
     }
 }
 
 pub fn run(target: Target, env: &Env) -> Result<()> {
-    for dep in target.dependencies() {
+    for dep in target.dependencies(env) {
         build::build(*dep, &env)?;
     }
 
@@ -69,26 +72,39 @@ pub fn run(target: Target, env: &Env) -> Result<()> {
                     '--eval-command' 'target remote :1234'
             ").run()?;
         }
-        Target::Run => {
-            let debug_log = match &env.debug_log {
-                Some(path) => vec![String::from("-d"), String::from("guest_errors,trace:riscv_trap,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int"), String::from("-D"), format!("{}", path.display())],
-                None => vec![String::new()],
-            };
+        Target::Run => match env.with {
+            Simulator::Qemu => {
+                let debug_log = match &env.debug_log {
+                    Some(path) => vec![String::from("-d"), String::from("guest_errors,trace:riscv_trap,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int"), String::from("-D"), format!("{}", path.display())],
+                    None => vec![String::new()],
+                };
 
-            cmd!("
-                qemu-system-riscv64
-                    -machine {machine}
-                    -cpu rv64
-                    -smp {cpu_count}
-                    -m {ram}
-                    -append {kernel_args}
-                    {enable_virtio_block_device...}
-                    -bios opensbi-riscv64-generic-fw_jump.bin 
-                    -kernel src/target/riscv64gc-unknown-none-elf/release/vanadinite
-                    -serial mon:stdio
-                    -nographic
-                    {debug_log...}
-            ").run()?;
+                cmd!("
+                    qemu-system-riscv64
+                        -machine {machine}
+                        -cpu rv64
+                        -smp {cpu_count}
+                        -m {ram}
+                        -append {kernel_args}
+                        {enable_virtio_block_device...}
+                        -bios opensbi-riscv64-generic-fw_jump.bin 
+                        -kernel src/target/riscv64gc-unknown-none-elf/release/vanadinite
+                        -serial mon:stdio
+                        -nographic
+                        {debug_log...}
+                ").run()?;
+            }
+            Simulator::Spike => {
+                cmd!("
+                    ./spike
+                        -d
+                        -p{cpu_count}
+                        -m{ram}
+                        --isa=rv64gc
+                        --bootargs={kernel_args}
+                        opensbi-riscv64-generic-fw_payload.elf 
+                ").run()?;
+            }
         }
     };
 

@@ -7,5 +7,6 @@ Cargo.lock
 *.dtb
 *.dts
 qemu.log
-opensbi-*.bin
+opensbi-*.*
 initfs.tar
+spike

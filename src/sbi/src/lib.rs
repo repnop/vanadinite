@@ -17,6 +17,8 @@ pub mod base;
 pub mod hart_state_management;
 /// IPI extension
 pub mod ipi;
+/// Legacy SBI calls
+pub mod legacy;
 /// RFENCE extension
 pub mod rfence;
 /// System Reset extension

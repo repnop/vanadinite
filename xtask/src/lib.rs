@@ -11,6 +11,13 @@ use xshell::{cmd, pushd};
 
 pub type Result<T> = anyhow::Result<T>;
 
+#[derive(Clap, Clone, Copy)]
+#[clap(rename_all = "snake_case")]
+pub enum Simulator {
+    Spike,
+    Qemu,
+}
+
 #[derive(Clap)]
 pub struct Env {
     #[clap(arg_enum, long, env = "MACHINE", default_value = "virt")]
@@ -35,6 +42,9 @@ pub struct Env {
 
     #[clap(long, env = "QEMU_DEBUG_LOG")]
     debug_log: Option<PathBuf>,
+
+    #[clap(arg_enum, long, default_value = "qemu")]
+    with: Simulator,
 }
 
 impl Default for Env {
@@ -47,6 +57,7 @@ impl Default for Env {
             additional_features: String::new(),
             drive_file: None,
             debug_log: None,
+            with: Simulator::Qemu,
         }
     }
 }

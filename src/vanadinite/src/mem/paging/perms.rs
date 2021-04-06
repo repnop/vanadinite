@@ -18,11 +18,14 @@ impl Permissions {
     }
 }
 
-pub const READ: Permissions = Permissions(0b00001);
-pub const WRITE: Permissions = Permissions(0b00010);
-pub const EXECUTE: Permissions = Permissions(0b00100);
-pub const USER: Permissions = Permissions(0b01000);
-pub const GLOBAL: Permissions = Permissions(0b10000);
+// FIXME: wtf why aren't these full values and why no valid
+pub const READ: Permissions = Permissions(0b0000_0001);
+pub const WRITE: Permissions = Permissions(0b0000_0010);
+pub const EXECUTE: Permissions = Permissions(0b0000_0100);
+pub const USER: Permissions = Permissions(0b0000_1000);
+pub const GLOBAL: Permissions = Permissions(0b0001_0000);
+pub const DIRTY: Permissions = Permissions(0b0100_0000);
+pub const ACCESSED: Permissions = Permissions(0b0010_0000);
 
 impl BitOr for Permissions {
     type Output = Permissions;

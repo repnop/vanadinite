@@ -132,6 +132,9 @@ pub mod volatile {
     #[repr(transparent)]
     pub struct Volatile<T, Direction = ReadWrite>(UnsafeCell<T>, core::marker::PhantomData<Direction>);
 
+    unsafe impl<T, Dir> Send for Volatile<T, Dir> {}
+    unsafe impl<T, Dir> Sync for Volatile<T, Dir> {}
+
     impl<T: Copy + 'static> Volatile<T, Read> {
         pub fn read(&self) -> T {
             unsafe { self.0.get().read_volatile() }

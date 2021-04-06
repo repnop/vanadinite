@@ -9,7 +9,7 @@ use crate::{
     csr::satp::{Satp, SatpMode},
     mem::{
         kernel_patching,
-        paging::{PageSize, PhysicalAddress, Sv39PageTable, VirtualAddress, EXECUTE, READ, WRITE},
+        paging::{PageSize, PhysicalAddress, Sv39PageTable, VirtualAddress, ACCESSED, DIRTY, EXECUTE, READ, WRITE},
         phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
     },
     utils::{LinkerSymbol, StaticMut, Units},
@@ -83,7 +83,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
             PageSize::Kilopage,
-            READ | WRITE,
+            DIRTY | ACCESSED | READ | WRITE,
         );
     }
 
@@ -96,7 +96,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
             PageSize::Kilopage,
-            READ | WRITE,
+            DIRTY | ACCESSED | READ | WRITE,
         );
     }
 
@@ -109,7 +109,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
             PageSize::Kilopage,
-            READ | EXECUTE,
+            ACCESSED | EXECUTE,
         );
     }
 
@@ -122,7 +122,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
             PageSize::Kilopage,
-            READ,
+            ACCESSED | READ,
         );
     }
 
@@ -131,7 +131,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             PhysicalAddress::new(addr * 1.gib()),
             VirtualAddress::new(PHYS_OFFSET_VALUE + addr * 1.gib()),
             PageSize::Gigapage,
-            READ | WRITE,
+            DIRTY | ACCESSED | READ | WRITE,
         );
     }
 
@@ -160,12 +160,14 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             mv sp, {new_sp}
             mv gp, {new_gp}
 
+            csrs sstatus, {mxr}
+
             # Load new `satp` value
             csrw satp, {satp}
             sfence.vma
             nop                 # we trap here and bounce to `kmain`!
         ",
-
+        mxr = in(reg) 1 << 19,
         satp = in(reg) satp.as_usize(),
         new_sp = in(reg) new_sp,
         new_gp = in(reg) new_gp,

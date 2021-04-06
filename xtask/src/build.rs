@@ -8,6 +8,7 @@ pub enum Target {
     Userspace,
     Vanadinite,
     OpenSBI,
+    Spike,
 }
 
 impl Target {
@@ -15,7 +16,7 @@ impl Target {
         match self {
             Target::Userspace => vec![],
             Target::Vanadinite => vec![pushenv("RUSTFLAGS", "-C code-model=medium")],
-            Target::OpenSBI => {
+            Target::OpenSBI | Target::Spike => {
                 vec![pushenv("CROSS_COMPILE", "riscv64-unknown-elf-"), pushenv("PLATFORM_RISCV_XLEN", "64")]
             }
         }
@@ -27,7 +28,7 @@ impl Target {
             Target::Vanadinite => {
                 vec![pushenv("RUSTFLAGS", format!("-C link-arg=-Tvanadinite/lds/{}.lds", env.machine))]
             }
-            Target::OpenSBI => vec![],
+            Target::OpenSBI | Target::Spike => vec![],
         }
     }
 }
@@ -89,13 +90,31 @@ pub fn build(target: Target, env: &Env) -> Result<()> {
             ").run()?;
         }
         Target::OpenSBI => {
+            cmd!("riscv64-unknown-elf-objcopy -O binary src/target/riscv64gc-unknown-none-elf/release/vanadinite src/target/riscv64gc-unknown-none-elf/release/vanadinite.bin --set-start 0x80200000").run()?;
+
             cmd!("git submodule init submodules/opensbi").run()?;
             cmd!("git submodule update --remote submodules/opensbi").run()?;
             let _dir = pushd("./submodules/opensbi")?;
 
-            cmd!("make PLATFORM=generic").run()?;
+            cmd!("make PLATFORM=generic FW_PAYLOAD_PATH=../../src/target/riscv64gc-unknown-none-elf/release/vanadinite.bin").run()?;
 
             cp("build/platform/generic/firmware/fw_jump.bin", "../../opensbi-riscv64-generic-fw_jump.bin")?;
+            cp("build/platform/generic/firmware/fw_jump.elf", "../../opensbi-riscv64-generic-fw_jump.elf")?;
+            cp("build/platform/generic/firmware/fw_payload.bin", "../../opensbi-riscv64-generic-fw_payload.bin")?;
+            cp("build/platform/generic/firmware/fw_payload.elf", "../../opensbi-riscv64-generic-fw_payload.elf")?;
+        }
+        Target::Spike => {
+            cmd!("git submodule init submodules/riscv-isa-sim").run()?;
+            cmd!("git submodule update --remote submodules/riscv-isa-sim").run()?;
+            let _dir = pushd("./submodules/riscv-isa-sim")?;
+
+            cmd!("mkdir -p build").run()?;
+            let _dir = pushd("./build")?;
+
+            cmd!("../configure").run()?;
+            cmd!("make").run()?;
+
+            cp("spike", "../../../spike")?;
         }
     }
 

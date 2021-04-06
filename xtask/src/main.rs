@@ -1,3 +1,5 @@
+use std::sync::{atomic::AtomicBool, Arc};
+
 use clap::Clap;
 use xshell::pushd;
 use xtask::{
@@ -20,6 +22,8 @@ enum Arguments {
     OpenSBI,
     /// Build `vanadinite` and run QEMU
     Run(Env),
+    /// Build the RISC-V ISA simulator `spike`
+    Spike,
     /// Build userspace and pack executables into tar file in the root directory
     Userspace,
     /// Build `vanadinite`
@@ -30,10 +34,14 @@ fn main() -> Result<()> {
     let args = Arguments::parse();
     let _working_dir = pushd(xtask::root())?;
 
+    let _sig = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&_sig)).unwrap();
+
     match args {
         Arguments::Vanadinite(env) => build::build(BuildTarget::Vanadinite, &env)?,
         Arguments::Userspace => build::build(BuildTarget::Userspace, &Env::default())?,
         Arguments::OpenSBI => build::build(BuildTarget::OpenSBI, &Env::default())?,
+        Arguments::Spike => build::build(BuildTarget::Spike, &Env::default())?,
         Arguments::Debug(env) => runner::run(RunTarget::Debug, &env)?,
         Arguments::Gdb => runner::run(RunTarget::Gdb, &Env::default())?,
         Arguments::Run(env) => runner::run(RunTarget::Run, &env)?,

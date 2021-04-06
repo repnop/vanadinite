@@ -115,12 +115,30 @@ impl ConsoleDevices {
             ConsoleDevices::SifiveUart => register_isr(interrupt_id, private, console_interrupt),
         }
 
-        let plic = crate::interrupts::PLIC.lock();
-        plic.enable_interrupt(crate::platform::current_plic_context(), interrupt_id);
-        plic.set_interrupt_priority(interrupt_id, 1);
+        if let Some(plic) = &*crate::interrupts::PLIC.lock() {
+            plic.enable_interrupt(crate::platform::current_plic_context(), interrupt_id);
+            plic.set_interrupt_priority(interrupt_id, 1);
+        }
     }
 }
 
 fn console_interrupt(_: usize, _: usize) -> Result<(), &'static str> {
     super::INPUT_QUEUE.push(CONSOLE.lock().read()).map_err(|_| "failed to write to input queue")
+}
+
+pub struct LegacySbiConsoleOut;
+
+impl ConsoleDevice for LegacySbiConsoleOut {
+    fn init(&mut self) {}
+
+    fn read(&self) -> u8 {
+        match sbi::legacy::console_getchar() {
+            -1 => 0,
+            n => n as u8,
+        }
+    }
+
+    fn write(&mut self, n: u8) {
+        sbi::legacy::console_putchar(n)
+    }
 }

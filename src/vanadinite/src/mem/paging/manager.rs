@@ -90,6 +90,16 @@ impl PageTableManager {
         }
     }
 
+    #[track_caller]
+    pub fn mark_dirty(&mut self, virt: VirtualAddress) {
+        unsafe { &mut *self.0 }.entry_mut(virt).expect("setting dirty bit on invalid mapping").0.set_dirty();
+    }
+
+    #[track_caller]
+    pub fn mark_accessed(&mut self, virt: VirtualAddress) {
+        unsafe { &mut *self.0 }.entry_mut(virt).expect("setting dirty bit on invalid mapping").0.set_accessed();
+    }
+
     pub fn resolve(&self, virt: VirtualAddress) -> Option<PhysicalAddress> {
         unsafe { &*self.0 }.translate(virt)
     }

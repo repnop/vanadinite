@@ -12,6 +12,8 @@ use crate::{
     utils::Units,
 };
 
+use super::{ACCESSED, DIRTY};
+
 pub const PHYS_PPN_MASK: usize = 0x0FFF_FFFF_FFFF;
 
 #[repr(C, align(4096))]
@@ -181,7 +183,23 @@ impl PageTableEntry {
     pub fn set_permissions(&mut self, permissions: Permissions) {
         assert!(permissions.valid(), "invalid permission bits");
         let permissions = permissions.as_bits() << 1;
-        self.0 = (self.0 & !(0b11110)) | permissions;
+        self.0 = (self.0 & !(0b1111_1110)) | permissions;
+    }
+
+    pub fn set_dirty(&mut self) {
+        self.0 |= DIRTY.as_bits() << 1;
+    }
+
+    pub fn set_accessed(&mut self) {
+        self.0 |= ACCESSED.as_bits() << 1;
+    }
+
+    pub fn clear_dirty(&mut self) {
+        self.0 &= !(DIRTY.as_bits() << 1);
+    }
+
+    pub fn clear_accessed(&mut self) {
+        self.0 &= !(ACCESSED.as_bits() << 1);
     }
 
     pub fn is_readable(self) -> bool {

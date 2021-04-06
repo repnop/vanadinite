@@ -182,41 +182,6 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
 
     let trap_kind = Trap::from_cause(scause);
     match trap_kind {
-        Trap::LoadPageFault | Trap::StorePageFault => {
-            let sepc = VirtualAddress::new(sepc);
-            let stval = VirtualAddress::new(stval);
-
-            match sepc.is_kernel_region() {
-                true => panic!("[KERNEL BUG] {:?}: {:#p} attempted accessing {:#p}", trap_kind, sepc, stval),
-                false => {
-                    let mapping = Scheduler::with_mut_self(|s| s.processes.front().unwrap().page_table.resolve(stval));
-                    let pid = Scheduler::active_pid();
-                    log::error!(
-                        "Active process (pid: {}) {:?} @ {:#p} attempted accessing address {:#p} (=> {:?} phys), killing",
-                        pid,
-                        trap_kind,
-                        sepc,
-                        stval,
-                        mapping,
-                    );
-                    log::error!(
-                        "Registers at death: {:x?}",
-                        Scheduler::with_mut_self(|s| s.processes.front().unwrap().frame.registers)
-                    );
-                    log::error!(
-                        "Page table address: {:#p}",
-                        Scheduler::with_mut_self(|s| s.processes.front().unwrap().page_table.table())
-                    );
-                    log::error!(
-                        "Page table contents: {:?}",
-                        Scheduler::with_mut_self(|s| s.processes.front().unwrap().page_table.debug_print())
-                    );
-
-                    Scheduler::mark_active_dead();
-                    Scheduler::schedule();
-                }
-            }
-        }
         Trap::SupervisorTimerInterrupt => {
             Scheduler::update_active_registers(*regs, sepc);
             Scheduler::schedule();
@@ -240,15 +205,51 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
             Scheduler::schedule();
         }
         Trap::SupervisorExternalInterrupt => {
-            let plic = PLIC.lock();
-            if let Some(claimed) = plic.claim(crate::platform::current_plic_context()) {
-                if let Some((callback, private)) = isr_entry(claimed.interrupt_id()) {
-                    if let Err(e) = callback(claimed.interrupt_id(), private) {
-                        log::error!("Error during ISR: {}", e);
+            // FIXME: there has to be a better way
+            if let Some(plic) = &*PLIC.lock() {
+                if let Some(claimed) = plic.claim(crate::platform::current_plic_context()) {
+                    if let Some((callback, private)) = isr_entry(claimed.interrupt_id()) {
+                        if let Err(e) = callback(claimed.interrupt_id(), private) {
+                            log::error!("Error during ISR: {}", e);
+                        }
+                    }
+
+                    claimed.complete();
+                }
+            }
+        }
+        Trap::LoadPageFault | Trap::StorePageFault | Trap::InstructionPageFault => {
+            let stval = VirtualAddress::new(stval);
+            match stval.is_kernel_region() {
+                // We should always have marked memory regions up front from the initial mapping
+                true => panic!("[KERNEL BUG] {:?}: Region not marked as A/D for kernel region?", trap_kind),
+                false => {
+                    let res = Scheduler::with_mut_self(|s| {
+                        let page_table = &mut s.processes.front_mut().unwrap().page_table;
+                        let entry = page_table.resolve(stval);
+
+                        match entry {
+                            Some(_) => match trap_kind {
+                                Trap::LoadPageFault | Trap::InstructionPageFault => page_table.mark_accessed(stval),
+                                Trap::StorePageFault => {
+                                    page_table.mark_dirty(stval);
+                                    page_table.mark_accessed(stval);
+                                }
+                                _ => unreachable!(),
+                            },
+                            None => return Err(()),
+                        }
+
+                        crate::mem::sfence(Some(stval), None);
+
+                        Ok(())
+                    });
+
+                    if let Err(()) = res {
+                        Scheduler::mark_active_dead();
+                        Scheduler::schedule();
                     }
                 }
-
-                claimed.complete();
             }
         }
         trap => panic!("Ignoring trap: {:?}, sepc: {:#x}, stval: {:#x}", trap, sepc, stval),

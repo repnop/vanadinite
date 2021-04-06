@@ -4,28 +4,12 @@
 
 pub mod isr;
 
-use core::ops::Deref;
-
 use crate::{drivers::generic::plic, sync::Mutex};
 
-pub static PLIC: Mutex<Plic> = Mutex::new(Plic(None));
-
-pub struct Plic(Option<&'static plic::Plic>);
-
-impl Deref for Plic {
-    type Target = plic::Plic;
-
-    #[track_caller]
-    fn deref(&self) -> &Self::Target {
-        self.0.as_ref().expect("No PLIC registered!")
-    }
-}
-
-unsafe impl Send for Plic {}
-unsafe impl Sync for Plic {}
+pub static PLIC: Mutex<Option<&'static plic::Plic>> = Mutex::new(None);
 
 pub fn register_plic(plic: &'static plic::Plic) {
-    PLIC.lock().0 = Some(plic);
+    *PLIC.lock() = Some(plic);
 }
 
 pub struct InterruptDisabler(bool);
