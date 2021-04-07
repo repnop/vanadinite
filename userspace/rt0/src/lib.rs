@@ -9,7 +9,6 @@ unsafe extern "C" fn _start() {
 
     #[rustfmt::skip]
     asm!("
-        .align 4
         .option push
         .option norelax
         lla gp, __global_pointer$

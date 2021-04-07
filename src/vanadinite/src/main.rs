@@ -11,6 +11,7 @@
     const_fn,
     const_generics,
     extern_types,
+    fn_align,
     inline_const,
     maybe_uninit_ref,
     naked_functions,
@@ -76,9 +77,8 @@ cpu_local! {
 }
 
 #[no_mangle]
+#[repr(align(4))]
 extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
-    unsafe { asm!(".align 4") };
-
     csr::stvec::set(trap::stvec_trap_shim);
     let heap_frame_alloc = unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(64) };
     let heap_start = mem::phys2virt(heap_frame_alloc.expect("moar memory").as_phys_address());
@@ -315,8 +315,8 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 }
 
 #[no_mangle]
+#[repr(align(4))]
 extern "C" fn kalt(hart_id: usize) -> ! {
-    unsafe { asm!(".align 4") };
     csr::sstatus::disable_interrupts();
     csr::stvec::set(trap::stvec_trap_shim);
     unsafe { crate::cpu_local::init_thread_locals() };
