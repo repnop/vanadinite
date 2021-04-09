@@ -1,0 +1,14 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: vanadinite
+Upstream-Contact: Wesley Norris <repnop@outlook.com>
+Source: https://github.com/repnop/vanadinite
+
+# Sample paragraph, commented out:
+#
+# Files: src/*
+# Copyright: $YEAR $NAME <$CONTACT>
+# License: ...
+
+Files: **/Cargo.toml **/config.toml **/*.png rust-toolchain rustfmt.toml README.md .gitignore .gitmodules
+Copyright: 2021 The vanadinite developers
+License: CC0-1.0
