@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#[cfg(feature = "virt")]
+#[cfg(feature = "platform.virt")]
 pub mod virt;
 
 // FIXME: this is kind of hacky because contexts aren't currently standardized,
@@ -17,7 +17,7 @@ pub fn current_plic_context() -> usize {
     // first context is M-mode E51 monitor core which doesn't support S-mode so
     // we'll always be on hart >=1 which ends up working out to remove the +1
     // from the other fn
-    #[cfg(feature = "sifive_u")]
+    #[cfg(feature = "platform.sifive_u")]
     return 2 * crate::HART_ID.get();
 }
 
@@ -28,7 +28,7 @@ pub fn plic_context_for(hart_id: usize) -> usize {
     // first context is M-mode E51 monitor core which doesn't support S-mode so
     // we'll always be on hart >=1 which ends up working out to remove the +1
     // from the other fn
-    #[cfg(feature = "sifive_u")]
+    #[cfg(feature = "platform.sifive_u")]
     return 2 * hart_id;
 }
 

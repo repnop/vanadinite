@@ -413,7 +413,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     // this is pretty awful but it seems to work well enough for the moment...
     // debugging the early paging code is not fun when you don't know where you
     // die at :)
-    #[cfg(feature = "virt")]
+    #[cfg(feature = "platform.virt")]
     if let csr::satp::SatpMode::Bare = csr::satp::read().mode {
         let uart = 0x1000_0000 as *mut u8;
         let location = info.location().unwrap();

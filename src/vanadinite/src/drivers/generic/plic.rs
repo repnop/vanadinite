@@ -75,7 +75,7 @@ impl Plic {
     }
 
     pub const fn max_priority() -> usize {
-        #[cfg(all(not(feature = "virt"), not(feature = "sifive_u")))]
+        #[cfg(all(not(feature = "platform.virt"), not(feature = "platform.sifive_u")))]
         compile_error!("Update PLIC max priority for new platform");
 
         // This value is fixed for the platforms we currently support, but may
