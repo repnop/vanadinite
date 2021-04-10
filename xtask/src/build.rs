@@ -5,57 +5,82 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{root, Env, Result};
+use crate::{Result, VanadiniteBuildOptions};
+use clap::Clap;
 use std::fs;
 use tar::{Builder, Header};
 use xshell::{cmd, cp, pushd, pushenv, rm_rf};
 
-#[derive(Clone, Copy)]
-pub enum Target {
-    Userspace,
-    Vanadinite,
-    OpenSBI,
-    Spike,
+#[derive(Clap, Clone, Copy)]
+#[clap(rename_all = "snake_case")]
+pub enum Platform {
+    Virt,
+    SifiveU,
 }
 
-impl Target {
-    fn predefined_env(self) -> Vec<xshell::Pushenv> {
+impl std::fmt::Display for Platform {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Target::Userspace => vec![],
-            Target::Vanadinite => vec![pushenv("RUSTFLAGS", "-C code-model=medium")],
-            Target::OpenSBI | Target::Spike => {
+            Platform::Virt => write!(f, "virt"),
+            Platform::SifiveU => write!(f, "sifive_u"),
+        }
+    }
+}
+
+#[derive(Clap)]
+#[clap(rename_all = "snake_case")]
+pub enum BuildTarget {
+    /// The `vanadinite` kernel
+    Vanadinite(VanadiniteBuildOptions),
+    /// The OpenSBI firmware image (builds `vanadinite`)
+    #[clap(name = "opensbi")]
+    OpenSBI(VanadiniteBuildOptions),
+    /// The RISC-V ISA simulator
+    Spike,
+    /// Userspace applications for the `vanadinite` kernel to use on boot
+    Userspace,
+}
+
+impl BuildTarget {
+    fn dependencies(&self) -> Vec<Self> {
+        match self {
+            BuildTarget::Vanadinite(_) => vec![BuildTarget::Userspace],
+            BuildTarget::OpenSBI(args) => vec![BuildTarget::Vanadinite(args.clone())],
+            _ => vec![],
+        }
+    }
+}
+
+impl BuildTarget {
+    fn env(&self) -> Vec<xshell::Pushenv> {
+        match self {
+            BuildTarget::Userspace => vec![],
+            BuildTarget::Vanadinite(opts) => vec![pushenv(
+                "RUSTFLAGS",
+                format!("-C code-model=medium -C link-arg=-Tvanadinite/lds/{}.lds", opts.platform),
+            )],
+            BuildTarget::OpenSBI(_) | BuildTarget::Spike => {
                 vec![pushenv("CROSS_COMPILE", "riscv64-unknown-elf-"), pushenv("PLATFORM_RISCV_XLEN", "64")]
             }
         }
     }
-
-    fn runtime_env(self, env: &Env) -> Vec<xshell::Pushenv> {
-        match self {
-            Target::Userspace => vec![],
-            Target::Vanadinite => {
-                vec![pushenv("RUSTFLAGS", format!("-C link-arg=-Tvanadinite/lds/{}.lds", env.machine))]
-            }
-            Target::OpenSBI | Target::Spike => vec![],
-        }
-    }
 }
 
-pub fn build(target: Target, env: &Env) -> Result<()> {
-    let _env = target.predefined_env();
-    let _env2 = target.runtime_env(env);
+pub fn build(target: BuildTarget) -> Result<()> {
+    for dependency in target.dependencies() {
+        build(dependency)?;
+    }
 
-    let features = format!("{} {}", env.machine, env.additional_features);
+    let _env = target.env();
 
     match target {
-        Target::Userspace => {
-            let init_tar = root().join("initfs.tar");
+        BuildTarget::Userspace => {
+            let init_tar = std::env::current_dir()?.join("initfs.tar");
 
             rm_rf(&init_tar)?;
 
             let _dir = pushd("./userspace")?;
             cmd!("cargo build --release --workspace").run()?;
-
-            println!("{}", xshell::cwd()?.display());
 
             let out = fs::File::create(init_tar)?;
             let mut archive = Builder::new(out);
@@ -84,7 +109,9 @@ pub fn build(target: Target, env: &Env) -> Result<()> {
 
             archive.finish()?;
         }
-        Target::Vanadinite => {
+        BuildTarget::Vanadinite(build_opts) => {
+            let features = format!("platform.{} {}", build_opts.platform, build_opts.kernel_features);
+
             let _dir = pushd("./src");
             #[rustfmt::skip]
             cmd!("
@@ -96,7 +123,7 @@ pub fn build(target: Target, env: &Env) -> Result<()> {
                     --features {features}
             ").run()?;
         }
-        Target::OpenSBI => {
+        BuildTarget::OpenSBI(_) => {
             cmd!("riscv64-unknown-elf-objcopy -O binary src/target/riscv64gc-unknown-none-elf/release/vanadinite src/target/riscv64gc-unknown-none-elf/release/vanadinite.bin --set-start 0x80200000").run()?;
 
             cmd!("git submodule init submodules/opensbi").run()?;
@@ -110,7 +137,7 @@ pub fn build(target: Target, env: &Env) -> Result<()> {
             cp("build/platform/generic/firmware/fw_payload.bin", "../../opensbi-riscv64-generic-fw_payload.bin")?;
             cp("build/platform/generic/firmware/fw_payload.elf", "../../opensbi-riscv64-generic-fw_payload.elf")?;
         }
-        Target::Spike => {
+        BuildTarget::Spike => {
             cmd!("git submodule init submodules/riscv-isa-sim").run()?;
             cmd!("git submodule update --remote submodules/riscv-isa-sim").run()?;
             let _dir = pushd("./submodules/riscv-isa-sim")?;

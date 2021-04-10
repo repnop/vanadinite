@@ -6,42 +6,75 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    build::{self, Target as BuildTarget},
-    Env, Machine, Result, Simulator,
+    build::{self, BuildTarget},
+    Platform, Result, Simulator, VanadiniteBuildOptions,
 };
+use clap::{ArgSettings, Clap};
+use std::path::PathBuf;
 use xshell::cmd;
 
-#[derive(Clone, Copy)]
-pub enum Target {
-    Debug,
-    Gdb,
-    Run,
+#[derive(Clap)]
+pub struct RunOptions {
+    /// Number of CPUs
+    #[clap(long, default_value = "4")]
+    cpus: usize,
+
+    /// Location to write debug logging to, enables QEMU debug logging
+    #[clap(long)]
+    debug_log: Option<PathBuf>,
+
+    /// Path to a disk image
+    #[clap(long)]
+    drive_file: Option<PathBuf>,
+
+    /// Arguments passed to the kernel
+    #[clap(setting = ArgSettings::AllowEmptyValues)]
+    #[clap(long, default_value = "")]
+    kernel_args: String,
+
+    /// Don't build anything before running
+    #[clap(long)]
+    no_build: bool,
+
+    /// RAM size in MiB
+    #[clap(long, default_value = "512")]
+    ram: usize,
+
+    #[clap(flatten)]
+    vanadinite_options: VanadiniteBuildOptions,
+
+    /// Which simulator to run with
+    #[clap(arg_enum, long, default_value = "qemu")]
+    with: Simulator,
 }
 
-impl Target {
-    const fn dependencies(self, env: &Env) -> &'static [BuildTarget] {
-        match (self, env.with) {
-            (Target::Debug | Target::Run, Simulator::Qemu) => &[BuildTarget::Userspace, BuildTarget::Vanadinite],
-            (Target::Debug | Target::Run, Simulator::Spike) => {
-                &[BuildTarget::Userspace, BuildTarget::Vanadinite, BuildTarget::OpenSBI]
-            }
-            (Target::Gdb, _) => &[],
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self {
+            cpus: 5,
+            debug_log: None,
+            drive_file: None,
+            kernel_args: String::new(),
+            no_build: false,
+            ram: 512,
+            vanadinite_options: VanadiniteBuildOptions { platform: Platform::Virt, kernel_features: String::new() },
+            with: Simulator::Qemu,
         }
     }
 }
 
-pub fn run(target: Target, env: &Env) -> Result<()> {
-    for dep in target.dependencies(env) {
-        build::build(*dep, &env)?;
+pub fn run(options: RunOptions) -> Result<()> {
+    if !options.no_build {
+        build::build(BuildTarget::OpenSBI(options.vanadinite_options.clone()))?;
     }
 
-    let machine = env.machine.to_string();
-    let cpu_count = env.cpus.to_string();
-    let ram = &env.ram;
-    let kernel_args = &env.kernel_args;
+    let platform = options.vanadinite_options.platform.to_string();
+    let cpu_count = options.cpus.to_string();
+    let ram = options.ram.to_string();
+    let kernel_args = options.kernel_args;
 
-    let enable_virtio_block_device = match (env.machine, &env.drive_file) {
-        (Machine::Virt, Some(path)) => vec![
+    let enable_virtio_block_device = match (options.vanadinite_options.platform, &options.drive_file) {
+        (Platform::Virt, Some(path)) => vec![
             String::from("-global"),
             String::from("virtio-mmio.force-legacy=false"),
             String::from("-drive"),
@@ -53,65 +86,42 @@ pub fn run(target: Target, env: &Env) -> Result<()> {
     };
 
     #[rustfmt::skip]
-    match target {
-        Target::Debug =>{
+    match options.with {
+        Simulator::Qemu => {
+            let debug_log = match &options.debug_log {
+                Some(path) => vec![
+                    String::from("-d"),
+                    String::from("guest_errors,trace:riscv_trap,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int"),
+                    String::from("-D"),
+                    format!("{}", path.display())
+                ],
+                None => vec![String::new()],
+            };
+
             cmd!("
-                qemu-system-riscv64 
-                    -machine {machine}
+                qemu-system-riscv64
+                    -machine {platform}
                     -cpu rv64
                     -smp {cpu_count}
-                    -m {ram}
+                    -m {ram}M
                     -append {kernel_args}
                     {enable_virtio_block_device...}
                     -bios opensbi-riscv64-generic-fw_jump.bin 
                     -kernel src/target/riscv64gc-unknown-none-elf/release/vanadinite
-                    -monitor stdio
-                    -gdb tcp::1234
-                    -S 
-                    -d guest_errors,trace:riscv_trap,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int
-                    -D qemu.log
+                    -serial mon:stdio
+                    -nographic
+                    {debug_log...}
             ").run()?;
         }
-        Target::Gdb => {
+        Simulator::Spike => {
             cmd!("
-                riscv64-unknown-elf-gdb 
-                    'src/target/riscv64gc-unknown-none-elf/release/vanadinite' 
-                    '--eval-command' 'target remote :1234'
+                ./spike
+                    -p{cpu_count}
+                    -m{ram}
+                    --isa=rv64gc
+                    --bootargs={kernel_args}
+                    opensbi-riscv64-generic-fw_payload.elf 
             ").run()?;
-        }
-        Target::Run => match env.with {
-            Simulator::Qemu => {
-                let debug_log = match &env.debug_log {
-                    Some(path) => vec![String::from("-d"), String::from("guest_errors,trace:riscv_trap,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int"), String::from("-D"), format!("{}", path.display())],
-                    None => vec![String::new()],
-                };
-
-                cmd!("
-                    qemu-system-riscv64
-                        -machine {machine}
-                        -cpu rv64
-                        -smp {cpu_count}
-                        -m {ram}
-                        -append {kernel_args}
-                        {enable_virtio_block_device...}
-                        -bios opensbi-riscv64-generic-fw_jump.bin 
-                        -kernel src/target/riscv64gc-unknown-none-elf/release/vanadinite
-                        -serial mon:stdio
-                        -nographic
-                        {debug_log...}
-                ").run()?;
-            }
-            Simulator::Spike => {
-                cmd!("
-                    ./spike
-                        -d
-                        -p{cpu_count}
-                        -m{ram}
-                        --isa=rv64gc
-                        --bootargs={kernel_args}
-                        opensbi-riscv64-generic-fw_payload.elf 
-                ").run()?;
-            }
         }
     };
 

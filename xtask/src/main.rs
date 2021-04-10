@@ -5,53 +5,101 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use clap::Clap;
+pub mod build;
+pub mod runner;
+
+use build::{BuildTarget, Platform};
+use clap::{AppSettings, ArgSettings, Clap};
+use runner::RunOptions;
 use std::sync::{atomic::AtomicBool, Arc};
-use xshell::pushd;
-use xtask::{
-    build::{self, Target as BuildTarget},
-    runner::{self, Target as RunTarget},
-    Env, Result,
-};
+use xshell::{pushd, rm_rf};
+
+pub type Result<T> = anyhow::Result<T>;
 
 #[derive(Clap)]
-#[clap(rename_all = "snake_case")]
+#[clap(rename_all = "snake_case", setting = AppSettings::DisableVersion, setting = AppSettings::VersionlessSubcommands)]
 enum Arguments {
-    /// Clean all projects
-    Clean,
-    /// Build `vanadinite`, run QEMU, and wait for GDB
-    Debug(Env),
-    /// Start GDB and connect to a running QEMU instance
-    Gdb,
-    /// Build the OpenSBI firmware image and copy it to the root directory
+    /// Build the various components needed to work with `vanadinite`
+    Build(BuildTarget),
+    /// Clean all or specific components
+    Clean(CleanTarget),
+    /// Run `vanadinite`
+    Run(RunOptions),
+}
+
+#[derive(Clap)]
+enum CleanTarget {
+    All,
     #[clap(name = "opensbi")]
     OpenSBI,
-    /// Build `vanadinite` and run QEMU
-    Run(Env),
-    /// Build the RISC-V ISA simulator `spike`
     Spike,
-    /// Build userspace and pack executables into tar file in the root directory
     Userspace,
-    /// Build `vanadinite`
-    Vanadinite(Env),
+    Vanadinite,
+}
+
+#[derive(Clap, Clone)]
+pub struct VanadiniteBuildOptions {
+    /// The platform to target for the `vanadinite` build
+    #[clap(arg_enum, long, default_value = "virt")]
+    platform: Platform,
+
+    /// Extra kernel features to enable, space separated
+    #[clap(setting = ArgSettings::AllowEmptyValues)]
+    #[clap(long, default_value = "")]
+    kernel_features: String,
+}
+
+#[derive(Clap, Clone, Copy)]
+#[clap(rename_all = "snake_case")]
+pub enum Simulator {
+    /// The RISC-V ISA simulator Spike
+    Spike,
+    Qemu,
 }
 
 fn main() -> Result<()> {
     let args = Arguments::parse();
-    let _working_dir = pushd(xtask::root())?;
 
     let _sig = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&_sig)).unwrap();
 
     match args {
-        Arguments::Vanadinite(env) => build::build(BuildTarget::Vanadinite, &env)?,
-        Arguments::Userspace => build::build(BuildTarget::Userspace, &Env::default())?,
-        Arguments::OpenSBI => build::build(BuildTarget::OpenSBI, &Env::default())?,
-        Arguments::Spike => build::build(BuildTarget::Spike, &Env::default())?,
-        Arguments::Debug(env) => runner::run(RunTarget::Debug, &env)?,
-        Arguments::Gdb => runner::run(RunTarget::Gdb, &Env::default())?,
-        Arguments::Run(env) => runner::run(RunTarget::Run, &env)?,
-        Arguments::Clean => xtask::clean()?,
+        Arguments::Build(target) => build::build(target)?,
+        Arguments::Clean(target) => clean(target)?,
+        Arguments::Run(target) => runner::run(target)?,
+    }
+
+    Ok(())
+}
+
+fn clean(target: CleanTarget) -> Result<()> {
+    match target {
+        CleanTarget::All => {
+            clean(CleanTarget::OpenSBI)?;
+            clean(CleanTarget::Spike)?;
+            clean(CleanTarget::Userspace)?;
+            clean(CleanTarget::Vanadinite)?;
+        }
+        CleanTarget::OpenSBI => {
+            let _dir = pushd("./submodules/opensbi")?;
+            rm_rf("./build")?;
+            println!("Cleaned OpenSBI");
+        }
+        CleanTarget::Spike => {
+            let _dir = pushd("./submodules/riscv-isa-sim")?;
+            rm_rf("./build")?;
+            println!("Cleaned Spike");
+        }
+        CleanTarget::Userspace => {
+            let _dir = pushd("./userspace")?;
+            rm_rf("./target")?;
+            println!("Cleaned userspace");
+        }
+        CleanTarget::Vanadinite => {
+            let _dir = pushd("./src")?;
+            rm_rf("./target")?;
+            println!("Cleaned vanadinite");
+        }
     }
 
     Ok(())
