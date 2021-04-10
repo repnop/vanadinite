@@ -66,9 +66,9 @@ impl Uart16550 {
     }
 
     pub fn data_empty(&self) -> bool {
-        let value = self.line_status() & (1 << 6);
+        let value = self.line_status() & (1 << 5);
 
-        value == (1 << 6)
+        value == (1 << 5)
     }
 
     pub fn write(&self, data: u8) {
