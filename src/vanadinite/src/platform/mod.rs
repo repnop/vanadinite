@@ -11,7 +11,7 @@ pub mod virt;
 // FIXME: this is kind of hacky because contexts aren't currently standardized,
 // should look for a better way to do it in the future
 pub fn current_plic_context() -> usize {
-    #[cfg(not(feature = "sifive_u"))]
+    #[cfg(not(feature = "platform.sifive_u"))]
     return 1 + 2 * crate::HART_ID.get();
 
     // first context is M-mode E51 monitor core which doesn't support S-mode so
@@ -22,7 +22,7 @@ pub fn current_plic_context() -> usize {
 }
 
 pub fn plic_context_for(hart_id: usize) -> usize {
-    #[cfg(not(feature = "sifive_u"))]
+    #[cfg(not(feature = "platform.sifive_u"))]
     return 1 + 2 * hart_id;
 
     // first context is M-mode E51 monitor core which doesn't support S-mode so
