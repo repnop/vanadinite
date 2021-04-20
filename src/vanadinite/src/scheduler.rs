@@ -7,9 +7,9 @@
 
 use crate::{
     cpu_local,
-    csr::satp::{self, Satp, SatpMode},
+    csr::satp::{self, Satp},
     interrupts::assert_interrupts_disabled,
-    mem::{paging::VirtualAddress, sfence, virt2phys},
+    mem::{paging::SATP_MODE, sfence},
     process::{Process, ProcessState},
     trap::TrapFrame,
 };
@@ -20,7 +20,7 @@ cpu_local! {
     pub static SCHEDULER: RefCell<Scheduler> = RefCell::new(Scheduler::new());
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Scheduler {
     pub processes: VecDeque<Process>,
 }
@@ -79,16 +79,10 @@ impl Scheduler {
 
             let active = this.processes.front_mut().expect("no active process?");
 
-            log::trace!(
-                "Switching page table to the one at: {:#p}, contents: {:?}",
-                virt2phys(VirtualAddress::from_ptr(active.page_table.table())),
-                active.page_table.debug_print(),
-            );
-
             satp::write(Satp {
-                mode: SatpMode::Sv39,
+                mode: SATP_MODE,
                 asid: active.pid as u16,
-                root_page_table: virt2phys(VirtualAddress::from_ptr(active.page_table.table())),
+                root_page_table: active.memory_manager.table_phys_address(),
             });
 
             sfence(None, Some(active.pid as u16));

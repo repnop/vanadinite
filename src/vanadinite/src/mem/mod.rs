@@ -7,20 +7,25 @@
 
 use {
     core::sync::atomic::{AtomicUsize, Ordering},
-    paging::{PhysicalAddress, Sv39PageTable, VirtualAddress},
+    paging::{PhysicalAddress, VirtualAddress},
     phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
 };
 
 pub mod heap;
+pub mod manager;
 pub mod phys;
+pub mod region;
 pub mod paging {
-    mod manager;
-    mod perms;
-    mod sv39;
+    mod table;
 
-    pub use manager::*;
-    pub use perms::*;
-    pub use sv39::*;
+    use crate::csr::satp::SatpMode;
+    pub use table::*;
+
+    #[cfg(all(not(feature = "paging.sv48"), not(feature = "paging.sv57")))]
+    pub const SATP_MODE: SatpMode = SatpMode::Sv39;
+
+    #[cfg(all(feature = "paging.sv48", not(feature = "paging.sv57")))]
+    pub const SATP_MODE: SatpMode = SatpMode::Sv48;
 }
 
 #[inline(always)]
@@ -72,9 +77,8 @@ pub fn phys2virt(phys: PhysicalAddress) -> VirtualAddress {
     VirtualAddress::new(phys.as_usize() + PHYSICAL_OFFSET.load(Ordering::Relaxed))
 }
 
-#[track_caller]
 pub fn virt2phys(virt: VirtualAddress) -> PhysicalAddress {
-    unsafe { &*Sv39PageTable::current() }.translate(virt).expect("no mapping found")
+    PhysicalAddress::new(virt.as_usize() - PHYSICAL_OFFSET.load(Ordering::Relaxed))
 }
 
 pub static PHYSICAL_OFFSET: AtomicUsize = AtomicUsize::new(0);

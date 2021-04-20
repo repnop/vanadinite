@@ -9,8 +9,13 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
     cpu_local,
-    mem::paging::VirtualAddress,
-    mem::paging::{PageTableManager, EXECUTE, READ, USER, WRITE},
+    mem::{
+        manager::MemoryManager,
+        paging::{
+            flags::{EXECUTE, READ, USER, VALID, WRITE},
+            VirtualAddress,
+        },
+    },
     trap::TrapFrame,
     utils::{StaticMut, Units},
 };
@@ -67,7 +72,7 @@ unsafe impl Sync for ThreadControlBlock {}
 pub struct Process {
     pub pid: usize,
     pub pc: usize,
-    pub page_table: PageTableManager,
+    pub memory_manager: MemoryManager,
     pub frame: TrapFrame,
     pub state: ProcessState,
     pub capabilities: [Capability; 32],
@@ -75,31 +80,28 @@ pub struct Process {
 
 impl Process {
     pub fn load(elf: &Elf) -> Self {
-        let mut page_table = PageTableManager::new(
-            crate::mem::phys2virt(crate::mem::phys::zalloc_page().as_phys_address()).as_mut_ptr().cast(),
-        );
+        let mut memory_manager = MemoryManager::new();
 
         let capabilities = Default::default();
 
         for header in elf.program_headers().filter(|header| header.r#type == elf64::ProgramSegmentType::Load) {
-            page_table.alloc_virtual_range_with_data(
+            memory_manager.alloc_region(
                 VirtualAddress::new(header.vaddr as usize),
-                match header.memory_size % 4096 {
-                    0 => header.memory_size as usize,
-                    n => (n as usize & !(4096 - 1)) + 4096,
+                match (header.memory_size as usize / 4.kib(), header.memory_size as usize % 4.kib()) {
+                    (n, 0) => n,
+                    (n, _) => n + 1,
                 },
                 match header.flags {
-                    0b101 => USER | READ | EXECUTE,
-                    0b110 => USER | READ | WRITE,
-                    0b100 => USER | READ,
+                    0b101 => USER | READ | EXECUTE | VALID,
+                    0b110 => USER | READ | WRITE | VALID,
+                    0b100 => USER | READ | VALID,
                     flags => unreachable!("flags: {:#b}", flags),
                 },
-                elf.program_segment_data(&header),
+                Some(elf.program_segment_data(&header)),
             );
         }
 
-        page_table.copy_kernel_pages();
-        page_table.alloc_virtual_range(VirtualAddress::new(0x7fff0000), 16.kib(), USER | READ | WRITE);
+        memory_manager.alloc_region(VirtualAddress::new(0x7fff0000), 4, USER | READ | WRITE | VALID, None);
 
         let mut frame = TrapFrame::default();
         frame.registers.sp = 0x7fff0000 + 16.kib();
@@ -107,7 +109,7 @@ impl Process {
         Self {
             pid: PID_COUNTER.next(),
             pc: elf.header.entry as usize,
-            page_table,
+            memory_manager,
             frame,
             state: ProcessState::Running,
             capabilities,

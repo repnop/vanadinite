@@ -7,7 +7,7 @@
 
 use crate::{
     interrupts::{isr::isr_entry, PLIC},
-    mem::paging::VirtualAddress,
+    mem::paging::{flags, VirtualAddress},
     scheduler::Scheduler,
     syscall,
 };
@@ -227,30 +227,27 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                 // We should always have marked memory regions up front from the initial mapping
                 true => panic!("[KERNEL BUG] {:?}: Region not marked as A/D for kernel region?", trap_kind),
                 false => {
-                    let res = Scheduler::with_mut_self(|s| {
-                        let page_table = &mut s.processes.front_mut().unwrap().page_table;
-                        let entry = page_table.resolve(stval);
+                    let valid = Scheduler::with_mut_self(|s| {
+                        let memory_manager = &mut s.processes.front_mut().unwrap().memory_manager;
 
-                        match entry {
-                            Some(_) => match trap_kind {
-                                Trap::LoadPageFault | Trap::InstructionPageFault => page_table.mark_accessed(stval),
-                                Trap::StorePageFault => {
-                                    page_table.mark_dirty(stval);
-                                    page_table.mark_accessed(stval);
-                                }
-                                _ => unreachable!(),
-                            },
-                            None => return Err(()),
+                        match trap_kind {
+                            Trap::LoadPageFault | Trap::InstructionPageFault => {
+                                memory_manager.modify_page_flags(stval, |f| f | flags::ACCESSED)
+                            }
+                            Trap::StorePageFault => {
+                                memory_manager.modify_page_flags(stval, |f| f | flags::ACCESSED | flags::DIRTY)
+                            }
+                            _ => unreachable!(),
                         }
-
-                        crate::mem::sfence(Some(stval), None);
-
-                        Ok(())
                     });
 
-                    if let Err(()) = res {
-                        Scheduler::mark_active_dead();
-                        Scheduler::schedule();
+                    match valid {
+                        true => crate::mem::sfence(Some(stval), None),
+                        false => {
+                            log::error!("Process died to a {:?}", trap_kind);
+                            Scheduler::mark_active_dead();
+                            Scheduler::schedule();
+                        }
                     }
                 }
             }

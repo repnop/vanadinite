@@ -6,7 +6,10 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    csr::sstatus::TemporaryUserMemoryAccess, io::INPUT_QUEUE, mem::paging::VirtualAddress, scheduler::Scheduler,
+    csr::sstatus::TemporaryUserMemoryAccess,
+    io::INPUT_QUEUE,
+    mem::paging::{flags, VirtualAddress},
+    scheduler::Scheduler,
     trap::TrapFrame,
 };
 
@@ -14,7 +17,10 @@ pub fn read_stdin(virt: VirtualAddress, len: usize, regs: &mut TrapFrame) {
     log::debug!("Attempting to write to memory at {:#p} (len={})", virt, len);
     let valid_memory = Scheduler::with_mut_self(|s| {
         let active = s.processes.front_mut().unwrap();
-        active.page_table.is_valid_readable(virt) && active.page_table.is_valid_readable(virt.offset(len))
+        let flags_start = active.memory_manager.page_flags(virt);
+        let flags_end = active.memory_manager.page_flags(virt.offset(len));
+
+        flags_start.zip(flags_end).map(|(fs, fe)| fs & flags::READ && fe & flags::READ).unwrap_or_default()
     });
 
     if virt.is_kernel_region() {

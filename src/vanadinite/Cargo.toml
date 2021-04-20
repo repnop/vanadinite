@@ -18,6 +18,7 @@ vanadinite_macros = { path = "../vanadinite_macros" }
 [features]
 default = ["platform.virt"]
 
+"paging.sv48" = []
 "platform.virt" = []
 "platform.sifive_u" = []
 "pmalloc.allocator.bitmap" = []

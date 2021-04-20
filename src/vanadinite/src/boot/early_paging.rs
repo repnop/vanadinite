@@ -5,17 +5,22 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use core::sync::atomic::AtomicUsize;
+
 use fdt::Fdt;
 use kernel_patching::kernel_section_p2v;
 
 use crate::{
-    csr::satp::{Satp, SatpMode},
+    csr::satp::Satp,
     mem::{
         kernel_patching,
-        paging::{PageSize, PhysicalAddress, Sv39PageTable, VirtualAddress, ACCESSED, DIRTY, EXECUTE, READ, WRITE},
+        paging::{
+            flags::{ACCESSED, DIRTY, EXECUTE, READ, VALID, WRITE},
+            PageSize, PageTable, PhysicalAddress, VirtualAddress, SATP_MODE,
+        },
         phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
     },
-    utils::{LinkerSymbol, StaticMut, Units},
+    utils::{LinkerSymbol, Units},
 };
 
 extern "C" {
@@ -30,8 +35,7 @@ extern "C" {
     static PHYS_OFFSET_VALUE: usize;
 }
 
-pub static TEMP_PAGE_TABLE_IDENTITY: StaticMut<Sv39PageTable> = StaticMut::new(Sv39PageTable::new());
-pub static PAGE_TABLE_ROOT: StaticMut<Sv39PageTable> = StaticMut::new(Sv39PageTable::new());
+pub static BOOTSTRAP_SATP: AtomicUsize = AtomicUsize::new(0);
 
 /// # Safety
 /// no
@@ -77,16 +81,18 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     drop(pf_alloc);
 
+    let mut root_page_table = PageTable::new_raw();
+
     let bss_start = __bss_start.as_usize();
     let bss_end = __bss_end.as_usize();
 
     for addr in (bss_start..bss_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        (&mut *PAGE_TABLE_ROOT.get()).map(
+        root_page_table.static_map(
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
+            DIRTY | ACCESSED | READ | WRITE | VALID,
             PageSize::Kilopage,
-            DIRTY | ACCESSED | READ | WRITE,
         );
     }
 
@@ -95,11 +101,11 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (data_start..data_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        (&mut *PAGE_TABLE_ROOT.get()).map(
+        root_page_table.static_map(
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
+            DIRTY | ACCESSED | READ | WRITE | VALID,
             PageSize::Kilopage,
-            DIRTY | ACCESSED | READ | WRITE,
         );
     }
 
@@ -108,11 +114,11 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (text_start..text_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        (&mut *PAGE_TABLE_ROOT.get()).map(
+        root_page_table.static_map(
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
+            ACCESSED | EXECUTE | VALID,
             PageSize::Kilopage,
-            ACCESSED | EXECUTE,
         );
     }
 
@@ -121,22 +127,30 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     for addr in (ktls_start..ktls_end).step_by(4096) {
         let addr = PhysicalAddress::new(addr);
-        (&mut *PAGE_TABLE_ROOT.get()).map(
+        root_page_table.static_map(
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
+            ACCESSED | READ | VALID,
             PageSize::Kilopage,
-            ACCESSED | READ,
         );
     }
 
     for addr in 0..64 {
-        (&mut *PAGE_TABLE_ROOT.get()).map(
+        root_page_table.static_map(
             PhysicalAddress::new(addr * 1.gib()),
             VirtualAddress::new(PHYS_OFFSET_VALUE + addr * 1.gib()),
+            DIRTY | ACCESSED | READ | WRITE | VALID,
             PageSize::Gigapage,
-            DIRTY | ACCESSED | READ | WRITE,
         );
     }
+
+    // Need to leak the root page table here so it doesn't drop
+    let root_pt_phys = root_page_table.physical_address();
+    core::mem::forget(root_page_table);
+
+    let satp = Satp { mode: SATP_MODE, asid: 0, root_page_table: root_pt_phys };
+
+    BOOTSTRAP_SATP.store(satp.as_usize(), core::sync::atomic::Ordering::SeqCst);
 
     // This ***must*** go after all of the above initial paging code so that
     // addresses are identity mapped for page frame allocation
@@ -153,7 +167,6 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let kmain_virt = kernel_section_p2v(PhysicalAddress::from_ptr(crate::kmain as *const u8));
     crate::csr::stvec::set(core::mem::transmute(kmain_virt.as_usize()));
 
-    let satp = Satp { mode: SatpMode::Sv39, asid: 0, root_page_table: PhysicalAddress::from_ptr(&PAGE_TABLE_ROOT) };
     let fdt = crate::mem::phys2virt(PhysicalAddress::from_ptr(fdt)).as_ptr();
 
     #[rustfmt::skip]

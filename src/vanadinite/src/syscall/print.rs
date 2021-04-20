@@ -6,7 +6,10 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    csr::sstatus::TemporaryUserMemoryAccess, io::ConsoleDevice, mem::paging::VirtualAddress, scheduler::Scheduler,
+    csr::sstatus::TemporaryUserMemoryAccess,
+    io::ConsoleDevice,
+    mem::paging::{flags, VirtualAddress},
+    scheduler::Scheduler,
 };
 use libvanadinite::{syscalls::print::PrintErr, KResult};
 
@@ -14,14 +17,18 @@ pub fn print(virt: VirtualAddress, len: usize, res_out: VirtualAddress) {
     log::debug!("Attempting to print memory at {:#p} (len={})", virt, len);
     let (valid_memory, valid_res) = Scheduler::with_mut_self(|s| {
         let active = s.processes.front_mut().unwrap();
+        let flags_start = active.memory_manager.page_flags(virt);
+        let flags_end = active.memory_manager.page_flags(virt.offset(len));
+        let flags_res_out = active.memory_manager.page_flags(res_out);
 
         (
-            active.page_table.is_valid_readable(virt) && active.page_table.is_valid_readable(virt.offset(len)),
-            active.page_table.is_valid_writable(res_out),
+            flags_start.zip(flags_end).map(|(fs, fe)| fs & flags::READ && fe & flags::READ).unwrap_or_default(),
+            flags_res_out.map(|f| f & flags::WRITE).unwrap_or_default(),
         )
     });
 
     if !valid_res {
+        log::error!("Invalid memory for print, killing");
         Scheduler::mark_active_dead();
         return;
     }

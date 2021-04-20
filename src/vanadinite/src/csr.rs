@@ -133,8 +133,9 @@ pub mod sscratch {
 }
 
 pub mod satp {
-    use crate::mem::paging::{PhysicalAddress, PHYS_PPN_MASK};
+    use crate::mem::paging::PhysicalAddress;
 
+    #[derive(Debug, Clone, Copy)]
     pub struct Satp {
         pub mode: SatpMode,
         pub asid: u16,
@@ -153,7 +154,7 @@ pub mod satp {
         unsafe { asm!("csrr {}, satp", out(reg) value) };
 
         let asid = ((value >> 44) & 0xFFFF) as u16;
-        let root_page_table = PhysicalAddress::new((value & PHYS_PPN_MASK) << 12);
+        let root_page_table = PhysicalAddress::new(value << 12);
         let mode = match value >> 60 {
             0 => SatpMode::Bare,
             8 => SatpMode::Sv39,
@@ -170,10 +171,13 @@ pub mod satp {
         unsafe { asm!("csrw satp, {}", in(reg) value) };
     }
 
+    #[derive(Debug, Clone, Copy)]
     #[repr(usize)]
     pub enum SatpMode {
         Bare = 0,
         Sv39 = 8,
         Sv48 = 9,
+        Sv57 = 10,
+        Sv64 = 11,
     }
 }

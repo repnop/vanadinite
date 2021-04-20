@@ -9,6 +9,7 @@
 #![allow(incomplete_features)]
 #![feature(
     alloc_error_handler,
+    allocator_api,
     asm,
     const_fn_fn_ptr_basics,
     const_fn,
@@ -18,6 +19,7 @@
     inline_const,
     maybe_uninit_ref,
     naked_functions,
+    new_uninit,
     raw_ref_op,
     thread_local
 )]
@@ -179,7 +181,10 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             .find(|region| {
                 let start = region.starting_address as usize;
                 let end = region.starting_address as usize + region.size.unwrap();
-                let kstart_phys = mem::virt2phys(VirtualAddress::from_ptr(kernel_patching::kernel_start())).as_usize();
+                let kstart_phys = unsafe {
+                    let start = kernel_patching::kernel_start();
+                    kernel_section_v2p(VirtualAddress::from_ptr(start)).as_usize()
+                };
                 start <= kstart_phys && kstart_phys <= end
             })
             .unwrap();
@@ -214,6 +219,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     info!(blue, "=== Vanadinite Info ===");
     info!(" stvec_trap_shim: {:#p}", trap::stvec_trap_shim as *const u8);
     info!(" Heap region: {:#p}-{:#p}", heap_start, heap_start.offset(64 * 4.kib() - 1));
+    info!(" Paging scheme: {:?}", csr::satp::read().mode);
 
     if let Some(ic) = fdt.find_compatible(Plic::compatible_with()) {
         let reg = ic.reg().unwrap().next().unwrap();
@@ -391,19 +397,15 @@ unsafe extern "C" fn other_hart_boot() -> ! {
             add t0, t0, t1
             csrw stvec, t0
 
-            # Load root page table physical address
-            lla t0, {}
-            srli t0, t0, 12
-            li t1, 8
-            slli t1, t1, 60
-            or t0, t1, t0
-
+            # Load bootstrap `satp` value
+            ld t0, {}
             csrw satp, t0
             sfence.vma
             nop             # We fault here and fall into `kalt`
         ",
         sym kalt,
-        sym boot::early_paging::PAGE_TABLE_ROOT,
+        // FIXME: see if there's a better way to do this
+        sym boot::early_paging::BOOTSTRAP_SATP,
         options(noreturn),
     );
 }

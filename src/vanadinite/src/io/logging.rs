@@ -10,6 +10,7 @@ use alloc::{collections::BTreeMap, string::String};
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use log::LevelFilter;
 
+static HART_FILTER: AtomicUsize = AtomicUsize::new(usize::max_value());
 static LOG_FILTER: RwLock<Option<BTreeMap<String, Option<LevelFilter>>>> = RwLock::new(None);
 static LOG_LEVEL: AtomicUsize = AtomicUsize::new(LevelFilter::Info as usize);
 pub static USE_COLOR: AtomicBool = AtomicBool::new(true);
@@ -21,9 +22,24 @@ pub fn parse_log_filter(filter: Option<&str>) {
             let mut parts = part.split('=');
             let name = parts.next().unwrap();
 
-            if let Some(level) = level_from_str(name) {
-                set_max_level(level);
-                continue;
+            match name {
+                "ignore-harts" => match parts.next() {
+                    Some(list) => {
+                        let mut mask = 0;
+                        for n in list.split(',').filter_map(|n| n.parse::<usize>().ok()) {
+                            mask |= 1 << n;
+                        }
+
+                        HART_FILTER.fetch_xor(mask, Ordering::Relaxed);
+                    }
+                    None => log::warn!("Missing hart list for `ignore-harts`"),
+                },
+                _ => {
+                    if let Some(level) = level_from_str(name) {
+                        set_max_level(level);
+                        continue;
+                    }
+                }
             }
 
             let level = match parts.next() {
@@ -60,6 +76,12 @@ struct Logger;
 
 impl log::Log for Logger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
+        let hart_id = crate::HART_ID.get();
+
+        if HART_FILTER.load(Ordering::Relaxed) & (1 << hart_id) == 0 {
+            return false;
+        }
+
         let max_level = max_level();
 
         let mut mod_path = metadata.target();
