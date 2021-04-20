@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{SbiError, SbiResult};
+use crate::{ecall, SbiResult};
 
 /// Hart state management extension ID
 pub const EXTENSION_ID: usize = 0x48534D;
@@ -28,24 +28,7 @@ pub const EXTENSION_ID: usize = 0x48534D;
 ///
 /// `Failed`: Start request failed for unknown reasons
 pub fn hart_start(hart_id: usize, start_addr: usize, private: usize) -> SbiResult<()> {
-    let error: isize;
-
-    unsafe {
-        asm!(
-            "ecall",
-            in("a0") hart_id,
-            in("a1") start_addr,
-            in("a2") private,
-            inout("a6") 0 => _,
-            inout("a7") EXTENSION_ID => _,
-            lateout("a0") error,
-        );
-    }
-
-    match error {
-        0 => SbiResult::Ok(()),
-        e => SbiResult::Err(SbiError::new(e)),
-    }
+    unsafe { ecall([hart_id, start_addr, private, 0, 0, 0], EXTENSION_ID, 0).map(drop) }
 }
 
 /// This SBI call stops S-mode execution on the current hart and yields
@@ -56,20 +39,9 @@ pub fn hart_start(hart_id: usize, start_addr: usize, private: usize) -> SbiResul
 ///
 /// `Failed`: The request failed for an unknown reason
 pub fn hart_stop() -> SbiResult<!> {
-    let error: isize;
-
-    unsafe {
-        asm!(
-            "ecall",
-            inout("a6") 1 => _,
-            inout("a7") EXTENSION_ID => _,
-            lateout("a0") error,
-        );
-    }
-
-    match error {
-        0 => unreachable!("this should never occur on a success"),
-        e => SbiResult::Err(SbiError::new(e)),
+    match unsafe { ecall(Default::default(), EXTENSION_ID, 1) } {
+        Ok(_) => unreachable!("this should never occur on a success"),
+        Err(e) => Err(e),
     }
 }
 
@@ -79,24 +51,7 @@ pub fn hart_stop() -> SbiResult<!> {
 ///
 /// `InvalidParameter`: The specified hart ID is not valid
 pub fn hart_status(hart_id: usize) -> SbiResult<HartStatus> {
-    let value: usize;
-    let error: isize;
-
-    unsafe {
-        asm!(
-            "ecall",
-            in("a0") hart_id,
-            inout("a6") 2 => _,
-            inout("a7") EXTENSION_ID => _,
-            lateout("a0") error,
-            lateout("a1") value,
-        );
-    }
-
-    match error {
-        0 => SbiResult::Ok(HartStatus::from_usize(value)),
-        e => SbiResult::Err(SbiError::new(e)),
-    }
+    unsafe { ecall([hart_id, 0, 0, 0, 0, 0], EXTENSION_ID, 2).map(HartStatus::from_usize) }
 }
 
 /// Execution status for a hart

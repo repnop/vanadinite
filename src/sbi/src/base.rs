@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::ecall;
+
 /// Base extension ID
 pub const EXTENSION_ID: usize = 0x10;
 
@@ -19,17 +21,7 @@ pub struct SbiSpecVersion {
 
 /// Retrieve the SBI specification version
 pub fn spec_version() -> SbiSpecVersion {
-    let value: usize;
-
-    unsafe {
-        asm!(
-            "ecall",
-            inout("a6") 0 => _,
-            inout("a7") EXTENSION_ID => _,
-            out("a1") value,
-        );
-    }
-
+    let value = unsafe { ecall(Default::default(), EXTENSION_ID, 0).unwrap() };
     SbiSpecVersion { major: (value >> 24) & 0x7f, minor: value & 0xff_ffff }
 }
 
@@ -81,32 +73,13 @@ impl SbiImplId {
 
 /// Retrieve the SBI implementation ID
 pub fn impl_id() -> SbiImplId {
-    let value: usize;
-    unsafe {
-        asm!(
-            "ecall",
-            inout("a6") 1 => _,
-            inout("a7") EXTENSION_ID => _,
-            out("a1") value,
-        );
-    }
-
+    let value = unsafe { ecall(Default::default(), EXTENSION_ID, 1).unwrap() };
     SbiImplId::from_usize(value)
 }
 
 /// Retrieve the SBI implementation's version
 pub fn impl_version() -> usize {
-    let value: usize;
-    unsafe {
-        asm!(
-            "ecall",
-            inout("a6") 2 => _,
-            inout("a7") EXTENSION_ID => _,
-            out("a1") value,
-        );
-    }
-
-    value
+    unsafe { ecall(Default::default(), EXTENSION_ID, 2).unwrap() }
 }
 
 /// Extension availability information returned by `probe_extension`
@@ -131,16 +104,7 @@ impl ExtensionAvailability {
 
 /// Probe the availability of the extension ID `id`
 pub fn probe_extension(id: usize) -> ExtensionAvailability {
-    let value: usize;
-    unsafe {
-        asm!(
-            "ecall",
-            in("a0") id,
-            inout("a6") 3 => _,
-            inout("a7") EXTENSION_ID => _,
-            lateout("a1") value,
-        );
-    }
+    let value = unsafe { ecall([id, 0, 0, 0, 0, 0], EXTENSION_ID, 3).unwrap() };
 
     match value {
         0 => ExtensionAvailability::Unavailable,
@@ -150,45 +114,15 @@ pub fn probe_extension(id: usize) -> ExtensionAvailability {
 
 /// Retrieve the value of `mvendorid` CSR
 pub fn mvendorid() -> usize {
-    let value: usize;
-    unsafe {
-        asm!(
-            "ecall",
-            inout("a6") 4 => _,
-            inout("a7") EXTENSION_ID => _,
-            out("a1") value,
-        );
-    }
-
-    value
+    unsafe { ecall(Default::default(), EXTENSION_ID, 4).unwrap() }
 }
 
 /// Retrieve the value of the `marchid` CSR
 pub fn marchid() -> usize {
-    let value: usize;
-    unsafe {
-        asm!(
-            "ecall",
-            inout("a6") 5 => _,
-            inout("a7") EXTENSION_ID => _,
-            out("a1") value,
-        );
-    }
-
-    value
+    unsafe { ecall(Default::default(), EXTENSION_ID, 5).unwrap() }
 }
 
 /// Retrieve the value of the `mimpid` CSR
 pub fn mimpid() -> usize {
-    let value: usize;
-    unsafe {
-        asm!(
-            "ecall",
-            inout("a6") 6 => _,
-            inout("a7") EXTENSION_ID => _,
-            out("a1") value,
-        );
-    }
-
-    value
+    unsafe { ecall(Default::default(), EXTENSION_ID, 6).unwrap() }
 }

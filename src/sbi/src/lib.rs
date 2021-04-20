@@ -54,6 +54,7 @@ pub enum SbiError {
 }
 
 impl SbiError {
+    #[inline]
     fn new(n: isize) -> Self {
         match n {
             -1 => SbiError::Failed,
@@ -69,3 +70,30 @@ impl SbiError {
 
 /// The result of an SBI call
 pub type SbiResult<T> = Result<T, SbiError>;
+
+/// # Safety
+/// This provides a
+#[inline]
+pub unsafe fn ecall(arguments: [usize; 6], extension_id: usize, function_id: usize) -> SbiResult<usize> {
+    let error: isize;
+    let value: usize;
+
+    asm!(
+        "ecall",
+        in("a0") arguments[0],
+        in("a1") arguments[1],
+        inout("a2") arguments[2] => _,
+        inout("a3") arguments[3] => _,
+        inout("a4") arguments[4] => _,
+        inout("a5") arguments[5] => _,
+        inout("a6") function_id => _,
+        inout("a7") extension_id => _,
+        lateout("a0") error,
+        lateout("a1") value,
+    );
+
+    match error {
+        0 => SbiResult::Ok(value),
+        e => SbiResult::Err(SbiError::new(e)),
+    }
+}
