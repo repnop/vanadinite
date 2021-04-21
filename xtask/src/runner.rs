@@ -93,9 +93,10 @@ pub fn run(options: RunOptions) -> Result<()> {
                     String::from("-d"),
                     String::from("guest_errors,trace:riscv_trap,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int"),
                     String::from("-D"),
-                    format!("{}", path.display())
+                    format!("{}", path.display()),
+                    String::from("-monitor"), String::from("stdio")
                 ],
-                None => vec![String::new()],
+                None => vec![String::from("-serial"), String::from("mon:stdio"), String::from("-nographic")],
             };
 
             cmd!("
@@ -108,8 +109,6 @@ pub fn run(options: RunOptions) -> Result<()> {
                     {enable_virtio_block_device...}
                     -bios opensbi-riscv64-generic-fw_jump.bin 
                     -kernel src/target/riscv64gc-unknown-none-elf/release/vanadinite
-                    -serial mon:stdio
-                    -nographic
                     {debug_log...}
             ").run()?;
         }
