@@ -6,40 +6,38 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{mem::phys::PhysicalMemoryAllocator, Units};
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::cell::Cell;
 
 #[macro_export]
 macro_rules! cpu_local {
     ($($v:vis static $name:ident: $ty:ty = $val:expr;)+) => {
         $(
             #[thread_local]
-            // FIXME: temporarily assert that alignment is 8 or lower, until we have a better heap allocator
             $v static $name: crate::cpu_local::CpuLocal<$ty> = unsafe { crate::cpu_local::CpuLocal::new(|| $val) };
         )+
     };
 }
 
-pub struct CpuLocal<T: Send + 'static>(AtomicBool, core::cell::UnsafeCell<core::mem::MaybeUninit<T>>, fn() -> T);
+pub struct CpuLocal<T: Send + 'static>(Cell<bool>, core::cell::UnsafeCell<core::mem::MaybeUninit<T>>, fn() -> T);
 
 impl<T: Send + 'static> CpuLocal<T> {
     #[doc(hidden)]
     pub const unsafe fn new(init: fn() -> T) -> Self {
-        Self(AtomicBool::new(false), core::cell::UnsafeCell::new(core::mem::MaybeUninit::uninit()), init)
+        Self(Cell::new(false), core::cell::UnsafeCell::new(core::mem::MaybeUninit::uninit()), init)
     }
 
     pub fn with<R, F: FnOnce(&T) -> R>(&'static self, f: F) -> R {
         f(self.init_if_needed())
     }
 
-    // FIXME: use 3 states
     fn init_if_needed(&self) -> &T {
-        let state = self.0.load(Ordering::Acquire);
+        let state = self.0.get();
 
         match state {
             true => unsafe { (&*self.1.get()).assume_init_ref() },
             false => {
-                assert!(self.0.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok());
                 unsafe { self.1.get().write(core::mem::MaybeUninit::new((self.2)())) };
+                self.0.set(true);
                 unsafe { (&*self.1.get()).assume_init_ref() }
             }
         }
