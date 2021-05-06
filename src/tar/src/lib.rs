@@ -140,7 +140,7 @@ fn from_utf8(bytes: &[u8]) -> Option<&str> {
 
 fn from_octal_str(bytes: &[u8]) -> Option<usize> {
     let nul = bytes.iter().copied().position(|b| b == b'\0').unwrap_or(bytes.len());
-    Some(usize::from_str_radix(from_utf8(&bytes[..nul])?, 8).ok()?)
+    usize::from_str_radix(from_utf8(&bytes[..nul])?, 8).ok()
 }
 
 #[derive(Debug, Clone, Copy)]

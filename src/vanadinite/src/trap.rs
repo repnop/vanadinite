@@ -8,8 +8,9 @@
 use crate::{
     interrupts::{isr::isr_entry, PLIC},
     mem::paging::{flags, VirtualAddress},
-    scheduler::Scheduler,
+    scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
     syscall,
+    task::{Context, TaskState},
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -180,37 +181,56 @@ impl Trap {
 #[no_mangle]
 pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize, stval: usize) -> usize {
     log::trace!("we trappin' on hart {}: {:x?}", crate::HART_ID.get(), regs);
-    log::trace!("TCB: {:?}", unsafe { &*crate::process::THREAD_CONTROL_BLOCK.get() });
     log::debug!("scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
 
     let trap_kind = Trap::from_cause(scause);
     match trap_kind {
         Trap::SupervisorTimerInterrupt => {
-            Scheduler::update_active_registers(*regs, sepc);
-            Scheduler::schedule();
+            if CURRENT_TASK.get().is_some() {
+                TASKS.active_on_cpu().unwrap().lock().context =
+                    Context { pc: sepc as usize, gp_regs: regs.registers, fp_regs: regs.fp_registers };
+            }
+
+            SCHEDULER.schedule()
         }
         Trap::UserModeEnvironmentCall => {
+            let active_task_lock = TASKS.active_on_cpu().unwrap();
+            let mut active_task = active_task_lock.lock();
+
             match regs.registers.a0 {
-                0 => syscall::exit::exit(),
+                0 => syscall::exit::exit(&mut *active_task),
                 1 => syscall::print::print(
+                    &mut *active_task,
                     VirtualAddress::new(regs.registers.a1),
                     regs.registers.a2,
                     VirtualAddress::new(regs.registers.a3),
                 ),
-                2 => syscall::read_stdin::read_stdin(VirtualAddress::new(regs.registers.a1), regs.registers.a2, regs),
+                2 => syscall::read_stdin::read_stdin(
+                    &mut *active_task,
+                    VirtualAddress::new(regs.registers.a1),
+                    regs.registers.a2,
+                    regs,
+                ),
                 n => {
                     log::error!("Unknown syscall number: {}", n);
-                    Scheduler::mark_active_dead();
+                    active_task.state = TaskState::Dead;
                 }
             }
 
-            Scheduler::update_active_registers(*regs, sepc + 4);
-            Scheduler::schedule();
+            active_task.context =
+                Context { pc: sepc as usize + 4, gp_regs: regs.registers, fp_regs: regs.fp_registers };
+
+            drop(active_task);
+            drop(active_task_lock);
+
+            SCHEDULER.schedule()
         }
         Trap::SupervisorExternalInterrupt => {
             // FIXME: there has to be a better way
             if let Some(plic) = &*PLIC.lock() {
                 if let Some(claimed) = plic.claim(crate::platform::current_plic_context()) {
+                    log::debug!("External interrupt for: {:?}", claimed);
+
                     if let Some((callback, private)) = isr_entry(claimed.interrupt_id()) {
                         if let Err(e) = callback(claimed.interrupt_id(), private) {
                             log::error!("Error during ISR: {}", e);
@@ -227,26 +247,30 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                 // We should always have marked memory regions up front from the initial mapping
                 true => panic!("[KERNEL BUG] {:?}: Region not marked as A/D for kernel region?", trap_kind),
                 false => {
-                    let valid = Scheduler::with_mut_self(|s| {
-                        let memory_manager = &mut s.processes.front_mut().unwrap().memory_manager;
+                    let active_task_lock = TASKS.active_on_cpu().unwrap();
+                    let mut active_task = active_task_lock.lock();
+                    let memory_manager = &mut active_task.memory_manager;
 
-                        match trap_kind {
-                            Trap::LoadPageFault | Trap::InstructionPageFault => {
-                                memory_manager.modify_page_flags(stval, |f| f | flags::ACCESSED)
-                            }
-                            Trap::StorePageFault => {
-                                memory_manager.modify_page_flags(stval, |f| f | flags::ACCESSED | flags::DIRTY)
-                            }
-                            _ => unreachable!(),
+                    let valid = match trap_kind {
+                        Trap::LoadPageFault | Trap::InstructionPageFault => {
+                            memory_manager.modify_page_flags(stval, |f| f | flags::ACCESSED)
                         }
-                    });
+                        Trap::StorePageFault => {
+                            memory_manager.modify_page_flags(stval, |f| f | flags::ACCESSED | flags::DIRTY)
+                        }
+                        _ => unreachable!(),
+                    };
 
                     match valid {
                         true => crate::mem::sfence(Some(stval), None),
                         false => {
-                            log::error!("Process died to a {:?}", trap_kind);
-                            Scheduler::mark_active_dead();
-                            Scheduler::schedule();
+                            log::error!("Process died to a {:?} @ {:#p}", trap_kind, VirtualAddress::new(sepc));
+                            active_task.state = TaskState::Dead;
+
+                            drop(active_task);
+                            drop(active_task_lock);
+
+                            SCHEDULER.schedule()
                         }
                     }
                 }
@@ -364,7 +388,6 @@ pub unsafe extern "C" fn stvec_trap_shim() -> ! {
         sd t0, 504(sp)
 
         mv a0, sp
-
         csrr a1, sepc
         csrr a2, scause
         csrr a3, stval

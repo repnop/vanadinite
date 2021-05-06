@@ -22,7 +22,7 @@ unsafe extern "C" fn _start() {
         .option pop
     ");
 
-    main(0, 0 as *const *const u8);
+    main(0, core::ptr::null::<*const u8>());
 
     #[rustfmt::skip]
     asm!("

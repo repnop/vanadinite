@@ -10,7 +10,6 @@ elf64 = { path = "../elf64" }
 fdt = { git = "https://github.com/repnop/fdt", branch = "master" }
 libvanadinite = { path = "../libvanadinite" }
 log = "0.4.11"
-lock_api = "0.4.1"
 sbi = { path = "../sbi" }
 tar = { path = "../tar" }
 vanadinite_macros = { path = "../vanadinite_macros" }

@@ -8,7 +8,7 @@
 use crate::{
     drivers::{generic::uart16550::Uart16550, sifive::fu540_c000::uart::SifiveUart, CompatibleWith},
     interrupts::isr::register_isr,
-    sync::Mutex,
+    sync::SpinMutex,
 };
 
 pub trait ConsoleDevice: 'static {
@@ -66,7 +66,7 @@ impl ConsoleDevice for StaticConsoleDevice {
 unsafe impl Send for StaticConsoleDevice {}
 unsafe impl Sync for StaticConsoleDevice {}
 
-pub static CONSOLE: Mutex<StaticConsoleDevice> = Mutex::new(StaticConsoleDevice(None));
+pub static CONSOLE: SpinMutex<StaticConsoleDevice> = SpinMutex::new(StaticConsoleDevice(None));
 
 /// # Safety
 ///

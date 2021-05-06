@@ -10,9 +10,12 @@
 #![feature(
     alloc_error_handler,
     allocator_api,
+    arbitrary_self_types,
     asm,
+    const_btree_new,
     const_fn_fn_ptr_basics,
     const_fn,
+    const_fn_trait_bound,
     const_generics,
     extern_types,
     fn_align,
@@ -40,9 +43,9 @@ pub mod interrupts;
 pub mod io;
 pub mod mem;
 pub mod platform;
-pub mod process;
 pub mod scheduler;
 pub mod sync;
+pub mod task;
 pub mod trap;
 pub mod utils;
 
@@ -62,7 +65,7 @@ use {
         phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
         phys2virt,
     },
-    sync::Mutex,
+    sync::SpinMutex,
     utils::Units,
 };
 
@@ -71,11 +74,13 @@ use drivers::InterruptServicable;
 use fdt::Fdt;
 use mem::kernel_patching::kernel_section_v2p;
 use sbi::{hart_state_management::hart_start, probe_extension, ExtensionAvailability};
+use scheduler::Scheduler;
 pub use vanadinite_macros::{debug, error, info, trace, warn};
 
+static N_CPUS: AtomicUsize = AtomicUsize::new(1);
 static TIMER_FREQ: AtomicUsize = AtomicUsize::new(0);
 static INIT_FS: &[u8] = include_bytes!("../../../initfs.tar");
-static BLOCK_DEV: Mutex<Option<drivers::virtio::block::BlockDevice>> = Mutex::new(None);
+static BLOCK_DEV: SpinMutex<Option<drivers::virtio::block::BlockDevice>> = SpinMutex::new(None);
 
 cpu_local! {
     static HART_ID: core::cell::Cell<usize> = core::cell::Cell::new(0);
@@ -205,6 +210,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     };
 
     let n_cpus = fdt.cpus().count();
+    N_CPUS.store(n_cpus, Ordering::Release);
 
     info!("vanadinite version {#brightgreen}", env!("CARGO_PKG_VERSION"));
     info!(blue, "=== Machine Info ===");
@@ -286,27 +292,25 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
-    unsafe {
-        *process::THREAD_CONTROL_BLOCK.get() = process::ThreadControlBlock {
-            kernel_stack: mem::alloc_kernel_stack(8.kib()),
-            kernel_thread_local: cpu_local::tp(),
-            saved_sp: 0,
-            saved_tp: 0,
-            kernel_stack_size: 8.kib(),
-            current_process: None,
-        };
+    let ptr = Box::leak(Box::new(task::ThreadControlBlock {
+        kernel_stack: mem::alloc_kernel_stack(8.kib()),
+        kernel_thread_local: cpu_local::tp(),
+        saved_sp: 0,
+        saved_tp: 0,
+        kernel_stack_size: 8.kib(),
+    }));
 
-        csr::sscratch::write(process::THREAD_CONTROL_BLOCK.get() as usize);
-    }
+    csr::sscratch::write(ptr as *mut _ as usize);
 
     csr::sstatus::set_fs(csr::sstatus::FloatingPointStatus::Initial);
     csr::sie::enable();
 
     let tar = tar::Archive::new(INIT_FS).unwrap();
 
-    scheduler::Scheduler::push(process::Process::load(
-        &elf64::Elf::new(tar.file(init_path).unwrap().contents).unwrap(),
-    ));
+    //scheduler::init_scheduler(Box::new(scheduler::round_robin::RoundRobinScheduler::new()));
+
+    scheduler::SCHEDULER
+        .enqueue(task::Task::load(init_path, &elf64::Elf::new(tar.file(init_path).unwrap().contents).unwrap()));
 
     let other_hart_boot_phys = unsafe { kernel_section_v2p(VirtualAddress::from_ptr(other_hart_boot as *const u8)) };
 
@@ -320,7 +324,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     }
 
     info!(brightgreen, "Scheduling init process!");
-    scheduler::Scheduler::schedule()
+    scheduler::SCHEDULER.schedule();
 }
 
 #[no_mangle]
@@ -337,26 +341,25 @@ extern "C" fn kalt(hart_id: usize) -> ! {
         plic.set_context_threshold(platform::current_plic_context(), 0);
     }
 
-    unsafe {
-        *process::THREAD_CONTROL_BLOCK.get() = process::ThreadControlBlock {
-            kernel_stack: mem::alloc_kernel_stack(8.kib()),
-            kernel_thread_local: cpu_local::tp(),
-            saved_sp: 0,
-            saved_tp: 0,
-            kernel_stack_size: 8.kib(),
-            current_process: None,
-        };
+    let ptr = Box::leak(Box::new(task::ThreadControlBlock {
+        kernel_stack: mem::alloc_kernel_stack(8.kib()),
+        kernel_thread_local: cpu_local::tp(),
+        saved_sp: 0,
+        saved_tp: 0,
+        kernel_stack_size: 8.kib(),
+    }));
 
-        csr::sscratch::write(process::THREAD_CONTROL_BLOCK.get() as usize);
-    }
-
+    csr::sscratch::write(ptr as *mut _ as usize);
     csr::sstatus::set_fs(csr::sstatus::FloatingPointStatus::Initial);
     csr::sie::enable();
 
     let tar = tar::Archive::new(INIT_FS).unwrap();
 
-    scheduler::Scheduler::push(process::Process::load(&elf64::Elf::new(tar.file("hax").unwrap().contents).unwrap()));
-    scheduler::Scheduler::schedule()
+    scheduler::SCHEDULER.enqueue(task::Task::load(
+        &alloc::format!("init{}", hart_id),
+        &elf64::Elf::new(tar.file("init").unwrap().contents).unwrap(),
+    ));
+    scheduler::SCHEDULER.schedule();
 }
 
 #[naked]

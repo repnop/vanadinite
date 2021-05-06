@@ -9,27 +9,30 @@ use crate::{
     csr::sstatus::TemporaryUserMemoryAccess,
     io::ConsoleDevice,
     mem::paging::{flags, VirtualAddress},
-    scheduler::Scheduler,
+    task::Task,
+    task::TaskState,
 };
 use libvanadinite::{syscalls::print::PrintErr, KResult};
 
-pub fn print(virt: VirtualAddress, len: usize, res_out: VirtualAddress) {
+pub fn print(current_task: &mut Task, virt: VirtualAddress, len: usize, res_out: VirtualAddress) {
     log::debug!("Attempting to print memory at {:#p} (len={})", virt, len);
-    let (valid_memory, valid_res) = Scheduler::with_mut_self(|s| {
-        let active = s.processes.front_mut().unwrap();
-        let flags_start = active.memory_manager.page_flags(virt);
-        let flags_end = active.memory_manager.page_flags(virt.offset(len));
-        let flags_res_out = active.memory_manager.page_flags(res_out);
+
+    let (valid_memory, valid_res) = {
+        let mm = &current_task.memory_manager;
+
+        let flags_start = mm.page_flags(virt);
+        let flags_end = mm.page_flags(virt.offset(len));
+        let flags_res_out = mm.page_flags(res_out);
 
         (
             flags_start.zip(flags_end).map(|(fs, fe)| fs & flags::READ && fe & flags::READ).unwrap_or_default(),
             flags_res_out.map(|f| f & flags::WRITE).unwrap_or_default(),
         )
-    });
+    };
 
     if !valid_res {
         log::error!("Invalid memory for print, killing");
-        Scheduler::mark_active_dead();
+        current_task.state = TaskState::Dead;
         return;
     }
 

@@ -9,27 +9,29 @@ use crate::{
     csr::sstatus::TemporaryUserMemoryAccess,
     io::INPUT_QUEUE,
     mem::paging::{flags, VirtualAddress},
-    scheduler::Scheduler,
+    task::{Task, TaskState},
     trap::TrapFrame,
 };
 
-pub fn read_stdin(virt: VirtualAddress, len: usize, regs: &mut TrapFrame) {
+pub fn read_stdin(active_task: &mut Task, virt: VirtualAddress, len: usize, regs: &mut TrapFrame) {
     log::debug!("Attempting to write to memory at {:#p} (len={})", virt, len);
-    let valid_memory = Scheduler::with_mut_self(|s| {
-        let active = s.processes.front_mut().unwrap();
-        let flags_start = active.memory_manager.page_flags(virt);
-        let flags_end = active.memory_manager.page_flags(virt.offset(len));
 
-        flags_start.zip(flags_end).map(|(fs, fe)| fs & flags::READ && fe & flags::READ).unwrap_or_default()
-    });
+    let valid_memory = {
+        let mm = &active_task.memory_manager;
+
+        let flags_start = mm.page_flags(virt);
+        let flags_end = mm.page_flags(virt.offset(len));
+
+        flags_start.zip(flags_end).map(|(fs, fe)| fs & flags::WRITE && fe & flags::WRITE).unwrap_or_default()
+    };
 
     if virt.is_kernel_region() {
         log::error!("Process tried to get us to write to our own memory >:(");
-        Scheduler::mark_active_dead();
+        active_task.state = TaskState::Dead;
         return;
     } else if !valid_memory {
         log::error!("Process tried to get us to write to unmapped memory >:(");
-        Scheduler::mark_active_dead();
+        active_task.state = TaskState::Dead;
         return;
     }
 

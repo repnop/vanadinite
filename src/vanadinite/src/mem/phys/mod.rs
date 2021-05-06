@@ -7,11 +7,11 @@
 
 pub mod bitmap;
 
-use crate::{mem::paging::PhysicalAddress, sync::Mutex};
+use crate::{mem::paging::PhysicalAddress, sync::SpinMutex};
 use bitmap::BitmapAllocator;
 
 #[cfg(any(not(any(feature = "pmalloc.allocator.buddy")), feature = "pmalloc.allocator.bitmap"))]
-pub static PHYSICAL_MEMORY_ALLOCATOR: Mutex<BitmapAllocator> = Mutex::new(BitmapAllocator::new());
+pub static PHYSICAL_MEMORY_ALLOCATOR: SpinMutex<BitmapAllocator> = SpinMutex::new(BitmapAllocator::new());
 
 pub unsafe trait PhysicalMemoryAllocator {
     /// # Safety
@@ -62,16 +62,16 @@ pub unsafe trait PhysicalMemoryAllocator {
 
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
-pub struct PhysicalPage(*mut u8);
+pub struct PhysicalPage(PhysicalAddress);
 
 impl PhysicalPage {
     pub fn from_ptr(ptr: *mut u8) -> Self {
         assert_eq!(ptr as usize % 4096, 0, "unaligned physical page creation");
-        Self(ptr)
+        Self(PhysicalAddress::from_ptr(ptr))
     }
 
     pub fn as_phys_address(self) -> PhysicalAddress {
-        PhysicalAddress::from_ptr(self.0)
+        self.0
     }
 }
 

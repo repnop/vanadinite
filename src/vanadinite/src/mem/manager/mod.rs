@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+mod address_map;
+
 use crate::{
     mem::{
         paging::{flags::Flags, PageSize, PageTable, PageTableDebug, PhysicalAddress, VirtualAddress},
@@ -13,18 +15,18 @@ use crate::{
     },
     utils::Units,
 };
-use alloc::collections::BTreeMap;
+use address_map::AddressMap;
 
 #[derive(Debug)]
 pub struct MemoryManager {
     table: PageTable,
-    regions: BTreeMap<VirtualAddress, PhysicalRegion>,
+    address_map: AddressMap,
 }
 
 impl MemoryManager {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Self { table: PageTable::new(), regions: BTreeMap::new() }
+        Self { table: PageTable::new(), address_map: AddressMap::new(VirtualAddress::userspace_range()) }
     }
 
     pub fn alloc_region(&mut self, at: VirtualAddress, n_pages: usize, flags: Flags, fill_with: Option<&[u8]>) {
@@ -39,7 +41,9 @@ impl MemoryManager {
             sfence(Some(virt_addr), None);
         }
 
-        self.regions.insert(at, PhysicalRegion::Unique(backing));
+        self.address_map
+            .alloc(at..at.offset(4.kib() * n_pages), PhysicalRegion::Unique(backing))
+            .expect("bad address mapping");
     }
 
     pub fn alloc_shared_region(&mut self, at: VirtualAddress, n_pages: usize, flags: Flags, fill_with: Option<&[u8]>) {
@@ -54,11 +58,17 @@ impl MemoryManager {
             sfence(Some(virt_addr), None);
         }
 
-        self.regions.insert(at, PhysicalRegion::Shared(backing.into_shared_region()));
+        self.address_map
+            .alloc(at..at.offset(4.kib() * n_pages), PhysicalRegion::Shared(backing.into_shared_region()))
+            .unwrap();
     }
 
     pub fn dealloc_region(&mut self, at: VirtualAddress) {
-        let region = self.regions.remove(&at).expect("tried deallocing an unmapped region");
+        let region = self.address_map.find(at).expect("kernel address passed in");
+        assert!(region.region.is_some(), "trying to dealloc an unallocated region");
+
+        let span = region.span.clone();
+        let region = self.address_map.free(span).expect("tried deallocing an unmapped region");
 
         let iter = (0..region.page_count()).map(|i| at.offset(i * 4.kib()));
         for virt_addr in iter {
@@ -105,6 +115,9 @@ impl MemoryManager {
     //    PageTableDebugPrint(self.0)
     //}
 }
+
+unsafe impl Send for PageTable {}
+unsafe impl Sync for PageTable {}
 
 //pub struct PageTableDebugPrint(*mut Sv39PageTable);
 //

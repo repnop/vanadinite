@@ -7,9 +7,9 @@
 
 pub mod isr;
 
-use crate::{drivers::generic::plic, sync::Mutex};
+use crate::{drivers::generic::plic, sync::SpinMutex};
 
-pub static PLIC: Mutex<Option<&'static plic::Plic>> = Mutex::new(None);
+pub static PLIC: SpinMutex<Option<&'static plic::Plic>> = SpinMutex::new(None);
 
 pub fn register_plic(plic: &'static plic::Plic) {
     *PLIC.lock() = Some(plic);
@@ -18,7 +18,7 @@ pub fn register_plic(plic: &'static plic::Plic) {
 pub struct InterruptDisabler(bool);
 
 impl InterruptDisabler {
-    #[allow(clippy::clippy::new_without_default)]
+    #[allow(clippy::new_without_default)]
     #[inline(always)]
     pub fn new() -> Self {
         let reenable = match crate::csr::sstatus::read() & 2 == 2 {

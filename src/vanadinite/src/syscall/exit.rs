@@ -5,9 +5,9 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::scheduler::Scheduler;
+use crate::task::{Task, TaskState};
 
-pub fn exit() {
-    log::info!("Killing active process (pid: {})", Scheduler::active_pid());
-    Scheduler::mark_active_dead();
+pub fn exit(active_task: &mut Task) {
+    log::info!("Killing active process");
+    active_task.state = TaskState::Dead;
 }

@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use core::ops::Range;
+
 use crate::{mem::paging::table::flags::*, utils::Units};
 
 // Default to Sv39
@@ -162,14 +164,14 @@ impl VirtualAddress {
         let mut addr = 0;
         let mut shift = 12;
 
-        for vpn in core::array::IntoIter::new(vpns).rev() {
+        for vpn in core::array::IntoIter::new(vpns) {
             addr |= vpn << shift;
             shift += 9;
         }
 
-        let top_most_bit = 1 << (12 + N_VPN * 9);
+        let top_most_bit = 1 << (12 + N_VPN * 9 - 1);
         if addr & top_most_bit == top_most_bit {
-            addr |= usize::max_value() << (12 + N_VPN * 9);
+            addr |= usize::max_value() << (12 + N_VPN * 9 - 1);
         }
 
         VirtualAddress(addr)
@@ -177,6 +179,10 @@ impl VirtualAddress {
 
     pub fn is_kernel_region(self) -> bool {
         (self.0 as isize).is_negative()
+    }
+
+    pub fn userspace_range() -> Range<VirtualAddress> {
+        VirtualAddress::new(0)..VirtualAddress::new(1 << (12 + N_VPN * 9 - 1))
     }
 }
 

@@ -5,13 +5,13 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::sync::RwLock;
+use crate::sync::SpinRwLock;
 use alloc::{collections::BTreeMap, string::String};
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use log::LevelFilter;
 
 static HART_FILTER: AtomicUsize = AtomicUsize::new(usize::max_value());
-static LOG_FILTER: RwLock<Option<BTreeMap<String, Option<LevelFilter>>>> = RwLock::new(None);
+static LOG_FILTER: SpinRwLock<Option<BTreeMap<String, Option<LevelFilter>>>> = SpinRwLock::new(None);
 static LOG_LEVEL: AtomicUsize = AtomicUsize::new(LevelFilter::Info as usize);
 pub static USE_COLOR: AtomicBool = AtomicBool::new(true);
 

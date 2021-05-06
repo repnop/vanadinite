@@ -176,7 +176,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             mv sp, {new_sp}
             mv gp, {new_gp}
 
-            csrs sstatus, {mxr}
+            csrc sstatus, {mxr}
 
             # Load new `satp` value
             csrw satp, {satp}

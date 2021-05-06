@@ -67,7 +67,7 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
             if page_ptr <= self.mem_end {
                 *entry |= 1 << bit_index;
                 log::debug!("Allocated page at: {:#p}", page_ptr);
-                return Some(PhysicalPage(page_ptr));
+                return Some(PhysicalPage::from_ptr(page_ptr));
             }
         }
 
@@ -89,7 +89,7 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
                     return None;
                 }
 
-                return Some(PhysicalPage(page_ptr));
+                return Some(PhysicalPage::from_ptr(page_ptr));
             }
 
             let mut bit_index = None;
@@ -115,7 +115,7 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
                 return None;
             }
 
-            let page = Some(PhysicalPage(page_ptr));
+            let page = Some(PhysicalPage::from_ptr(page_ptr));
             *entry |= (!mask).rotate_left(bit_index as u32);
 
             return page;

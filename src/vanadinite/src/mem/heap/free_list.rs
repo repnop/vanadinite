@@ -5,16 +5,16 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::sync::Mutex;
+use crate::sync::SpinMutex;
 use core::ptr::NonNull;
 
 pub struct FreeListAllocator {
-    inner: Mutex<FreeList>,
+    inner: SpinMutex<FreeList>,
 }
 
 impl FreeListAllocator {
     pub const fn new() -> Self {
-        Self { inner: Mutex::new(FreeList { head: None }) }
+        Self { inner: SpinMutex::new(FreeList { head: None }) }
     }
 
     /// # Safety
@@ -116,6 +116,8 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
 struct FreeList {
     head: Option<NonNull<FreeListNode>>,
 }
+
+unsafe impl Send for FreeList {}
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
