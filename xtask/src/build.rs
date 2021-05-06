@@ -130,7 +130,7 @@ pub fn build(target: BuildTarget) -> Result<()> {
             cmd!("git submodule update --remote submodules/opensbi").run()?;
             let _dir = pushd("./submodules/opensbi")?;
 
-            cmd!("make PLATFORM=generic FW_PAYLOAD_PATH=../../src/target/riscv64gc-unknown-none-elf/release/vanadinite.bin").run()?;
+            cmd!("make PLATFORM=generic FW_PIC=no FW_PAYLOAD_PATH=../../src/target/riscv64gc-unknown-none-elf/release/vanadinite.bin").run()?;
 
             cp("build/platform/generic/firmware/fw_jump.bin", "../../opensbi-riscv64-generic-fw_jump.bin")?;
             cp("build/platform/generic/firmware/fw_jump.elf", "../../opensbi-riscv64-generic-fw_jump.elf")?;
