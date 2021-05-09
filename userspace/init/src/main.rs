@@ -9,6 +9,10 @@
 
 fn main() {
     loop {
-        unsafe { asm!("nop") };
+        let msg = receive_message();
+
+        if let Ok(Some(msg)) = msg {
+            println!("\n[INIT] We received a message: {:?}", msg);
+        }
     }
 }

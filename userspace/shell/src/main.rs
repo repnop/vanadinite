@@ -1,3 +1,9 @@
+use core::num::NonZeroUsize;
+use std::librust::{
+    message::{Message, MessageKind, Sender},
+    task::Tid,
+};
+
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2021 The vanadinite developers
 //
@@ -17,11 +23,45 @@ fn main() {
             }
         };
 
-        match cmd.split(' ').next().unwrap() {
-            "echo" => println!("{}", cmd.split_once(' ').map(|(_, s)| s).unwrap_or_default()),
+        let mut args = cmd.split(' ');
+        let cmd = args.next().unwrap();
+        let arg_str = args.next().unwrap_or_default();
+
+        match cmd {
+            "echo" => println!("{}", arg_str),
             "yeet" => {
-                drop(std::syscalls::print(unsafe { core::slice::from_raw_parts(0xffffffc000000000 as *mut u8, 1024) }))
+                println!("Asking the kernel to print some of its memory!");
+                let kresult =
+                    std::syscalls::print(unsafe { core::slice::from_raw_parts(0xffffffc000000000 as *mut u8, 1024) });
+                println!("Kernel responded with: {:?}", kresult);
             }
+            "send" => match arg_str.trim().parse::<usize>() {
+                Ok(0) | Err(_) => {
+                    println!("Need valid TID :(")
+                }
+                Ok(tidn) => {
+                    let tid = Tid::new(NonZeroUsize::new(tidn).unwrap());
+                    let ret = send_message(
+                        tid,
+                        Message {
+                            sender: Sender::dummy(),
+                            kind: MessageKind::Request(Some(NonZeroUsize::new(1).unwrap())),
+                            fid: 0,
+                            arguments: [0; 8],
+                        },
+                    );
+
+                    match ret {
+                        Ok(_) => println!("Message sent to TID {}!", tidn),
+                        Err(e) => println!("Couldn't send message: {:?}", e),
+                    }
+                }
+            },
+            "read" => match receive_message() {
+                Ok(Some(msg)) => println!("We had a message! {:?}", msg),
+                Ok(None) => println!("No messages :("),
+                Err(e) => println!("Error receiving message: {:?}", e),
+            },
             "" => {}
             _ => println!("Unrecognized command :("),
         }
@@ -34,7 +74,7 @@ fn read_line(buf: &mut [u8]) -> Option<&str> {
 
     while read < max_len {
         let mut c = [0u8];
-        while let 0 = read_stdin(&mut c[..]) {}
+        while let Ok(0) = read_stdin(&mut c[..]) {}
 
         match c[0] {
             b'\r' => break,

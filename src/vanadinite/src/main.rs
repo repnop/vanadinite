@@ -17,6 +17,7 @@
     const_fn,
     const_fn_trait_bound,
     const_generics,
+    destructuring_assignment,
     extern_types,
     fn_align,
     inline_const,
@@ -45,15 +46,10 @@ pub mod mem;
 pub mod platform;
 pub mod scheduler;
 pub mod sync;
+pub mod syscall;
 pub mod task;
 pub mod trap;
 pub mod utils;
-
-mod syscall {
-    pub mod exit;
-    pub mod print;
-    pub mod read_stdin;
-}
 
 use {
     core::sync::atomic::{AtomicUsize, Ordering},

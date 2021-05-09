@@ -14,7 +14,8 @@ pub mod io;
 pub mod prelude;
 pub mod syscalls;
 
-pub use libvanadinite::capabilities::Capability;
+pub use librust;
+pub use librust::{capabilities::Capability, KResult};
 
 #[prelude_import]
 pub use prelude::rust_2018::*;
@@ -30,13 +31,6 @@ macro_rules! println {
     ($($arg:tt)*) => ($crate::print!("{}\r\n", format_args!($($arg)*)));
 }
 
-#[derive(Debug)]
-#[repr(C)]
-pub enum KResult<T, E> {
-    Ok(T),
-    Err(E),
-}
-
 #[doc(hidden)]
 pub fn _print(args: core::fmt::Arguments) {
     use core::fmt::Write;
@@ -44,6 +38,7 @@ pub fn _print(args: core::fmt::Arguments) {
 }
 
 #[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    println!("PANIC: {:?}", info);
     syscalls::exit()
 }

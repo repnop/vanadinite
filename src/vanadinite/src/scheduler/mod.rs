@@ -16,8 +16,10 @@ use crate::{
 use alloc::{collections::BTreeMap, sync::Arc};
 use core::{
     cell::Cell,
+    num::NonZeroUsize,
     sync::atomic::{AtomicUsize, Ordering},
 };
+use librust::task::Tid;
 
 pub static SCHEDULER: round_robin::RoundRobinScheduler = round_robin::RoundRobinScheduler::new();
 pub static TASKS: TaskList = TaskList::new();
@@ -40,7 +42,7 @@ impl TaskList {
     }
 
     pub fn insert(&self, task: Task) -> (Tid, Arc<SpinMutex<Task>>) {
-        let tid = Tid::new(self.next_id.load(Ordering::Acquire));
+        let tid = Tid::new(NonZeroUsize::new(self.next_id.load(Ordering::Acquire)).unwrap());
         let task = Arc::new(SpinMutex::new(task));
         // FIXME: reuse older pids at some point
         let _ = self.map.write().insert(tid, Arc::clone(&task));
@@ -72,20 +74,6 @@ impl TaskList {
             Some(tid) => self.get(tid),
             None => None,
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(transparent)]
-pub struct Tid(usize);
-
-impl Tid {
-    const fn new(id: usize) -> Self {
-        Self(id)
-    }
-
-    pub fn value(&self) -> usize {
-        self.0
     }
 }
 

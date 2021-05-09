@@ -16,9 +16,9 @@ use crate::{
     trap::{FloatingPointRegisters, Registers},
     utils::Units,
 };
-use alloc::boxed::Box;
+use alloc::{boxed::Box, collections::VecDeque};
 use elf64::Elf;
-use libvanadinite::capabilities::Capability;
+use librust::{capabilities::Capability, message::Message};
 
 #[derive(Debug)]
 #[repr(C)]
@@ -67,6 +67,7 @@ pub struct Task {
     pub context: Context,
     pub memory_manager: MemoryManager,
     pub state: TaskState,
+    pub message_queue: VecDeque<Message>,
     pub capabilities: [Capability; 32],
 }
 
@@ -101,7 +102,14 @@ impl Task {
             fp_regs: FloatingPointRegisters::default(),
         };
 
-        Self { name: Box::from(name), context, memory_manager, state: TaskState::Running, capabilities }
+        Self {
+            name: Box::from(name),
+            context,
+            memory_manager,
+            state: TaskState::Running,
+            message_queue: VecDeque::new(),
+            capabilities,
+        }
     }
 }
 

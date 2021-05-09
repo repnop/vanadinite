@@ -194,36 +194,8 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
             SCHEDULER.schedule()
         }
         Trap::UserModeEnvironmentCall => {
-            let active_task_lock = TASKS.active_on_cpu().unwrap();
-            let mut active_task = active_task_lock.lock();
-
-            match regs.registers.a0 {
-                0 => syscall::exit::exit(&mut *active_task),
-                1 => syscall::print::print(
-                    &mut *active_task,
-                    VirtualAddress::new(regs.registers.a1),
-                    regs.registers.a2,
-                    VirtualAddress::new(regs.registers.a3),
-                ),
-                2 => syscall::read_stdin::read_stdin(
-                    &mut *active_task,
-                    VirtualAddress::new(regs.registers.a1),
-                    regs.registers.a2,
-                    regs,
-                ),
-                n => {
-                    log::error!("Unknown syscall number: {}", n);
-                    active_task.state = TaskState::Dead;
-                }
-            }
-
-            active_task.context =
-                Context { pc: sepc as usize + 4, gp_regs: regs.registers, fp_regs: regs.fp_registers };
-
-            drop(active_task);
-            drop(active_task_lock);
-
-            SCHEDULER.schedule()
+            syscall::handle(regs);
+            sepc + 4
         }
         Trap::SupervisorExternalInterrupt => {
             // FIXME: there has to be a better way
@@ -240,6 +212,8 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                     claimed.complete();
                 }
             }
+
+            sepc
         }
         Trap::LoadPageFault | Trap::StorePageFault | Trap::InstructionPageFault => {
             let stval = VirtualAddress::new(stval);
@@ -262,7 +236,10 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                     };
 
                     match valid {
-                        true => crate::mem::sfence(Some(stval), None),
+                        true => {
+                            crate::mem::sfence(Some(stval), None);
+                            sepc
+                        }
                         false => {
                             log::error!("Process died to a {:?} @ {:#p}", trap_kind, VirtualAddress::new(sepc));
                             active_task.state = TaskState::Dead;
@@ -278,8 +255,6 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
         }
         trap => panic!("Ignoring trap: {:?}, sepc: {:#x}, stval: {:#x}", trap, sepc, stval),
     }
-
-    sepc
 }
 
 /// # Safety

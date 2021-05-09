@@ -11,7 +11,7 @@ fn main() {
 
     while total_read < 10 {
         let start = total_read;
-        let read = read_stdin(&mut input[start..]);
+        let read = read_stdin(&mut input[start..]).unwrap();
         total_read += read;
         print!("{}", core::str::from_utf8(&input[start..][..read]).unwrap());
     }

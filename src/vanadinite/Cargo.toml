@@ -8,7 +8,7 @@ edition = "2018"
 crossbeam-queue = { version = "0.3.1", default-features = false, features = ["alloc"] }
 elf64 = { path = "../elf64" }
 fdt = { git = "https://github.com/repnop/fdt", branch = "master" }
-libvanadinite = { path = "../libvanadinite" }
+librust = { path = "../librust" }
 log = "0.4.11"
 sbi = { path = "../sbi" }
 tar = { path = "../tar" }

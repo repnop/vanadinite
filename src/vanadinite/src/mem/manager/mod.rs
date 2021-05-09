@@ -16,6 +16,7 @@ use crate::{
     utils::Units,
 };
 use address_map::AddressMap;
+use core::ops::Range;
 
 #[derive(Debug)]
 pub struct MemoryManager {
@@ -81,6 +82,31 @@ impl MemoryManager {
         self.table.map(map_from, map_to, flags, n_pages);
 
         sfence(Some(map_to), None);
+    }
+
+    pub fn is_user_region_valid(
+        &self,
+        range: Range<VirtualAddress>,
+        f: impl Fn(Flags) -> bool,
+    ) -> Result<(), VirtualAddress> {
+        let start = range.start.align_down_to(PageSize::Kilopage);
+        let end = range.end.align_to_next(PageSize::Kilopage);
+
+        for page in (start.as_usize()..end.as_usize()).step_by(4.kib()) {
+            let page = VirtualAddress::new(page);
+
+            if page.is_kernel_region() {
+                return Err(page);
+            }
+
+            match self.page_flags(page) {
+                Some(flags) if !f(flags) => return Err(page),
+                None => return Err(page),
+                _ => {}
+            }
+        }
+
+        Ok(())
     }
 
     pub fn page_flags(&self, virt: VirtualAddress) -> Option<Flags> {

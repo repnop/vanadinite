@@ -132,6 +132,14 @@ impl VirtualAddress {
         self.0 as *mut u8
     }
 
+    pub fn align_down_to(self, size: PageSize) -> Self {
+        Self(self.0 & !(size.to_byte_size() - 1))
+    }
+
+    pub fn align_to_next(self, size: PageSize) -> Self {
+        Self(self.align_down_to(size).0 + size.to_byte_size())
+    }
+
     pub fn vpns(self) -> [usize; N_VPN] {
         #[cfg(feature = "paging.sv57")]
         compile_error!("sv57 stuff");
