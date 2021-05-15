@@ -45,7 +45,7 @@ fn main() {
                         tid,
                         Message {
                             sender: Sender::dummy(),
-                            kind: MessageKind::Request(Some(NonZeroUsize::new(1).unwrap())),
+                            kind: MessageKind::Notification(0),
                             fid: 0,
                             arguments: [0; 8],
                         },
@@ -61,6 +61,24 @@ fn main() {
                 Ok(Some(msg)) => println!("We had a message! {:?}", msg),
                 Ok(None) => println!("No messages :("),
                 Err(e) => println!("Error receiving message: {:?}", e),
+            },
+            "test_alloc_mem" => match alloc_memory(4096) {
+                Ok(ptr) => {
+                    println!("Kernel returned us address: {:#p}", ptr);
+                    println!("Testing read/write...");
+
+                    for i in 0..4096 {
+                        unsafe { *ptr.add(i) = ((i as u8) % (126 - 32)) + 32 };
+                    }
+
+                    for i in 0..(4096 / 256) {
+                        for c in 0..256 {
+                            unsafe { print!("{}", *ptr.add(i * 256 + c) as char) };
+                        }
+                        println!();
+                    }
+                }
+                Err(e) => println!("Kernel returned error: {:?}", e),
             },
             "" => {}
             _ => println!("Unrecognized command :("),

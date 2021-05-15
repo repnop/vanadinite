@@ -30,7 +30,14 @@ impl MemoryManager {
         Self { table: PageTable::new(), address_map: AddressMap::new(VirtualAddress::userspace_range()) }
     }
 
-    pub fn alloc_region(&mut self, at: VirtualAddress, n_pages: usize, flags: Flags, fill_with: Option<&[u8]>) {
+    pub fn alloc_region(
+        &mut self,
+        at: Option<VirtualAddress>,
+        n_pages: usize,
+        flags: Flags,
+        fill_with: Option<&[u8]>,
+    ) -> VirtualAddress {
+        let at = at.unwrap_or_else(|| self.find_free_region(n_pages));
         let mut backing = UniquePhysicalRegion::alloc_sparse(n_pages);
         if let Some(fill_with) = fill_with {
             backing.copy_data_into(fill_with);
@@ -38,16 +45,25 @@ impl MemoryManager {
 
         let iter = backing.physical_addresses().enumerate().map(|(i, phys)| (phys, at.offset(i * 4.kib())));
         for (phys_addr, virt_addr) in iter {
+            log::debug!("Mapping {:#p} -> {:#p}", phys_addr, virt_addr);
             self.table.map(phys_addr, virt_addr, flags, PageSize::Kilopage);
-            sfence(Some(virt_addr), None);
         }
 
         self.address_map
             .alloc(at..at.offset(4.kib() * n_pages), PhysicalRegion::Unique(backing))
             .expect("bad address mapping");
+
+        at
     }
 
-    pub fn alloc_shared_region(&mut self, at: VirtualAddress, n_pages: usize, flags: Flags, fill_with: Option<&[u8]>) {
+    pub fn alloc_shared_region(
+        &mut self,
+        at: Option<VirtualAddress>,
+        n_pages: usize,
+        flags: Flags,
+        fill_with: Option<&[u8]>,
+    ) -> VirtualAddress {
+        let at = at.unwrap_or_else(|| self.find_free_region(n_pages));
         let mut backing = UniquePhysicalRegion::alloc_sparse(n_pages);
         if let Some(fill_with) = fill_with {
             backing.copy_data_into(fill_with);
@@ -62,6 +78,8 @@ impl MemoryManager {
         self.address_map
             .alloc(at..at.offset(4.kib() * n_pages), PhysicalRegion::Shared(backing.into_shared_region()))
             .unwrap();
+
+        at
     }
 
     pub fn dealloc_region(&mut self, at: VirtualAddress) {
@@ -135,6 +153,32 @@ impl MemoryManager {
 
     pub fn page_table_debug(&self) -> PageTableDebug<'_> {
         self.table.debug()
+    }
+
+    // FIXME: Need a source of RNG to offset into the address space at random so
+    // we don't fill it up from the start every single time
+    pub fn find_free_region(&self, n_pages: usize) -> VirtualAddress {
+        let total_bytes = n_pages * 4.kib();
+
+        for region in self.address_map.unoccupied_regions() {
+            log::debug!("Found unoccupied region: {:#p}-{:#p}", region.span.start, region.span.end);
+            let region_size = region.span.end.as_usize() - region.span.start.as_usize();
+            if region_size >= total_bytes {
+                // FIXME: Need to add the concept of guard pages so we don't
+                // need to manually skip the 0..4kib range
+                if region.span.start == VirtualAddress::new(0) {
+                    if region_size - 4.kib() >= total_bytes {
+                        return VirtualAddress::new(4.kib());
+                    }
+
+                    continue;
+                }
+
+                return region.span.start;
+            }
+        }
+
+        todo!("exhausted address space -- this should be an `Err(...)` in the future")
     }
 
     //pub fn debug_print(&self) -> PageTableDebugPrint {

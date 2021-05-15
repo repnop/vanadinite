@@ -79,7 +79,7 @@ impl Task {
 
         for header in elf.program_headers().filter(|header| header.r#type == elf64::ProgramSegmentType::Load) {
             memory_manager.alloc_region(
-                VirtualAddress::new(header.vaddr as usize),
+                Some(VirtualAddress::new(header.vaddr as usize)),
                 match (header.memory_size as usize / 4.kib(), header.memory_size as usize % 4.kib()) {
                     (n, 0) => n,
                     (n, _) => n + 1,
@@ -94,7 +94,7 @@ impl Task {
             );
         }
 
-        memory_manager.alloc_region(VirtualAddress::new(0x7fff0000), 4, USER | READ | WRITE | VALID, None);
+        memory_manager.alloc_region(Some(VirtualAddress::new(0x7fff0000)), 4, USER | READ | WRITE | VALID, None);
 
         let context = Context {
             pc: elf.header.entry as usize,

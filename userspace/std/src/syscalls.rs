@@ -129,3 +129,18 @@ pub fn send_message(tid: Tid, message: Message) -> KResult<()> {
         .expect("bad KResult returned by kernel or something is out of sync")
         .map(drop)
 }
+
+#[inline]
+pub fn alloc_memory(size_in_bytes: usize) -> KResult<*mut u8> {
+    KResult::try_from(syscall(
+        Recipient::kernel(),
+        Message {
+            sender: Sender::dummy(),
+            kind: MessageKind::Request(None),
+            fid: Syscall::AllocMemory as usize,
+            arguments: [size_in_bytes, 0, 0, 0, 0, 0, 0, 0],
+        },
+    ))
+    .expect("bad KResult returned by kernel or something is out of sync")
+    .map(|m| m.arguments[0] as *mut u8)
+}

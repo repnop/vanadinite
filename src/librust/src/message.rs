@@ -60,6 +60,12 @@ impl From<KError> for Message {
                 fid: 0,
                 arguments: [id, 0, 0, 0, 0, 0, 0, 0],
             },
+            KError::InvalidArgument(idx) => Self {
+                sender: Sender::kernel(),
+                kind: MessageKind::Reply(Some(error::INVALID_ARGUMENT.try_into().unwrap())),
+                fid: 0,
+                arguments: [idx, 0, 0, 0, 0, 0, 0, 0],
+            },
         }
     }
 }
@@ -80,6 +86,7 @@ pub enum MessageKind {
     ApplicationSpecific(usize),
     Request(Option<NonZeroUsize>),
     Reply(Option<NonZeroUsize>),
+    Notification(usize),
 }
 
 impl MessageKind {
@@ -94,6 +101,7 @@ impl MessageKind {
                 0 => None,
                 _ => Some(NonZeroUsize::new(value).unwrap()),
             })),
+            3 => Some(MessageKind::Notification(value)),
             _ => None,
         }
     }
@@ -103,6 +111,7 @@ impl MessageKind {
             MessageKind::ApplicationSpecific(value) => (0, value),
             MessageKind::Request(value) => (1, value.map(|v| v.get()).unwrap_or(0)),
             MessageKind::Reply(value) => (2, value.map(|v| v.get()).unwrap_or(0)),
+            MessageKind::Notification(value) => (3, value),
         }
     }
 }

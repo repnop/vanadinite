@@ -12,6 +12,7 @@ use crate::{
     scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
     task::TaskState,
     trap::TrapFrame,
+    utils::{self, Units},
 };
 use core::convert::TryInto;
 use librust::{
@@ -67,12 +68,11 @@ fn do_syscall(msg: Message, frame: &mut TrapFrame) {
     let mut task_lock = task_lock.lock();
     let task = &mut *task_lock;
 
-    let msg = match msg.fid {
+    let mut msg = match msg.fid {
         const { Syscall::Exit as usize } => {
-            log::info!("{:?}", msg);
             log::info!("Active process exited");
             task.state = TaskState::Dead;
-            // task.message_queue.clear();
+            task.message_queue.clear();
 
             drop(task_lock);
 
@@ -131,8 +131,32 @@ fn do_syscall(msg: Message, frame: &mut TrapFrame) {
             Some(msg) => msg,
             None => None.into(),
         },
+        const { Syscall::AllocMemory as usize } => {
+            let size = msg.arguments[0];
+
+            match size {
+                0 => KError::InvalidArgument(0).into(),
+                _ => {
+                    let allocated_at = task.memory_manager.alloc_region(
+                        None,
+                        utils::round_up_to_next(size, 4096) / 4.kib(),
+                        flags::VALID | flags::READ | flags::WRITE | flags::USER,
+                        None,
+                    );
+
+                    Message {
+                        sender: Sender::kernel(),
+                        kind: MessageKind::Reply(None),
+                        fid: 0,
+                        arguments: [allocated_at.as_usize(), 0, 0, 0, 0, 0, 0, 0],
+                    }
+                }
+            }
+        }
         id => KError::InvalidSyscall(id).into(),
     };
+
+    msg.sender = Sender::kernel();
 
     log::debug!("Replying with {:x?}", msg);
 

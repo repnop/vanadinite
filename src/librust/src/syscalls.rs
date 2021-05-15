@@ -8,8 +8,9 @@
 #[derive(Debug)]
 #[repr(C)]
 pub enum Syscall {
-    Exit = 0,
-    Print = 1,
-    ReadStdin = 2,
-    ReadMessage = 3,
+    Exit,
+    Print,
+    ReadStdin,
+    ReadMessage,
+    AllocMemory,
 }

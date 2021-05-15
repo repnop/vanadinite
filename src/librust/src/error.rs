@@ -12,6 +12,7 @@ pub(crate) const INVALID_ACCESS: usize = 1;
 pub(crate) const INVALID_MESSAGE: usize = 2;
 pub(crate) const INVALID_RECIPIENT: usize = 3;
 pub(crate) const INVALID_SYSCALL: usize = 4;
+pub(crate) const INVALID_ARGUMENT: usize = 5;
 
 #[derive(Debug)]
 pub enum KError {
@@ -19,6 +20,7 @@ pub enum KError {
     InvalidMessage,
     InvalidRecipient,
     InvalidSyscall(usize),
+    InvalidArgument(usize),
 }
 
 impl TryFrom<Message> for KError {
@@ -30,6 +32,7 @@ impl TryFrom<Message> for KError {
                 const { INVALID_MESSAGE } => Ok(Self::InvalidMessage),
                 const { INVALID_RECIPIENT } => Ok(Self::InvalidRecipient),
                 const { INVALID_SYSCALL } => Ok(Self::InvalidSyscall(msg.arguments[0])),
+                const { INVALID_ARGUMENT } => Ok(Self::InvalidArgument(msg.arguments[0])),
                 const { INVALID_ACCESS } => Ok(Self::InvalidAccess(match msg.arguments[0] {
                     0 => AccessError::Read(msg.arguments[1] as _),
                     1 => AccessError::Write(msg.arguments[1] as _),
@@ -40,6 +43,7 @@ impl TryFrom<Message> for KError {
             MessageKind::Reply(None) => Err("no kernel error reported!"),
             MessageKind::Request(_) => Err("requests are not replies :squint:"),
             MessageKind::ApplicationSpecific(_) => Err("application specifics are not replies :squint:"),
+            MessageKind::Notification(_) => Err("notifications are not replies :squint:"),
         }
     }
 }
@@ -53,6 +57,7 @@ impl TryFrom<Message> for Option<KError> {
             MessageKind::Reply(None) => Ok(None),
             MessageKind::Request(_) => Err("requests are not replies :squint:"),
             MessageKind::ApplicationSpecific(_) => Err("application specifics are not replies :squint:"),
+            MessageKind::Notification(_) => Err("notifications are not replies :squint:"),
         }
     }
 }

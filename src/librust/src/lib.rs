@@ -25,7 +25,9 @@ impl TryFrom<Message> for KResult<Message> {
 
     fn try_from(msg: Message) -> Result<Self, Self::Error> {
         match msg.kind {
-            MessageKind::Request(_) | MessageKind::ApplicationSpecific(_) => Err("message not a reply"),
+            MessageKind::Request(_) | MessageKind::ApplicationSpecific(_) | MessageKind::Notification(_) => {
+                Err("message not a reply")
+            }
             MessageKind::Reply(err) => match err {
                 Some(_) => Ok(Self::Err(error::KError::try_from(msg)?)),
                 None => Ok(Self::Ok(msg)),
