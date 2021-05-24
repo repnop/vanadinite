@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(inline_const)]
+#![feature(asm, inline_const)]
 #![no_std]
 #![allow(incomplete_features)]
 

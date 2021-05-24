@@ -12,7 +12,7 @@ pub const EXTENSION_ID: usize = 0x54494D45;
 
 /// Schedule an interrupt for `time` in the future. To clear the timer interrupt
 /// without scheduling another timer event, a time infinitely far into the
-/// future (`u64::max_value()`) or mask the `STIE` bit of the `sie` CSR.
+/// future (`u64::MAX`) or mask the `STIE` bit of the `sie` CSR.
 pub fn set_timer(time: u64) -> SbiResult<()> {
     unsafe { ecall([time as usize, 0, 0, 0, 0, 0], EXTENSION_ID, 0).map(drop) }
 }

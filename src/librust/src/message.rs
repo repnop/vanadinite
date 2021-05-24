@@ -126,7 +126,7 @@ impl Sender {
     }
 
     pub const fn dummy() -> Self {
-        Sender(usize::max_value())
+        Sender(usize::MAX)
     }
 
     pub const fn kernel() -> Self {

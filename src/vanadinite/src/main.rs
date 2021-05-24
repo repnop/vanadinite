@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![allow(clippy::match_bool, clippy::identity_op)]
+#![allow(clippy::match_bool, clippy::identity_op, clippy::never_loop)]
 #![allow(incomplete_features)]
 #![feature(
     alloc_error_handler,
@@ -14,7 +14,6 @@
     asm,
     const_btree_new,
     const_fn_fn_ptr_basics,
-    const_fn,
     const_fn_trait_bound,
     const_generics,
     destructuring_assignment,
@@ -58,7 +57,6 @@ use {
     mem::{
         kernel_patching,
         paging::{PhysicalAddress, VirtualAddress},
-        phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
         phys2virt,
     },
     sync::SpinMutex,
@@ -86,14 +84,13 @@ cpu_local! {
 #[repr(align(4))]
 extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     csr::stvec::set(trap::stvec_trap_shim);
-    let heap_frame_alloc = unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(64) };
-    let heap_start = mem::phys2virt(heap_frame_alloc.expect("moar memory").as_phys_address());
-    unsafe { mem::heap::HEAP_ALLOCATOR.init(heap_start.as_mut_ptr(), 64 * 4.kib()) };
 
     unsafe { crate::cpu_local::init_thread_locals() };
     HART_ID.set(hart_id);
 
     crate::io::logging::init_logging();
+
+    let (heap_start, heap_end) = mem::heap::HEAP_ALLOCATOR.init(64.mib());
 
     let fdt: Fdt<'static> = match unsafe { Fdt::from_ptr(fdt) } {
         Ok(fdt) => fdt,
@@ -220,7 +217,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     info!(blue, "=== Vanadinite Info ===");
     info!(" stvec_trap_shim: {:#p}", trap::stvec_trap_shim as *const u8);
-    info!(" Heap region: {:#p}-{:#p}", heap_start, heap_start.offset(64 * 4.kib() - 1));
+    info!(" Heap region: {:#p}-{:#p}", heap_start, heap_end);
     info!(" Paging scheme: {:?}", csr::satp::read().mode);
 
     if let Some(ic) = fdt.find_compatible(Plic::compatible_with()) {

@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::librust::syscalls::*;
+
 fn main() {
     let mut input = [0; 10];
     let mut total_read = 0;
@@ -19,9 +21,9 @@ fn main() {
     print!("\nyou typed: ");
     println!("{}", core::str::from_utf8(&input).unwrap());
 
-    let result = std::syscalls::print(unsafe { core::slice::from_raw_parts(0xffffffd000004690 as *mut u8, 1024) });
+    let result = print(unsafe { core::slice::from_raw_parts(0xffffffd000004690 as *mut u8, 1024) });
     println!("{:?}", result);
 
-    let result = std::syscalls::print(&input[..]);
+    let result = print(&input[..]);
     println!("\n{:?}", result);
 }

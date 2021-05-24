@@ -6,10 +6,9 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{PhysicalAddress, PhysicalMemoryAllocator, PhysicalPage};
-use crate::Units;
+use crate::{mem::paging::PageSize, Units};
 
 const SINGLE_ENTRY_SIZE_BYTES: usize = 64 * 4096;
-const FULL_ENTRY: u64 = 0xFFFF_FFFF_FFFF_FFFF;
 
 pub struct BitmapAllocator {
     bitmap: *mut u64,
@@ -36,6 +35,78 @@ impl BitmapAllocator {
             )
         }
     }
+
+    // TODO: Check for small inter-regions as well
+    fn alloc_contig_4k_intra_pages(&mut self, n: usize) -> Option<PhysicalPage> {
+        let mask = u64::MAX << n;
+
+        if n == 64 {
+            let (index, entry) = self.bitmap_slice().iter_mut().enumerate().find(|(_, e)| **e == 0)?;
+            *entry = u64::MAX;
+
+            let page_ptr = (self.mem_start as usize + index * SINGLE_ENTRY_SIZE_BYTES) as *mut u8;
+
+            return match page_ptr < self.mem_end {
+                true => Some(PhysicalPage::from_ptr(page_ptr as *mut u8)),
+                false => None,
+            };
+        }
+
+        let free_bit_filter = |(_, e): &(usize, &mut u64)| e.count_zeros() as usize >= n;
+        for (index, entry) in self.bitmap_slice().iter_mut().enumerate().filter(free_bit_filter) {
+            let bit_index = match (0..(64 - n)).map(|i| (i, *entry >> i)).find(|(_, e)| e | mask == mask) {
+                Some((idx, _)) => idx,
+                None => continue,
+            };
+
+            *entry |= (!mask).rotate_left(bit_index as u32);
+
+            let page_ptr = (self.mem_start as usize + index * SINGLE_ENTRY_SIZE_BYTES) + (bit_index * 4096);
+            let page_ptr = page_ptr as *mut u8;
+
+            if page_ptr < self.mem_end {
+                return Some(PhysicalPage::from_ptr(page_ptr));
+            }
+        }
+
+        None
+    }
+
+    fn alloc_contig_4k_inter_pages(&mut self, n: usize) -> Option<PhysicalPage> {
+        let whole_entries_needed = n / 64;
+        let last_bits_needed = (n % 64) as u32;
+
+        let mut start_index = 0;
+        let bitmap = self.bitmap_slice();
+
+        loop {
+            let range = start_index..(start_index + whole_entries_needed);
+
+            if bitmap.get(range.clone())?.iter().any(|e| *e != 0) {
+                start_index += whole_entries_needed;
+                continue;
+            }
+
+            if last_bits_needed != 0 && bitmap.get(range.end)?.leading_zeros() < last_bits_needed {
+                start_index = range.end + 1;
+                continue;
+            }
+
+            let page_ptr = self.mem_start as usize + start_index * SINGLE_ENTRY_SIZE_BYTES;
+            let page_ptr = page_ptr as *mut u8;
+
+            if page_ptr < self.mem_end {
+                bitmap.get_mut(range.clone())?.iter_mut().for_each(|e| *e = u64::MAX);
+                if last_bits_needed > 0 {
+                    *bitmap.get_mut(range.end)? |= !(u64::MAX << last_bits_needed);
+                }
+
+                return Some(PhysicalPage::from_ptr(page_ptr));
+            } else {
+                return None;
+            }
+        }
+    }
 }
 
 unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
@@ -57,106 +128,144 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
     }
 
     #[track_caller]
-    unsafe fn alloc(&mut self) -> Option<PhysicalPage> {
-        if let Some((index, entry)) = self.bitmap_slice().iter_mut().enumerate().find(|(_, e)| **e != FULL_ENTRY) {
-            let bit_index = entry.trailing_ones() as usize;
+    unsafe fn alloc(&mut self, align_to: PageSize) -> Option<PhysicalPage> {
+        match align_to {
+            PageSize::Megapage => self.alloc_contiguous(align_to, 1),
+            PageSize::Kilopage => {
+                log::debug!("attempting to allocate a single page");
+                if let Some((index, entry)) = self.bitmap_slice().iter_mut().enumerate().find(|(_, e)| **e != u64::MAX)
+                {
+                    let bit_index = entry.trailing_ones() as usize;
 
-            let page_ptr = (self.mem_start as usize + index * SINGLE_ENTRY_SIZE_BYTES) + (bit_index * 4096);
-            let page_ptr = page_ptr as *mut u8;
+                    let page_ptr = (self.mem_start as usize + index * SINGLE_ENTRY_SIZE_BYTES) + (bit_index * 4096);
+                    let page_ptr = page_ptr as *mut u8;
 
-            if page_ptr <= self.mem_end {
-                *entry |= 1 << bit_index;
-                log::debug!("Allocated page at: {:#p}", page_ptr);
-                return Some(PhysicalPage::from_ptr(page_ptr));
-            }
-        }
-
-        None
-    }
-
-    // FIXME: this should look for inter-u64 regions
-    unsafe fn alloc_contiguous(&mut self, n: usize) -> Option<PhysicalPage> {
-        assert!(n <= 64, "> 64 page allocations are currently not supported");
-        let mask = u64::max_value() << n;
-        for (index, entry) in self.bitmap_slice().iter_mut().enumerate().filter(|(_, e)| e.count_zeros() as usize >= n)
-        {
-            if n == 64 {
-                *entry = u64::max_value();
-                let page_ptr = self.mem_start as usize + index * SINGLE_ENTRY_SIZE_BYTES;
-                let page_ptr = page_ptr as *mut u8;
-
-                if page_ptr >= self.mem_end {
-                    return None;
+                    if page_ptr <= self.mem_end {
+                        *entry |= 1 << bit_index;
+                        log::debug!("Allocated page at: {:#p}", page_ptr);
+                        return Some(PhysicalPage::from_ptr(page_ptr));
+                    }
                 }
 
-                return Some(PhysicalPage::from_ptr(page_ptr));
+                None
             }
-
-            let mut bit_index = None;
-            for i in 0..=(64 - n as u64) {
-                let selected = *entry | mask.rotate_left(i as u32);
-                let shifted = selected >> i;
-
-                if !shifted & !mask == !mask {
-                    bit_index = Some(i as usize);
-                    break;
-                }
-            }
-
-            let bit_index = match bit_index {
-                Some(b) => b,
-                None => continue,
-            };
-
-            let page_ptr = (self.mem_start as usize + index * SINGLE_ENTRY_SIZE_BYTES) + (bit_index * 4096);
-            let page_ptr = page_ptr as *mut u8;
-
-            if page_ptr >= self.mem_end {
-                return None;
-            }
-
-            let page = Some(PhysicalPage::from_ptr(page_ptr));
-            *entry |= (!mask).rotate_left(bit_index as u32);
-
-            return page;
+            _ => todo!("[pmalloc.allocator] BitmapAllocator::alloc: >megapage alloc"),
         }
-
-        None
     }
 
     #[track_caller]
-    unsafe fn dealloc(&mut self, page: PhysicalPage) {
-        let index = (page.as_phys_address().as_usize() - self.mem_start as usize) / SINGLE_ENTRY_SIZE_BYTES;
-        let bit = ((page.as_phys_address().as_usize() - self.mem_start as usize) / 4096) % 64;
-
-        let entry = &mut self.bitmap_slice()[index];
-
-        if (*entry >> bit) & 1 != 1 {
-            panic!(
-                "[pmalloc.allocator] BitmapAllocator::dealloc: double free detected for address {:#p}",
-                page.as_phys_address().as_ptr()
-            );
+    unsafe fn alloc_contiguous(&mut self, align_to: PageSize, n: usize) -> Option<PhysicalPage> {
+        if let PageSize::Kilopage = align_to {
+            match n {
+                0..=64 => return self.alloc_contig_4k_intra_pages(n),
+                _ => return self.alloc_contig_4k_inter_pages(n),
+            }
         }
 
-        *entry &= !(1 << bit);
+        // Megapages and above can use the same code
+        let n_entries = (((align_to.to_byte_size() / 4.kib()) * n) / 64).max(1);
+        let mut start_index = {
+            let offset = self.mem_start.align_offset(align_to.to_byte_size());
+            offset / 64.kib()
+        };
+
+        let mut end_index = start_index + n_entries;
+        while self.bitmap_slice().get(start_index..end_index)?.iter().any(|n| n.count_ones() != 0) {
+            start_index += n_entries;
+            end_index = start_index + n_entries;
+        }
+
+        for entry in &mut self.bitmap_slice()[start_index..end_index] {
+            *entry = u64::MAX;
+        }
+
+        let page_ptr = self.mem_start as usize + start_index * SINGLE_ENTRY_SIZE_BYTES;
+        assert_eq!(page_ptr % align_to.to_byte_size(), 0);
+        Some(PhysicalPage::from_ptr(page_ptr as *mut u8))
     }
 
     #[track_caller]
-    unsafe fn dealloc_contiguous(&mut self, page: PhysicalPage, n: usize) {
-        let index = (page.as_phys_address().as_usize() - self.mem_start as usize) / SINGLE_ENTRY_SIZE_BYTES;
-        let bit = ((page.as_phys_address().as_usize() - self.mem_start as usize) / 4096) % 64;
-        let mask = u64::max_value() << n;
+    unsafe fn dealloc(&mut self, page: PhysicalPage, size: PageSize) {
+        match size {
+            PageSize::Megapage => {
+                let index = (page.as_phys_address().as_usize() - self.mem_start as usize) / SINGLE_ENTRY_SIZE_BYTES;
+                for entry in &mut self.bitmap_slice()[index..][..512] {
+                    assert_eq!(
+                        *entry,
+                        u64::MAX,
+                        "[pmalloc.allocator] BitmapAllocator::dealloc: double free in large page region!"
+                    );
+                    *entry = 0;
+                }
+            }
+            PageSize::Kilopage => {
+                let index = (page.as_phys_address().as_usize() - self.mem_start as usize) / SINGLE_ENTRY_SIZE_BYTES;
+                let bit = ((page.as_phys_address().as_usize() - self.mem_start as usize) / 4096) % 64;
 
-        let entry = &mut self.bitmap_slice()[index];
+                let entry = &mut self.bitmap_slice()[index];
 
-        if (*entry >> bit) & !mask != !mask {
-            panic!(
-                "[pmalloc.allocator] BitmapAllocator::dealloc: double free detected for address {:#p}",
-                page.as_phys_address().as_ptr()
-            );
+                if (*entry >> bit) & 1 != 1 {
+                    panic!(
+                        "[pmalloc.allocator] BitmapAllocator::dealloc: double free detected for address {:#p}",
+                        page.as_phys_address().as_ptr()
+                    );
+                }
+
+                *entry &= !(1 << bit);
+            }
+            _ => todo!("[pmalloc.allocator] BitmapAllocator::dealloc: >megapage dealloc"),
         }
+    }
 
-        *entry &= mask.rotate_left(bit as u32);
+    #[track_caller]
+    unsafe fn dealloc_contiguous(&mut self, page: PhysicalPage, size: PageSize, n: usize) {
+        let start_index = (page.as_phys_address().as_usize() - self.mem_start as usize) / SINGLE_ENTRY_SIZE_BYTES;
+
+        match size {
+            PageSize::Kilopage => match n {
+                0..=64 => {
+                    let start_bit = ((page.as_phys_address().as_usize() - self.mem_start as usize) / 4.kib()) % 64;
+
+                    if n == 64 {
+                        self.bitmap_slice()[start_index] = 0;
+                    } else {
+                        let mask = (u64::MAX << n).rotate_left(start_bit as u32);
+                        self.bitmap_slice()[start_index] &= mask;
+                    }
+                }
+                _ => {
+                    let whole_entries_needed = n / 64;
+                    let last_bits_needed = (n % 64) as u32;
+                    let range = start_index..(start_index + whole_entries_needed);
+
+                    for entry in &mut self.bitmap_slice()[range.clone()] {
+                        assert_eq!(
+                            *entry,
+                            u64::MAX,
+                            "[pmalloc.allocator] BitmapAllocator::dealloc: double free in contiguous page region!"
+                        );
+                        *entry = 0;
+                    }
+
+                    if last_bits_needed > 0 {
+                        self.bitmap_slice()[range.end] &= u64::MAX << last_bits_needed;
+                    }
+                }
+            },
+            _ => {
+                let n_entries = (((size.to_byte_size() / 4.kib()) * n) / 64).max(1);
+                let end_index = start_index + n_entries;
+
+                for entry in &mut self.bitmap_slice()[start_index..][..end_index] {
+                    assert_eq!(
+                        *entry,
+                        u64::MAX,
+                        "[pmalloc.allocator] BitmapAllocator::dealloc: double free in contiguous page region!"
+                    );
+                    *entry = 0;
+                }
+            }
+        }
     }
 
     #[track_caller]

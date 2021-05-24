@@ -5,17 +5,17 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{PhysicalRegion, VirtualAddress};
+use super::VirtualAddress;
+use crate::mem::region::MemoryRegion;
 use alloc::collections::BTreeMap;
 use core::ops::Range;
 
 #[derive(Debug)]
 pub struct AddressRegion {
-    pub region: Option<PhysicalRegion>,
+    pub region: Option<MemoryRegion>,
     pub span: Range<VirtualAddress>,
 }
 
-#[derive(Debug)]
 pub struct AddressMap {
     map: BTreeMap<VirtualAddress, AddressRegion>,
 }
@@ -28,7 +28,7 @@ impl AddressMap {
         Self { map }
     }
 
-    pub fn alloc(&mut self, subrange: Range<VirtualAddress>, backing: PhysicalRegion) -> Result<(), ()> {
+    pub fn alloc(&mut self, subrange: Range<VirtualAddress>, backing: MemoryRegion) -> Result<(), ()> {
         let key = match self.map.range(subrange.end..).next() {
             Some((_, range))
                 if range.span.start > subrange.start || range.span.end < subrange.end || range.region.is_some() =>
@@ -73,7 +73,7 @@ impl AddressMap {
         Ok(())
     }
 
-    pub fn free(&mut self, range: Range<VirtualAddress>) -> Option<PhysicalRegion> {
+    pub fn free(&mut self, range: Range<VirtualAddress>) -> Option<MemoryRegion> {
         match self.map.range(range.end..).next() {
             Some((_, curr_range))
                 if curr_range.span.start != range.start
@@ -114,7 +114,29 @@ impl AddressMap {
         self.map.values().filter(|v| v.region.is_none())
     }
 
-    pub fn regions(&self) -> impl Iterator<Item = &AddressRegion> {
-        self.map.values()
+    pub fn occupied_regions(&self) -> impl Iterator<Item = &AddressRegion> {
+        self.map.values().filter(|v| v.region.is_some())
+    }
+}
+
+impl core::fmt::Debug for AddressMap {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match f.alternate() {
+            true => {
+                for region in self.occupied_regions() {
+                    writeln!(
+                        f,
+                        "[{:?}] {:#p}..{:#p} {:?}",
+                        region.region.as_ref().unwrap().page_size(),
+                        region.span.start,
+                        region.span.end,
+                        region.region
+                    )?;
+                }
+
+                Ok(())
+            }
+            false => f.debug_struct("AddressMap").field("map", &self.map).finish(),
+        }
     }
 }

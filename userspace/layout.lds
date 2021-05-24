@@ -35,6 +35,18 @@ SECTIONS {
         *(.rodata .rodata.*)
     }
 
+    . = ALIGN(4K);
+
+    .tdata : {
+        *(.tdata .tdata.*)
+    }
+
+    .tbss : {
+        *(.tbss .tbss.*)
+    }
+
+    . = ALIGN(4K);
+
     .capabilities : {
         KEEP(*(.capabilities))
     }

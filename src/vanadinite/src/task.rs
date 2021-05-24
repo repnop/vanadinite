@@ -7,14 +7,14 @@
 
 use crate::{
     mem::{
-        manager::MemoryManager,
+        manager::{FillOption, MemoryManager},
         paging::{
             flags::{EXECUTE, READ, USER, VALID, WRITE},
-            VirtualAddress,
+            PageSize, VirtualAddress,
         },
     },
     trap::{FloatingPointRegisters, Registers},
-    utils::Units,
+    utils::{round_up_to_next, Units},
 };
 use alloc::{boxed::Box, collections::VecDeque};
 use elf64::Elf;
@@ -78,8 +78,10 @@ impl Task {
         let capabilities = Default::default();
 
         for header in elf.program_headers().filter(|header| header.r#type == elf64::ProgramSegmentType::Load) {
+            log::debug!("header: {:?}", header);
             memory_manager.alloc_region(
                 Some(VirtualAddress::new(header.vaddr as usize)),
+                PageSize::Kilopage,
                 match (header.memory_size as usize / 4.kib(), header.memory_size as usize % 4.kib()) {
                     (n, 0) => n,
                     (n, _) => n + 1,
@@ -90,15 +92,37 @@ impl Task {
                     0b100 => USER | READ | VALID,
                     flags => unreachable!("flags: {:#b}", flags),
                 },
-                Some(elf.program_segment_data(&header)),
+                FillOption::Data(elf.program_segment_data(&header)),
             );
         }
 
-        memory_manager.alloc_region(Some(VirtualAddress::new(0x7fff0000)), 4, USER | READ | WRITE | VALID, None);
+        let tls = elf.program_headers().find(|header| header.r#type == elf64::ProgramSegmentType::Tls).map(|header| {
+            log::debug!("header: {:?}", header);
+            memory_manager
+                .alloc_region(
+                    None,
+                    PageSize::Kilopage,
+                    round_up_to_next(header.memory_size as usize, 4096) / 4096,
+                    USER | READ | WRITE | VALID,
+                    FillOption::Data(elf.program_segment_data(&header)),
+                )
+                .as_usize()
+        });
+
+        memory_manager.alloc_region(
+            Some(VirtualAddress::new(0x7fff0000)),
+            PageSize::Kilopage,
+            4,
+            USER | READ | WRITE | VALID,
+            FillOption::Unitialized,
+        );
+
+        memory_manager.guard(VirtualAddress::new(0x7fff0000 - 4.kib()));
+        memory_manager.guard(VirtualAddress::new(0x7fff0000 + 16.kib()));
 
         let context = Context {
             pc: elf.header.entry as usize,
-            gp_regs: Registers { sp: 0x7fff0000 + 16.kib(), ..Default::default() },
+            gp_regs: Registers { sp: 0x7fff0000 + 16.kib(), tp: tls.unwrap_or(0), ..Default::default() },
             fp_regs: FloatingPointRegisters::default(),
         };
 

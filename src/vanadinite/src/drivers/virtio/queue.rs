@@ -72,7 +72,7 @@ impl SplitVirtqueue {
     }
 
     pub fn alloc_descriptor(&mut self) -> Option<usize> {
-        let (index, entry) = self.free_bitmap.iter_mut().enumerate().find(|(_, e)| **e != u64::max_value())?;
+        let (index, entry) = self.free_bitmap.iter_mut().enumerate().find(|(_, e)| **e != u64::MAX)?;
         let bit_index = entry.trailing_ones() as usize;
 
         let descriptor_index = index * 64 + bit_index;

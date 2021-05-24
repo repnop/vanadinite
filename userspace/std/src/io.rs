@@ -5,11 +5,13 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use librust::syscalls::print;
+
 pub(crate) struct Stdout;
 
 impl core::fmt::Write for Stdout {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        let _ = crate::syscalls::print(s.as_bytes());
+        let _ = print(s.as_bytes());
         Ok(())
     }
 }

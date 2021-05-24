@@ -239,6 +239,7 @@ pub enum ProgramSegmentType {
     Note = 4,
     ShLib = 5,
     ProgramHeaderTable = 6,
+    Tls = 7,
     LoOs = 0x6000_0000,
     HiOs = 0x6FFF_FFFF,
     LoProc = 0x7000_0000,

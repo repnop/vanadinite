@@ -10,6 +10,8 @@ pub mod bitmap;
 use crate::{mem::paging::PhysicalAddress, sync::SpinMutex};
 use bitmap::BitmapAllocator;
 
+use super::paging::PageSize;
+
 #[cfg(any(not(any(feature = "pmalloc.allocator.buddy")), feature = "pmalloc.allocator.bitmap"))]
 pub static PHYSICAL_MEMORY_ALLOCATOR: SpinMutex<BitmapAllocator> = SpinMutex::new(BitmapAllocator::new());
 
@@ -24,24 +26,24 @@ pub unsafe trait PhysicalMemoryAllocator {
     ///
     /// This method must not return the same physical page multiple times
     /// without it having been deallocated before being reused each time
-    unsafe fn alloc(&mut self) -> Option<PhysicalPage>;
+    unsafe fn alloc(&mut self, align_to: PageSize) -> Option<PhysicalPage>;
 
     /// # Safety
     ///
     /// The requirements for this method are the same as [`alloc`], but apply to
     /// the entire range returned
-    unsafe fn alloc_contiguous(&mut self, n: usize) -> Option<PhysicalPage>;
+    unsafe fn alloc_contiguous(&mut self, align_to: PageSize, n: usize) -> Option<PhysicalPage>;
 
     /// # Safety
     ///
     /// See the memory safety requirements of [`set_unused`]
-    unsafe fn dealloc(&mut self, page: PhysicalPage);
+    unsafe fn dealloc(&mut self, page: PhysicalPage, size: PageSize);
 
     /// # Safety
     ///
     /// The requirements for this method are the same as [`dealloc`], but apply
     /// to the entire range returned
-    unsafe fn dealloc_contiguous(&mut self, page: PhysicalPage, n: usize);
+    unsafe fn dealloc_contiguous(&mut self, page: PhysicalPage, size: PageSize, n: usize);
 
     /// # Safety
     ///
@@ -76,7 +78,7 @@ impl PhysicalPage {
 }
 
 pub fn alloc_page() -> PhysicalPage {
-    unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc().expect("out of memory") }
+    unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc(PageSize::Kilopage).expect("out of memory") }
 }
 
 pub fn zalloc_page() -> PhysicalPage {

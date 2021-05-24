@@ -9,14 +9,24 @@ mod address_map;
 
 use crate::{
     mem::{
-        paging::{flags::Flags, PageSize, PageTable, PageTableDebug, PhysicalAddress, VirtualAddress},
-        region::{PhysicalRegion, UniquePhysicalRegion},
+        paging::{
+            flags::{self, Flags},
+            PageSize, PageTable, PageTableDebug, PhysicalAddress, VirtualAddress,
+        },
+        region::{MemoryRegion, PhysicalRegion, UniquePhysicalRegion},
         sfence,
     },
     utils::Units,
 };
 use address_map::AddressMap;
+pub use address_map::AddressRegion;
 use core::ops::Range;
+
+pub enum FillOption<'a> {
+    Data(&'a [u8]),
+    Unitialized,
+    Zeroed,
+}
 
 #[derive(Debug)]
 pub struct MemoryManager {
@@ -33,24 +43,30 @@ impl MemoryManager {
     pub fn alloc_region(
         &mut self,
         at: Option<VirtualAddress>,
+        size: PageSize,
         n_pages: usize,
         flags: Flags,
-        fill_with: Option<&[u8]>,
+        fill: FillOption<'_>,
     ) -> VirtualAddress {
         let at = at.unwrap_or_else(|| self.find_free_region(n_pages));
-        let mut backing = UniquePhysicalRegion::alloc_sparse(n_pages);
-        if let Some(fill_with) = fill_with {
-            backing.copy_data_into(fill_with);
+
+        log::debug!("Allocating region at {:#p}: size={:?} n_pages={} flags={:?}", at, size, n_pages, flags);
+
+        let mut backing = UniquePhysicalRegion::alloc_sparse(PageSize::Kilopage, n_pages);
+        match fill {
+            FillOption::Data(data) => backing.copy_data_into(data),
+            FillOption::Zeroed => backing.zero(),
+            FillOption::Unitialized => {}
         }
 
-        let iter = backing.physical_addresses().enumerate().map(|(i, phys)| (phys, at.offset(i * 4.kib())));
+        let iter = backing.physical_addresses().enumerate().map(|(i, phys)| (phys, at.offset(i * size.to_byte_size())));
         for (phys_addr, virt_addr) in iter {
             log::debug!("Mapping {:#p} -> {:#p}", phys_addr, virt_addr);
             self.table.map(phys_addr, virt_addr, flags, PageSize::Kilopage);
         }
 
         self.address_map
-            .alloc(at..at.offset(4.kib() * n_pages), PhysicalRegion::Unique(backing))
+            .alloc(at..at.offset(4.kib() * n_pages), MemoryRegion::Backed(PhysicalRegion::Unique(backing)))
             .expect("bad address mapping");
 
         at
@@ -64,7 +80,7 @@ impl MemoryManager {
         fill_with: Option<&[u8]>,
     ) -> VirtualAddress {
         let at = at.unwrap_or_else(|| self.find_free_region(n_pages));
-        let mut backing = UniquePhysicalRegion::alloc_sparse(n_pages);
+        let mut backing = UniquePhysicalRegion::alloc_sparse(PageSize::Kilopage, n_pages);
         if let Some(fill_with) = fill_with {
             backing.copy_data_into(fill_with);
         }
@@ -76,10 +92,18 @@ impl MemoryManager {
         }
 
         self.address_map
-            .alloc(at..at.offset(4.kib() * n_pages), PhysicalRegion::Shared(backing.into_shared_region()))
+            .alloc(
+                at..at.offset(4.kib() * n_pages),
+                MemoryRegion::Backed(PhysicalRegion::Shared(backing.into_shared_region())),
+            )
             .unwrap();
 
         at
+    }
+
+    pub fn guard(&mut self, at: VirtualAddress) {
+        self.address_map.alloc(at..at.offset(4.kib()), MemoryRegion::GuardPage).unwrap();
+        self.table.map(PhysicalAddress::null(), at, flags::USER | flags::VALID, PageSize::Kilopage);
     }
 
     pub fn dealloc_region(&mut self, at: VirtualAddress) {
@@ -89,11 +113,15 @@ impl MemoryManager {
         let span = region.span.clone();
         let region = self.address_map.free(span).expect("tried deallocing an unmapped region");
 
-        let iter = (0..region.page_count()).map(|i| at.offset(i * 4.kib()));
+        let iter = (0..region.page_count()).map(|i| at.offset(i * region.page_size().to_byte_size()));
         for virt_addr in iter {
             self.table.unmap(virt_addr);
             sfence(Some(virt_addr), None);
         }
+    }
+
+    pub fn region_for(&self, at: VirtualAddress) -> Option<&AddressRegion> {
+        self.address_map.find(at)
     }
 
     pub fn map_direct(&mut self, map_from: PhysicalAddress, map_to: VirtualAddress, n_pages: PageSize, flags: Flags) {

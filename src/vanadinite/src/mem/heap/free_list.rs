@@ -5,7 +5,15 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::sync::SpinMutex;
+use crate::{
+    mem::{
+        paging::PageSize,
+        phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
+        phys2virt,
+    },
+    sync::SpinMutex,
+    utils::{round_up_to_next, Units},
+};
 use core::ptr::NonNull;
 
 pub struct FreeListAllocator {
@@ -17,16 +25,28 @@ impl FreeListAllocator {
         Self { inner: SpinMutex::new(FreeList { head: None }) }
     }
 
-    /// # Safety
-    ///
-    /// `origin` and `size` must create a valid memory region that does not
-    /// conflict with anything else
-    pub unsafe fn init(&self, origin: *mut u8, size: usize) {
+    /// Returns the start and end for logging purposes
+    pub fn init(&self, size: usize) -> (*mut u8, *mut u8) {
+        let n_pages = round_up_to_next(size, 4.kib()) / 4.kib();
+        let origin = unsafe {
+            phys2virt(
+                PHYSICAL_MEMORY_ALLOCATOR
+                    .lock()
+                    .alloc_contiguous(PageSize::Kilopage, n_pages)
+                    .expect("unable to allocate memory for heap")
+                    .as_phys_address(),
+            )
+            .as_mut_ptr()
+        };
+
         let mut inner = self.inner.lock();
         inner.head = Some(NonNull::new(origin.cast()).expect("bad origin passed"));
 
-        *inner.head.unwrap().as_ptr() = FreeListNode { next: None, size: size - FreeListNode::struct_size() };
-        log::info!("Heap allocator initialized, using memory block: {:#p}-{:#p}", origin, origin.add(size));
+        unsafe {
+            *inner.head.unwrap().as_ptr() = FreeListNode { next: None, size: size - FreeListNode::struct_size() }
+        };
+
+        (origin, unsafe { origin.add(round_up_to_next(size, 4.kib())) })
     }
 }
 

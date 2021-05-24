@@ -10,7 +10,7 @@ use alloc::{collections::BTreeMap, string::String};
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use log::LevelFilter;
 
-static HART_FILTER: AtomicUsize = AtomicUsize::new(usize::max_value());
+static HART_FILTER: AtomicUsize = AtomicUsize::new(usize::MAX);
 static LOG_FILTER: SpinRwLock<Option<BTreeMap<String, Option<LevelFilter>>>> = SpinRwLock::new(None);
 static LOG_LEVEL: AtomicUsize = AtomicUsize::new(LevelFilter::Info as usize);
 pub static USE_COLOR: AtomicBool = AtomicBool::new(true);

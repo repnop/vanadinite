@@ -179,7 +179,7 @@ impl VirtualAddress {
 
         let top_most_bit = 1 << (12 + N_VPN * 9 - 1);
         if addr & top_most_bit == top_most_bit {
-            addr |= usize::max_value() << (12 + N_VPN * 9 - 1);
+            addr |= usize::MAX << (12 + N_VPN * 9 - 1);
         }
 
         VirtualAddress(addr)
@@ -249,6 +249,10 @@ impl PhysicalAddress {
 
     pub fn offset_into_page(self, page_size: PageSize) -> usize {
         self.0 & (page_size.to_byte_size() - 1)
+    }
+
+    pub fn null() -> Self {
+        Self(0)
     }
 }
 

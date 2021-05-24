@@ -8,7 +8,10 @@
 use crate::{
     csr::sstatus::TemporaryUserMemoryAccess,
     io::{ConsoleDevice, INPUT_QUEUE},
-    mem::paging::{flags, VirtualAddress},
+    mem::{
+        manager::FillOption,
+        paging::{flags, PageSize, VirtualAddress},
+    },
     scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
     task::TaskState,
     trap::TrapFrame,
@@ -18,7 +21,10 @@ use core::convert::TryInto;
 use librust::{
     error::{AccessError, KError},
     message::{Message, MessageKind, Recipient, Sender},
-    syscalls::Syscall,
+    syscalls::{
+        allocation::{AllocationOptions, MemoryPermissions},
+        Syscall,
+    },
     task::Tid,
 };
 
@@ -127,22 +133,56 @@ fn do_syscall(msg: Message, frame: &mut TrapFrame) {
 
             msg
         }
-        const { Syscall::ReadMessage as usize } => match task.message_queue.pop_front() {
-            Some(msg) => msg,
-            None => None.into(),
-        },
-        const { Syscall::AllocMemory as usize } => {
-            let size = msg.arguments[0];
+        const { Syscall::ReadMessage as usize } => {
+            // Avoid accidentally overwriting sender later on
+            return apply_message(
+                match task.message_queue.pop_front() {
+                    Some(msg) => msg,
+                    None => {
+                        let mut msg: Message = None.into();
+                        msg.sender = Sender::kernel();
 
-            match size {
+                        msg
+                    }
+                },
+                frame,
+            );
+        }
+        const { Syscall::AllocVirtualMemory as usize } => loop {
+            let size = msg.arguments[0];
+            let options = AllocationOptions::new(msg.arguments[1]);
+            let permissions = MemoryPermissions::new(msg.arguments[2]);
+
+            if permissions & MemoryPermissions::Write && !(permissions & MemoryPermissions::Read) {
+                break KError::InvalidArgument(2).into();
+            }
+
+            let mut flags = flags::VALID | flags::USER;
+
+            if permissions & MemoryPermissions::Read {
+                flags |= flags::READ;
+            }
+
+            if permissions & MemoryPermissions::Write {
+                flags |= flags::WRITE;
+            }
+
+            if permissions & MemoryPermissions::Execute {
+                flags |= flags::EXECUTE;
+            }
+
+            break match size {
                 0 => KError::InvalidArgument(0).into(),
                 _ => {
                     let allocated_at = task.memory_manager.alloc_region(
                         None,
+                        if options & AllocationOptions::LargePage { PageSize::Megapage } else { PageSize::Kilopage },
                         utils::round_up_to_next(size, 4096) / 4.kib(),
-                        flags::VALID | flags::READ | flags::WRITE | flags::USER,
-                        None,
+                        flags,
+                        if options & AllocationOptions::Zero { FillOption::Zeroed } else { FillOption::Unitialized },
                     );
+
+                    log::debug!("Allocated memory at {:#p} for user process", allocated_at);
 
                     Message {
                         sender: Sender::kernel(),
@@ -151,8 +191,14 @@ fn do_syscall(msg: Message, frame: &mut TrapFrame) {
                         arguments: [allocated_at.as_usize(), 0, 0, 0, 0, 0, 0, 0],
                     }
                 }
-            }
-        }
+            };
+        },
+        const { Syscall::GetTid as usize } => Message {
+            sender: Sender::kernel(),
+            kind: MessageKind::Reply(None),
+            fid: 0,
+            arguments: [CURRENT_TASK.get().unwrap().value(), 0, 0, 0, 0, 0, 0, 0],
+        },
         id => KError::InvalidSyscall(id).into(),
     };
 

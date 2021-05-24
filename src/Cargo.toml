@@ -2,15 +2,15 @@
 members = [
     "bytestream",
     "elf64",
-    #"fat32",
+    
     "librust",
     "sbi",
     "tar",
     "vanadinite",
     "vanadinite_macros",
-]
+] #"fat32",
 
 [profile.release]
 debug = true
-lto = "fat"
-codegen-units = 1
+#lto = "fat"
+#codegen-units = 1

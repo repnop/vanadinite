@@ -50,7 +50,9 @@ impl Scheduler for RoundRobinScheduler {
         log::debug!("Starting scheduling");
         let mut queue = self.current_queue().lock();
 
-        queue.rotate_left(1);
+        if queue.len() > 1 {
+            queue.rotate_left(1);
+        }
 
         while let Some(queued_task) = queue.front() {
             let state = queued_task.task.lock().state;

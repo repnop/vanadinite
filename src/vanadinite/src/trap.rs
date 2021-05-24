@@ -7,7 +7,11 @@
 
 use crate::{
     interrupts::{isr::isr_entry, PLIC},
-    mem::paging::{flags, VirtualAddress},
+    mem::{
+        manager::AddressRegion,
+        paging::{flags, VirtualAddress},
+        region::MemoryRegion,
+    },
     scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
     syscall,
     task::{Context, TaskState},
@@ -138,7 +142,7 @@ pub enum Trap {
     LoadPageFault = 13,
     StorePageFault = 15,
 
-    Reserved = usize::max_value(),
+    Reserved = usize::MAX,
 }
 
 impl Trap {
@@ -225,14 +229,32 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                     let mut active_task = active_task_lock.lock();
                     let memory_manager = &mut active_task.memory_manager;
 
-                    let valid = match trap_kind {
-                        Trap::LoadPageFault | Trap::InstructionPageFault => {
-                            memory_manager.modify_page_flags(stval, |f| f | flags::ACCESSED)
+                    let valid = match memory_manager.region_for(stval) {
+                        None | Some(AddressRegion { region: None, .. }) => false,
+                        Some(AddressRegion { region: Some(MemoryRegion::GuardPage), .. }) => {
+                            log::error!("Process hit a guard page, stack overflow?");
+                            false
                         }
-                        Trap::StorePageFault => {
-                            memory_manager.modify_page_flags(stval, |f| f | flags::ACCESSED | flags::DIRTY)
-                        }
-                        _ => unreachable!(),
+                        _ => match trap_kind {
+                            Trap::LoadPageFault | Trap::InstructionPageFault => {
+                                match memory_manager.page_flags(stval) {
+                                    Some(flags) => {
+                                        (flags & flags::READ)
+                                            && memory_manager.modify_page_flags(stval, |f| f | flags::ACCESSED)
+                                    }
+                                    None => false,
+                                }
+                            }
+                            Trap::StorePageFault => match memory_manager.page_flags(stval) {
+                                Some(flags) => {
+                                    (flags & flags::WRITE)
+                                        && memory_manager
+                                            .modify_page_flags(stval, |f| f | flags::DIRTY | flags::ACCESSED)
+                                }
+                                None => false,
+                            },
+                            _ => unreachable!(),
+                        },
                     };
 
                     match valid {

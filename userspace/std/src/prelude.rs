@@ -6,7 +6,8 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod rust_2018 {
-    pub use crate::syscalls::*;
     pub use crate::{print, println};
     pub use core::prelude::v1::*;
+    pub type Box<T> = alloc::boxed::Box<T, crate::heap::TaskLocal>;
+    pub type Vec<T> = alloc::vec::Vec<T, crate::heap::TaskLocal>;
 }

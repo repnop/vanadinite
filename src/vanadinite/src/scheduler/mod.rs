@@ -46,7 +46,7 @@ impl TaskList {
         let task = Arc::new(SpinMutex::new(task));
         // FIXME: reuse older pids at some point
         let _ = self.map.write().insert(tid, Arc::clone(&task));
-        if self.next_id.fetch_add(1, Ordering::AcqRel) == usize::max_value() {
+        if self.next_id.fetch_add(1, Ordering::AcqRel) == usize::MAX {
             todo!("something something overflow");
         }
 

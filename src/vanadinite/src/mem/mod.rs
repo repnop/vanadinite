@@ -1,3 +1,5 @@
+use crate::mem::paging::PageSize;
+
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2021 The vanadinite developers
 //
@@ -66,7 +68,8 @@ pub fn alloc_kernel_stack(size: usize) -> *mut u8 {
     assert_eq!(size % 4096, 0);
 
     let total_pages = size / 4096;
-    let phys_start = unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(total_pages) }.expect("oom :(");
+    let phys_start =
+        unsafe { PHYSICAL_MEMORY_ALLOCATOR.lock().alloc_contiguous(PageSize::Kilopage, total_pages) }.expect("oom :(");
 
     // FIXME: Eventually make these proper virtual address ranges so we can add
     // guard pages which will detect stack overflowing

@@ -5,7 +5,11 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{mem::phys::PhysicalMemoryAllocator, Units};
+use crate::{
+    mem::{paging::PageSize, phys::PhysicalMemoryAllocator},
+    utils::round_up_to_next,
+    Units,
+};
 use core::cell::Cell;
 
 #[macro_export]
@@ -70,7 +74,7 @@ pub unsafe fn init_thread_locals() {
     let new_thread_locals = crate::mem::phys2virt(
         crate::mem::phys::PHYSICAL_MEMORY_ALLOCATOR
             .lock()
-            .alloc_contiguous(size / 4.kib() + 1)
+            .alloc_contiguous(PageSize::Kilopage, round_up_to_next(size, 4.kib()))
             .unwrap()
             .as_phys_address(),
     )
