@@ -9,6 +9,7 @@
 
 extern crate alloc;
 
+use alloc::alloc::Allocator;
 use core::num::NonZeroUsize;
 use std::librust::syscalls::*;
 use std::librust::{
@@ -163,7 +164,7 @@ fn main() {
                 *(sp.add(4096)) = 0;
             },
             "test_large_page_alloc" => {
-                unsafe { alloc::alloc::alloc(alloc::alloc::Layout::from_size_align(32768, 8).unwrap()) };
+                std::heap::TaskLocal::new().allocate(alloc::alloc::Layout::from_size_align(32768, 8).unwrap()).unwrap();
             }
             "tp" => {
                 let tp: usize;

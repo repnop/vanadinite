@@ -171,13 +171,16 @@ fn do_syscall(msg: Message, frame: &mut TrapFrame) {
                 flags |= flags::EXECUTE;
             }
 
+            let page_size =
+                if options & AllocationOptions::LargePage { PageSize::Megapage } else { PageSize::Kilopage };
+
             break match size {
                 0 => KError::InvalidArgument(0).into(),
                 _ => {
                     let allocated_at = task.memory_manager.alloc_region(
                         None,
-                        if options & AllocationOptions::LargePage { PageSize::Megapage } else { PageSize::Kilopage },
-                        utils::round_up_to_next(size, 4096) / 4.kib(),
+                        page_size,
+                        utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
                         flags,
                         if options & AllocationOptions::Zero { FillOption::Zeroed } else { FillOption::Unitialized },
                     );

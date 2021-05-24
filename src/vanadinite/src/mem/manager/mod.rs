@@ -16,7 +16,7 @@ use crate::{
         region::{MemoryRegion, PhysicalRegion, UniquePhysicalRegion},
         sfence,
     },
-    utils::Units,
+    utils::{self, Units},
 };
 use address_map::AddressMap;
 pub use address_map::AddressRegion;
@@ -37,7 +37,12 @@ pub struct MemoryManager {
 impl MemoryManager {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Self { table: PageTable::new(), address_map: AddressMap::new(VirtualAddress::userspace_range()) }
+        let mut this =
+            Self { table: PageTable::new(), address_map: AddressMap::new(VirtualAddress::userspace_range()) };
+
+        this.guard(VirtualAddress::new(0));
+
+        this
     }
 
     pub fn alloc_region(
@@ -48,11 +53,12 @@ impl MemoryManager {
         flags: Flags,
         fill: FillOption<'_>,
     ) -> VirtualAddress {
-        let at = at.unwrap_or_else(|| self.find_free_region(n_pages));
+        let at = at.unwrap_or_else(|| self.find_free_region(size, n_pages));
 
         log::debug!("Allocating region at {:#p}: size={:?} n_pages={} flags={:?}", at, size, n_pages, flags);
 
-        let mut backing = UniquePhysicalRegion::alloc_sparse(PageSize::Kilopage, n_pages);
+        let mut backing = UniquePhysicalRegion::alloc_sparse(size, n_pages);
+
         match fill {
             FillOption::Data(data) => backing.copy_data_into(data),
             FillOption::Zeroed => backing.zero(),
@@ -62,11 +68,11 @@ impl MemoryManager {
         let iter = backing.physical_addresses().enumerate().map(|(i, phys)| (phys, at.offset(i * size.to_byte_size())));
         for (phys_addr, virt_addr) in iter {
             log::debug!("Mapping {:#p} -> {:#p}", phys_addr, virt_addr);
-            self.table.map(phys_addr, virt_addr, flags, PageSize::Kilopage);
+            self.table.map(phys_addr, virt_addr, flags, size);
         }
 
         self.address_map
-            .alloc(at..at.offset(4.kib() * n_pages), MemoryRegion::Backed(PhysicalRegion::Unique(backing)))
+            .alloc(at..at.offset(size.to_byte_size() * n_pages), MemoryRegion::Backed(PhysicalRegion::Unique(backing)))
             .expect("bad address mapping");
 
         at
@@ -75,25 +81,26 @@ impl MemoryManager {
     pub fn alloc_shared_region(
         &mut self,
         at: Option<VirtualAddress>,
+        size: PageSize,
         n_pages: usize,
         flags: Flags,
         fill_with: Option<&[u8]>,
     ) -> VirtualAddress {
-        let at = at.unwrap_or_else(|| self.find_free_region(n_pages));
-        let mut backing = UniquePhysicalRegion::alloc_sparse(PageSize::Kilopage, n_pages);
+        let at = at.unwrap_or_else(|| self.find_free_region(size, n_pages));
+        let mut backing = UniquePhysicalRegion::alloc_sparse(size, n_pages);
         if let Some(fill_with) = fill_with {
             backing.copy_data_into(fill_with);
         }
 
-        let iter = backing.physical_addresses().enumerate().map(|(i, phys)| (phys, at.offset(i * 4.kib())));
+        let iter = backing.physical_addresses().enumerate().map(|(i, phys)| (phys, at.offset(i * size.to_byte_size())));
         for (phys_addr, virt_addr) in iter {
-            self.table.map(phys_addr, virt_addr, flags, PageSize::Kilopage);
+            self.table.map(phys_addr, virt_addr, flags, size);
             sfence(Some(virt_addr), None);
         }
 
         self.address_map
             .alloc(
-                at..at.offset(4.kib() * n_pages),
+                at..at.offset(size.to_byte_size() * n_pages),
                 MemoryRegion::Backed(PhysicalRegion::Shared(backing.into_shared_region())),
             )
             .unwrap();
@@ -185,24 +192,21 @@ impl MemoryManager {
 
     // FIXME: Need a source of RNG to offset into the address space at random so
     // we don't fill it up from the start every single time
-    pub fn find_free_region(&self, n_pages: usize) -> VirtualAddress {
-        let total_bytes = n_pages * 4.kib();
+    pub fn find_free_region(&self, size: PageSize, n_pages: usize) -> VirtualAddress {
+        let total_bytes = n_pages * size.to_byte_size();
 
         for region in self.address_map.unoccupied_regions() {
-            log::debug!("Found unoccupied region: {:#p}-{:#p}", region.span.start, region.span.end);
-            let region_size = region.span.end.as_usize() - region.span.start.as_usize();
+            let aligned_start =
+                VirtualAddress::new(utils::round_up_to_next(region.span.start.as_usize(), size.to_byte_size()));
+
+            if aligned_start > region.span.end {
+                continue;
+            }
+
+            log::debug!("Found unoccupied region: {:#p}-{:#p}", aligned_start, region.span.end);
+            let region_size = region.span.end.as_usize() - aligned_start.as_usize();
             if region_size >= total_bytes {
-                // FIXME: Need to add the concept of guard pages so we don't
-                // need to manually skip the 0..4kib range
-                if region.span.start == VirtualAddress::new(0) {
-                    if region_size - 4.kib() >= total_bytes {
-                        return VirtualAddress::new(4.kib());
-                    }
-
-                    continue;
-                }
-
-                return region.span.start;
+                return aligned_start;
             }
         }
 

@@ -229,6 +229,8 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                     let mut active_task = active_task_lock.lock();
                     let memory_manager = &mut active_task.memory_manager;
 
+                    log::info!("{:#?}", memory_manager.region_for(stval));
+
                     let valid = match memory_manager.region_for(stval) {
                         None | Some(AddressRegion { region: None, .. }) => false,
                         Some(AddressRegion { region: Some(MemoryRegion::GuardPage), .. }) => {
