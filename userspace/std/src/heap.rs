@@ -114,17 +114,22 @@ impl TaskLocalAllocator {
     }
 }
 
-struct DummyGlobalAlloc;
+struct GlobalTaskLocalAllocator;
 
-unsafe impl GlobalAlloc for DummyGlobalAlloc {
-    unsafe fn alloc(&self, _: Layout) -> *mut u8 {
-        panic!("Don't use `Box` with the `Global` allocator")
+unsafe impl GlobalAlloc for GlobalTaskLocalAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        match TASK_LOCAL_ALLOCATOR.allocate(layout) {
+            Ok(ptr) => ptr.as_ptr() as *mut u8,
+            Err(_) => core::ptr::null_mut(),
+        }
     }
 
-    unsafe fn dealloc(&self, _: *mut u8, _: Layout) {
-        panic!("Don't use `Box` with the `Global` allocator")
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        if !ptr.is_null() {
+            TASK_LOCAL_ALLOCATOR.deallocate(NonNull::new_unchecked(ptr), layout)
+        }
     }
 }
 
 #[global_allocator]
-static THIS_REALLY_SHOULD_NOT_BE_NECESSARY: DummyGlobalAlloc = DummyGlobalAlloc;
+static TASK_LOCAL: GlobalTaskLocalAllocator = GlobalTaskLocalAllocator;

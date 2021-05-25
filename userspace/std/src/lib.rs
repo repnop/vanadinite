@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(allocator_api, alloc_error_handler, asm, inline_const, prelude_import, thread_local)]
+#![feature(allocator_api, alloc_error_handler, alloc_prelude, asm, inline_const, prelude_import, thread_local)]
 #![no_std]
 #![allow(incomplete_features)]
 

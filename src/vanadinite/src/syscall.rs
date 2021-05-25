@@ -15,7 +15,7 @@ use crate::{
     scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
     task::TaskState,
     trap::TrapFrame,
-    utils::{self, Units},
+    utils,
 };
 use core::convert::TryInto;
 use librust::{

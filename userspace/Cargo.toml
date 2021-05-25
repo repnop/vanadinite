@@ -1,5 +1,6 @@
 [workspace]
 members = ["hax", "init", "rt0", "shell", "std", "template"]
+resolver = "2"
 
 [profile.release]
 debug = true

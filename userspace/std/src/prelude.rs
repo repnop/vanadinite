@@ -7,7 +7,7 @@
 
 pub mod rust_2018 {
     pub use crate::{print, println};
+    pub use alloc::collections::VecDeque;
+    pub use alloc::prelude::v1::*;
     pub use core::prelude::v1::*;
-    pub type Box<T> = alloc::boxed::Box<T, crate::heap::TaskLocal>;
-    pub type Vec<T> = alloc::vec::Vec<T, crate::heap::TaskLocal>;
 }

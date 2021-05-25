@@ -9,7 +9,6 @@
 
 extern crate alloc;
 
-use alloc::alloc::Allocator;
 use core::num::NonZeroUsize;
 use std::librust::syscalls::*;
 use std::librust::{
@@ -19,24 +18,24 @@ use std::librust::{
 };
 
 fn main() {
-    let mut history: Vec<Vec<u8>> = Vec::new_in(std::heap::TaskLocal::new());
+    let mut history: VecDeque<String> = VecDeque::new();
     let mut history_index = None;
-    let mut curr_history: Option<Vec<u8>> = None;
+    let mut curr_history: Option<&str> = None;
 
     loop {
         print!("vanadinite> ");
 
         if let Some(cmd) = &curr_history {
-            print!("{}", core::str::from_utf8(cmd).unwrap());
+            print!("{}", cmd);
         }
 
-        let input = match read_input(curr_history.as_ref()) {
+        let input = match read_input(curr_history.as_deref()) {
             Some(input) => input,
             None => continue,
         };
 
-        let cmd_bytes = match input {
-            Input::Command(cmd_bytes) => cmd_bytes,
+        let cmd_str = match input {
+            Input::Command(cmd_str) => cmd_str,
             Input::Control(ControlSequence::ArrowUp) => {
                 let index = match &mut history_index {
                     Some(i) if history.len() > *i + 1 => {
@@ -51,7 +50,7 @@ fn main() {
                 };
 
                 if index < history.len() {
-                    curr_history = Some(history[index].clone());
+                    curr_history = Some(&history[index]);
                 }
 
                 clear_line();
@@ -66,7 +65,7 @@ fn main() {
                         }
                         n => {
                             *i -= 1;
-                            curr_history = Some(history[n - 1].clone());
+                            curr_history = Some(&history[n - 1]);
                         }
                     }
                 }
@@ -76,13 +75,9 @@ fn main() {
             }
         };
 
-        let cmd = match core::str::from_utf8(&cmd_bytes).ok() {
-            Some("") => continue,
-            Some(cmd) => cmd,
-            None => {
-                println!("unknown command :(");
-                continue;
-            }
+        let cmd = match &*cmd_str {
+            "" => continue,
+            cmd => cmd,
         };
 
         let (cmd, args) = cmd.split_once(' ').unwrap_or((cmd, ""));
@@ -145,12 +140,12 @@ fn main() {
             },
             "test_std_allocator" => {
                 println!("Testing Box...");
-                let mut b = Box::new_in(5u32, std::heap::TaskLocal::new());
+                let mut b = Box::new(5u32);
                 *b = 6;
                 println!("    *b = {}", b);
 
                 println!("Testing Vec...");
-                let mut v = Vec::new_in(std::heap::TaskLocal::new());
+                let mut v = Vec::new();
 
                 for i in 0..100usize {
                     v.push(i);
@@ -163,9 +158,9 @@ fn main() {
 
                 *(sp.add(4096)) = 0;
             },
-            "test_large_page_alloc" => {
-                std::heap::TaskLocal::new().allocate(alloc::alloc::Layout::from_size_align(32768, 8).unwrap()).unwrap();
-            }
+            "test_large_page_alloc" => unsafe {
+                alloc::alloc::alloc(alloc::alloc::Layout::from_size_align(32768, 8).unwrap());
+            },
             "tp" => {
                 let tp: usize;
                 unsafe { asm!("mv {}, tp", out(reg) tp) };
@@ -178,8 +173,8 @@ fn main() {
             _ => println!("unknown command :("),
         }
 
-        if history.first() != Some(&cmd_bytes) {
-            history.insert(0, cmd_bytes);
+        if history.front() != Some(&cmd_str) {
+            history.push_front(cmd_str);
         }
         history_index = None;
         curr_history = None;
@@ -187,7 +182,7 @@ fn main() {
 }
 
 enum Input {
-    Command(Vec<u8>),
+    Command(String),
     Control(ControlSequence),
 }
 
@@ -196,10 +191,10 @@ enum ControlSequence {
     ArrowDown,
 }
 
-fn read_input(current_cmd: Option<&Vec<u8>>) -> Option<Input> {
+fn read_input(current_cmd: Option<&str>) -> Option<Input> {
     let mut buf = match current_cmd {
-        Some(cmd) => cmd.clone(),
-        None => Vec::with_capacity_in(256, std::heap::TaskLocal::new()),
+        Some(cmd) => cmd.to_string(),
+        None => String::with_capacity(256),
     };
 
     let max_len = 256;
@@ -235,7 +230,7 @@ fn read_input(current_cmd: Option<&Vec<u8>>) -> Option<Input> {
             _ => print!("{}", c[0] as char),
         }
 
-        buf.push(c[0]);
+        buf.push(c[0] as char);
         read += 1;
     }
 

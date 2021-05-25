@@ -2,13 +2,13 @@
 members = [
     "bytestream",
     "elf64",
-    
     "librust",
     "sbi",
     "tar",
     "vanadinite",
     "vanadinite_macros",
 ] #"fat32",
+resolver = "2"
 
 [profile.release]
 debug = true

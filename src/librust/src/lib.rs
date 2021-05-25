@@ -5,9 +5,12 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(asm, inline_const)]
+#![feature(allocator_api, asm, inline_const)]
 #![no_std]
 #![allow(incomplete_features)]
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
 
 use core::convert::TryFrom;
 use message::{Message, MessageKind};
@@ -17,6 +20,7 @@ pub mod error;
 pub mod message;
 pub mod syscalls;
 pub mod task;
+pub mod taskgroup;
 
 pub type KResult<T> = Result<T, error::KError>;
 

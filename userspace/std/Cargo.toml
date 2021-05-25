@@ -7,5 +7,5 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-librust = { path = "../../src/librust" }
+librust = { path = "../../src/librust", features = ["alloc"] }
 rt0 = { path = "../rt0" }
