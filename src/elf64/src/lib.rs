@@ -46,6 +46,10 @@ impl<'a> Elf<'a> {
         core::iter::from_fn(move || phs.next())
     }
 
+    pub fn load_segments(&self) -> impl Iterator<Item = ProgramHeader> + '_ {
+        self.program_headers().filter(|ph| ph.r#type == ProgramSegmentType::Load)
+    }
+
     pub fn section_headers(&self) -> impl Iterator<Item = SectionHeader> + '_ {
         let start = self.header.sh_offset as usize;
         let end = start + (self.header.sh_count as usize * core::mem::size_of::<SectionHeader>());
@@ -54,8 +58,46 @@ impl<'a> Elf<'a> {
         core::iter::from_fn(move || phs.next())
     }
 
-    pub fn program_segment_data(&self, header: &ProgramHeader) -> &[u8] {
+    pub fn program_segment_data(&self, header: &ProgramHeader) -> &'a [u8] {
         &self.data[header.offset as usize..][..header.file_size as usize]
+    }
+
+    pub fn relocations(&self) -> impl Iterator<Item = Relocation> + '_ {
+        let dyn_header = self.program_headers().find(|ph| ph.r#type == ProgramSegmentType::Dynamic);
+
+        dyn_header.into_iter().flat_map(move |header| {
+            self.rels(&header).map(Relocation::Rel).chain(self.relas(&header).map(Relocation::Rela))
+        })
+    }
+
+    fn rels(&'a self, dyn_header: &ProgramHeader) -> impl Iterator<Item = Rel> + 'a {
+        let rel_size = self.dynamic_entry(dyn_header, DynamicTag::RelSz).map(|de| de.value);
+        let rel = self.dynamic_entry(dyn_header, DynamicTag::Rel).map(|de| de.value);
+
+        rel.into_iter().zip(rel_size).flat_map(move |(rel, rel_size)| {
+            self.data[rel as usize..][..rel_size as usize]
+                .chunks_exact(core::mem::size_of::<Rel>())
+                .flat_map(Rel::from_bytes)
+        })
+    }
+
+    fn relas(&'a self, dyn_header: &ProgramHeader) -> impl Iterator<Item = Rela> + 'a {
+        let rela_size = self.dynamic_entry(dyn_header, DynamicTag::RelaSz).map(|de| de.value);
+        let rela = self.dynamic_entry(dyn_header, DynamicTag::Rela).map(|de| de.value);
+
+        rela.into_iter().zip(rela_size).flat_map(move |(rela, rela_size)| {
+            self.data[rela as usize..][..rela_size as usize]
+                .chunks_exact(core::mem::size_of::<Rela>())
+                .flat_map(Rela::from_bytes)
+        })
+    }
+
+    fn dynamic_entry(&self, dyn_header: &ProgramHeader, tag: DynamicTag) -> Option<DynamicEntry> {
+        self.program_segment_data(&dyn_header)
+            .chunks_exact(16)
+            .flat_map(DynamicEntry::from_bytes)
+            .take_while(|de| de.tag != DynamicTag::Null)
+            .find(|de| de.tag == tag)
     }
 }
 
@@ -241,6 +283,7 @@ pub enum ProgramSegmentType {
     ProgramHeaderTable = 6,
     Tls = 7,
     LoOs = 0x6000_0000,
+    GnuRelro = 0x6474_E552,
     HiOs = 0x6FFF_FFFF,
     LoProc = 0x7000_0000,
     HiProc = 0x7FFF_FFFF,
@@ -263,3 +306,85 @@ pub enum ProgramSegmentFlags {
 }
 
 // TODO: dynamic sections, hash table stuff
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u64)]
+pub enum DynamicTag {
+    Null = 0,
+    Needed = 1,
+    PltRelSz = 2,
+    PltGot = 3,
+    Hash = 4,
+    StrTab = 5,
+    SymTab = 6,
+    Rela = 7,
+    RelaSz = 8,
+    RelaEnt = 9,
+    StrSz = 10,
+    SymEnt = 11,
+    Init = 12,
+    Fini = 13,
+    SoName = 14,
+    RPath = 15,
+    Symbolic = 16,
+    Rel = 17,
+    RelSz = 18,
+    RelEnt = 19,
+    PltRel = 20,
+    Debug = 21,
+    TextRel = 22,
+    JmpRel = 23,
+    BindNow = 24,
+    InitArray = 25,
+    FiniArray = 26,
+    InitArraySz = 27,
+    FiniArraySz = 28,
+    LoOs = 0x60000000,
+    HiOs = 0x6fffffff,
+    LoProc = 0x70000000,
+    HiProc = 0x7fffffff,
+    GnuHash = 0x6ffffef5,
+    Flags1 = 0x6ffffffb,
+    RelACount = 0x6ffffff9,
+}
+
+impl core::cmp::PartialEq<DynamicTag> for Xword {
+    fn eq(&self, other: &DynamicTag) -> bool {
+        *self == *other as Xword
+    }
+}
+
+streamable_struct! {
+    #[derive(Debug, Clone, Copy)]
+    pub struct DynamicEntry {
+        pub tag: Xword,
+        pub value: u64,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Relocation {
+    Rel(Rel),
+    Rela(Rela),
+}
+
+streamable_struct! {
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub struct Rel {
+        pub offset: Addr,
+        pub r#type: Word,
+        pub sym: Word,
+    }
+}
+
+streamable_struct! {
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub struct Rela {
+        pub offset: Addr,
+        pub r#type: Word,
+        pub sym: Word,
+        pub addend: Sxword,
+    }
+}

@@ -117,6 +117,7 @@ pub fn run(options: RunOptions) -> Result<()> {
                 ./spike
                     -p{cpu_count}
                     -m{ram}
+                    -d
                     --isa=rv64gc
                     --bootargs={kernel_args}
                     opensbi-riscv64-generic-fw_payload.elf 

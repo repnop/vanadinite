@@ -66,6 +66,8 @@ impl TaskLocalAllocator {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let size = usize::max(layout.size(), layout.align().min(4096));
 
+        //println!("Alloc request: {:?}", layout);
+
         let slab = self.slabs.iter().find(|s| s.0 >= size).ok_or(AllocError)?;
         let mut slab_head = slab.1.get();
 
@@ -77,7 +79,7 @@ impl TaskLocalAllocator {
             let mut options = AllocationOptions::None;
 
             if mem_size >= 2 * 1024 * 1024 {
-                println!("Asking for large pages");
+                //println!("Asking for large pages");
                 options = options | AllocationOptions::LargePage;
             }
 

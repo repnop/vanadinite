@@ -170,6 +170,7 @@ fn main() {
             "tid" => {
                 println!("Our TID is {}", current_tid().value())
             }
+            "where_main" => println!("main is at: {:#p}", main as *mut u8),
             _ => println!("unknown command :("),
         }
 

@@ -9,7 +9,7 @@
 #![no_std]
 
 #[no_mangle]
-unsafe extern "C" fn _start() {
+unsafe extern "C" fn _start() -> ! {
     extern "C" {
         fn main(_: isize, _: *const *const u8) -> isize;
     }
@@ -23,13 +23,7 @@ unsafe extern "C" fn _start() {
     ");
 
     main(0, core::ptr::null::<*const u8>());
-
-    #[rustfmt::skip]
-    asm!("
-        mv a1, a0
-        li a0, 0
-        ecall
-    ", options(noreturn));
+    librust::syscalls::exit()
 }
 
 #[lang = "start"]

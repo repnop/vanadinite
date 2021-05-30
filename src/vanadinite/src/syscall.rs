@@ -9,7 +9,7 @@ use crate::{
     csr::sstatus::TemporaryUserMemoryAccess,
     io::{ConsoleDevice, INPUT_QUEUE},
     mem::{
-        manager::FillOption,
+        manager::{AddressRegionKind, FillOption},
         paging::{flags, PageSize, VirtualAddress},
     },
     scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
@@ -183,6 +183,7 @@ fn do_syscall(msg: Message, frame: &mut TrapFrame) {
                         utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
                         flags,
                         if options & AllocationOptions::Zero { FillOption::Zeroed } else { FillOption::Unitialized },
+                        AddressRegionKind::UserAllocated,
                     );
 
                     log::debug!("Allocated memory at {:#p} for user process", allocated_at);

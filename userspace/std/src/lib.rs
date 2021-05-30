@@ -15,6 +15,7 @@ extern crate rt0;
 pub mod heap;
 pub mod io;
 pub mod prelude;
+mod task_local;
 
 pub use librust;
 

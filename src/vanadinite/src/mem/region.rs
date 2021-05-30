@@ -85,7 +85,6 @@ impl UniquePhysicalRegion {
     pub fn alloc_contiguous(page_size: PageSize, n_pages: usize) -> Self {
         log::debug!("Allocating page for contiguous region");
         let mut lock = PHYSICAL_MEMORY_ALLOCATOR.lock();
-        log::info!("locked");
 
         let kind = PhysicalRegionKind::Contiguous(unsafe {
             lock.alloc_contiguous(page_size, n_pages).expect("couldn't alloc contiguous region")
@@ -96,9 +95,9 @@ impl UniquePhysicalRegion {
 
     #[track_caller]
     pub fn alloc_sparse(page_size: PageSize, n_pages: usize) -> Self {
-        //if n_pages == 1 {
-        //    return Self::alloc_contiguous(page_size, 1);
-        //}
+        if n_pages == 1 {
+            return Self::alloc_contiguous(page_size, 1);
+        }
 
         let kind = PhysicalRegionKind::Sparse(unsafe {
             let mut allocator = PHYSICAL_MEMORY_ALLOCATOR.lock();

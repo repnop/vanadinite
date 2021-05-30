@@ -247,6 +247,9 @@ impl PageTable {
     }
 }
 
+unsafe impl Send for PageTable {}
+unsafe impl Sync for PageTable {}
+
 impl Drop for PageTable {
     fn drop(&mut self) {
         for pt in self.subtables.drain(..) {
