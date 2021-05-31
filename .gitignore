@@ -10,3 +10,4 @@ qemu.log
 opensbi-*.*
 initfs.tar
 spike
+todo.txt
