@@ -35,7 +35,6 @@ pub struct MemoryManager {
 }
 
 impl MemoryManager {
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let mut this = Self { table: PageTable::new(), address_map: AddressMap::new() };
 

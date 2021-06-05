@@ -34,7 +34,6 @@ pub struct ThreadControlBlock {
 }
 
 impl ThreadControlBlock {
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             kernel_stack: core::ptr::null_mut(),

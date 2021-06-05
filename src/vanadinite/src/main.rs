@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![allow(clippy::match_bool, clippy::identity_op, clippy::never_loop)]
+#![allow(clippy::match_bool, clippy::identity_op, clippy::never_loop, clippy::new_without_default)]
 #![allow(incomplete_features)]
 #![feature(
     alloc_error_handler,

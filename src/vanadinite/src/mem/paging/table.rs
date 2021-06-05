@@ -30,7 +30,6 @@ impl PageTable {
 
     /// Creates a new [`PageTable`], copying the kernel regions from the active
     /// table
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         // Safety: This is safe since page tables are made up of trivial types,
         // of which zero is a valid state (and the one we want for new ones)

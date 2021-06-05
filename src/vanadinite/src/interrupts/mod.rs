@@ -18,7 +18,6 @@ pub fn register_plic(plic: &'static plic::Plic) {
 pub struct InterruptDisabler(bool);
 
 impl InterruptDisabler {
-    #[allow(clippy::new_without_default)]
     #[inline(always)]
     pub fn new() -> Self {
         let reenable = match crate::csr::sstatus::read() & 2 == 2 {

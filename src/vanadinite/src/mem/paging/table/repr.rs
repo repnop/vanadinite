@@ -189,7 +189,7 @@ impl VirtualAddress {
         (self.0 as isize).is_negative()
     }
 
-    pub fn userspace_range() -> Range<VirtualAddress> {
+    pub const fn userspace_range() -> Range<VirtualAddress> {
         VirtualAddress::new(0)..VirtualAddress::new(1 << (12 + N_VPN * 9 - 1))
     }
 }
