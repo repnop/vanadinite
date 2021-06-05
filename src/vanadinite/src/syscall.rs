@@ -6,11 +6,11 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    csr::sstatus::TemporaryUserMemoryAccess,
     io::{ConsoleDevice, INPUT_QUEUE},
     mem::{
         manager::{AddressRegionKind, FillOption},
         paging::{flags, PageSize, VirtualAddress},
+        user::RawUserSlice,
     },
     scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
     task::TaskState,
@@ -87,46 +87,47 @@ fn do_syscall(msg: Message, frame: &mut TrapFrame) {
         const { Syscall::Print as usize } => {
             let start = VirtualAddress::new(msg.arguments[0]);
             let len = msg.arguments[1];
-            let end = start.offset(len);
+            let user_slice = RawUserSlice::readable(start, len);
+            let user_slice = match unsafe { user_slice.validate(&task.memory_manager) } {
+                Ok(slice) => slice,
+                Err((addr, e)) => {
+                    log::error!("Bad memory from process: {:?}", e);
+                    return apply_message(KError::InvalidAccess(AccessError::Read(addr.as_ptr())).into(), frame);
+                }
+            };
 
             log::debug!("Attempting to print memory at {:#p} (len={})", start, len);
 
-            if let Err(addr) = task.memory_manager.is_user_region_valid(start..end, |f| f & flags::READ) {
-                log::error!("Bad memory from process >:(");
-                return apply_message(KError::InvalidAccess(AccessError::Read(addr.as_ptr())).into(), frame);
-            }
-
-            let _guard = TemporaryUserMemoryAccess::new();
-
             let mut console = crate::io::CONSOLE.lock();
-            let bytes = unsafe { core::slice::from_raw_parts(start.as_ptr(), len) };
-            for byte in bytes {
-                console.write(*byte);
-            }
+            user_slice.with(|bytes| bytes.iter().copied().for_each(|b| console.write(b)));
 
             None.into()
         }
         const { Syscall::ReadStdin as usize } => {
             let start = VirtualAddress::new(msg.arguments[0]);
             let len = msg.arguments[1];
-            let end = start.offset(len);
+            let user_slice = RawUserSlice::writable(start, len);
+            let mut user_slice = match unsafe { user_slice.validate(&task.memory_manager) } {
+                Ok(slice) => slice,
+                Err((addr, e)) => {
+                    log::error!("Bad memory from process: {:?}", e);
+                    return apply_message(KError::InvalidAccess(AccessError::Write(addr.as_mut_ptr())).into(), frame);
+                }
+            };
 
             log::debug!("Attempting to write to memory at {:#p} (len={})", start, len);
 
-            if let Err(addr) = task.memory_manager.is_user_region_valid(start..end, |f| f & flags::WRITE) {
-                return apply_message(KError::InvalidAccess(AccessError::Write(addr.as_mut_ptr())).into(), frame);
-            }
-
-            let _guard = TemporaryUserMemoryAccess::new();
             let mut n_written = 0;
-            for index in 0..len {
-                let value = match INPUT_QUEUE.pop() {
-                    Some(v) => v,
-                    None => break,
-                };
-                unsafe { start.offset(index).as_mut_ptr().write(value) };
-                n_written += 1;
-            }
+            user_slice.with(|bytes| {
+                for byte in bytes {
+                    let value = match INPUT_QUEUE.pop() {
+                        Some(v) => v,
+                        None => break,
+                    };
+                    *byte = value;
+                    n_written += 1;
+                }
+            });
 
             let mut msg: Message = None.into();
             msg.arguments[0] = n_written;

@@ -1,5 +1,3 @@
-use crate::mem::paging::PageSize;
-
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2021 The vanadinite developers
 //
@@ -9,7 +7,7 @@ use crate::mem::paging::PageSize;
 
 use {
     core::sync::atomic::{AtomicUsize, Ordering},
-    paging::{PhysicalAddress, VirtualAddress},
+    paging::{PageSize, PhysicalAddress, VirtualAddress},
     phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
 };
 
@@ -17,6 +15,7 @@ pub mod heap;
 pub mod manager;
 pub mod phys;
 pub mod region;
+pub mod user;
 pub mod paging {
     mod table;
 

@@ -28,6 +28,11 @@ pub enum FillOption<'a> {
     Zeroed,
 }
 
+pub enum InvalidRegion {
+    NotMapped,
+    InvalidPermissions,
+}
+
 #[derive(Debug)]
 pub struct MemoryManager {
     table: PageTable,
@@ -179,12 +184,13 @@ impl MemoryManager {
 
     /// Iterates over the given address range, returning `Ok(())` if each page
     /// within the address range satisfied `f`, otherwise returning the first
-    /// [`VirtualAddress`] that was not satisfied
+    /// [`VirtualAddress`] that was not satisfied along with the reason for why
+    /// it is invalid
     pub fn is_user_region_valid(
         &self,
         range: Range<VirtualAddress>,
         f: impl Fn(Flags) -> bool,
-    ) -> Result<(), VirtualAddress> {
+    ) -> Result<(), (VirtualAddress, InvalidRegion)> {
         let start = range.start.align_down_to(PageSize::Kilopage);
         let end = range.end.align_to_next(PageSize::Kilopage);
 
@@ -192,12 +198,12 @@ impl MemoryManager {
             let page = VirtualAddress::new(page);
 
             if page.is_kernel_region() {
-                return Err(page);
+                return Err((page, InvalidRegion::InvalidPermissions));
             }
 
             match self.page_flags(page) {
-                Some(flags) if !f(flags) => return Err(page),
-                None => return Err(page),
+                Some(flags) if !f(flags) => return Err((page, InvalidRegion::InvalidPermissions)),
+                None => return Err((page, InvalidRegion::NotMapped)),
                 _ => {}
             }
         }
