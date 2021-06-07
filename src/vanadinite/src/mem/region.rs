@@ -153,6 +153,14 @@ impl UniquePhysicalRegion {
     pub fn into_shared_region(self) -> SharedPhysicalRegion {
         SharedPhysicalRegion { region: Arc::new(self) }
     }
+
+    pub fn page_size(&self) -> PageSize {
+        self.page_size
+    }
+
+    pub fn n_pages(&self) -> usize {
+        self.n_pages
+    }
 }
 
 impl Drop for UniquePhysicalRegion {

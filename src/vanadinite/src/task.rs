@@ -13,6 +13,7 @@ use crate::{
             PageSize, VirtualAddress,
         },
     },
+    syscall::channel::UserspaceChannel,
     trap::{FloatingPointRegisters, Registers},
     utils::{round_up_to_next, Units},
 };
@@ -21,7 +22,7 @@ use alloc::{
     collections::{BTreeMap, VecDeque},
 };
 use elf64::{Elf, ProgramSegmentType, Relocation};
-use librust::{capabilities::Capability, message::Message};
+use librust::{capabilities::Capability, message::Message, syscalls::channel::ChannelId};
 
 #[derive(Debug)]
 #[repr(C)]
@@ -70,6 +71,7 @@ pub struct Task {
     pub memory_manager: MemoryManager,
     pub state: TaskState,
     pub message_queue: VecDeque<Message>,
+    pub channels: BTreeMap<ChannelId, UserspaceChannel>,
     pub capabilities: [Capability; 32],
 }
 
@@ -256,6 +258,7 @@ impl Task {
             context,
             memory_manager,
             state: TaskState::Running,
+            channels: BTreeMap::new(),
             message_queue: VecDeque::new(),
             capabilities,
         }

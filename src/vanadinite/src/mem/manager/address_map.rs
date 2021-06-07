@@ -161,7 +161,7 @@ impl AddressMap {
 
     /// Find the region containing the given [`VirtualAddress`]
     pub fn find(&self, address: VirtualAddress) -> Option<&AddressRegion> {
-        self.map.range(address..).next().map(|(_, r)| r)
+        self.map.range(address.offset(1)..).next().map(|(_, r)| r)
     }
 
     /// Returns the unoccupied regions in the address space

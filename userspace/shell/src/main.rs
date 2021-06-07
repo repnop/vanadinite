@@ -10,10 +10,13 @@
 extern crate alloc;
 
 use core::num::NonZeroUsize;
-use std::librust::syscalls::*;
+use std::librust::syscalls::{channel::ChannelId, *};
 use std::librust::{
     message::{Message, MessageKind, Sender},
-    syscalls::allocation::{alloc_virtual_memory, AllocationOptions, MemoryPermissions},
+    syscalls::{
+        allocation::{alloc_virtual_memory, AllocationOptions, MemoryPermissions},
+        channel,
+    },
     task::Tid,
 };
 
@@ -21,6 +24,7 @@ fn main() {
     let mut history: VecDeque<String> = VecDeque::new();
     let mut history_index = None;
     let mut curr_history: Option<&str> = None;
+    let mut channels = Vec::new();
 
     loop {
         print!("vanadinite> ");
@@ -171,6 +175,82 @@ fn main() {
                 println!("Our TID is {}", current_tid().value())
             }
             "where_main" => println!("main is at: {:#p}", main as *mut u8),
+            "open_channel" => match args.trim().parse::<usize>() {
+                Ok(0) | Err(_) => {
+                    println!("Need valid TID :(")
+                }
+                Ok(tidn) => {
+                    let tid = Tid::new(NonZeroUsize::new(tidn).unwrap());
+                    let ret = send_message(
+                        tid,
+                        Message {
+                            sender: Sender::dummy(),
+                            kind: MessageKind::Request(None),
+                            fid: 1,
+                            arguments: [0; 8],
+                        },
+                    );
+
+                    match ret {
+                        Ok(_) => println!("Message sent to TID {}!", tidn),
+                        Err(e) => println!("Couldn't send message: {:?}", e),
+                    }
+
+                    println!("Waiting for response with channel ID");
+                    let channel_id = loop {
+                        match receive_message() {
+                            Ok(Some(msg)) if msg.sender == Sender::task(tid) => {
+                                break ChannelId::new(msg.arguments[0]);
+                            }
+                            _ => {}
+                        }
+                    };
+
+                    match channel::read_message(channel_id) {
+                        Ok(Some(msg)) => {
+                            let slice = unsafe { core::slice::from_raw_parts(msg.ptr, msg.len) };
+                            println!("A message already! Contents: {:?}", slice);
+
+                            channel::retire_message(channel_id, msg.id).unwrap();
+
+                            channels.push(channel_id);
+
+                            println!("Channel ID with {:?}: {:?}", tid, channel_id);
+                        }
+                        Ok(None) => {
+                            channels.push(channel_id);
+                            println!("Channel ID with {:?}: {:?}", tid, channel_id);
+                        }
+                        Err(_) => println!("Didn't get back a valid channel ID :("),
+                    }
+                }
+            },
+            "read_channel" => match args.trim().parse::<usize>() {
+                Err(_) => {
+                    println!("Need valid channel ID :(")
+                }
+                Ok(cid) => {
+                    let channel_id = ChannelId::new(cid);
+
+                    match channels.iter().find(|c| **c == channel_id) {
+                        None => println!("Not a channel I know about :("),
+                        Some(_) => match channel::read_message(channel_id) {
+                            Ok(Some(msg)) => {
+                                let slice = unsafe { core::slice::from_raw_parts(msg.ptr, msg.len) };
+
+                                match core::str::from_utf8(slice) {
+                                    Err(_) => println!("A message! Contents: {:?}", slice),
+                                    Ok(s) => println!("A message! It says: {}", s),
+                                }
+
+                                channel::retire_message(channel_id, msg.id).unwrap();
+                            }
+                            Ok(None) => println!("No message waiting on channel"),
+                            Err(_) => println!("Didn't get back a valid channel ID :("),
+                        },
+                    }
+                }
+            },
             _ => println!("unknown command :("),
         }
 

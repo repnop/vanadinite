@@ -22,6 +22,8 @@ use address_map::AddressMap;
 pub use address_map::{AddressRegion, AddressRegionKind};
 use core::ops::Range;
 
+use super::region::SharedPhysicalRegion;
+
 pub enum FillOption<'a> {
     Data(&'a [u8]),
     Unitialized,
@@ -60,7 +62,7 @@ impl MemoryManager {
         flags: Flags,
         fill: FillOption<'_>,
         kind: AddressRegionKind,
-    ) -> VirtualAddress {
+    ) -> Range<VirtualAddress> {
         let at = at.unwrap_or_else(|| self.find_free_region(size, n_pages));
 
         log::debug!("Allocating region at {:#p}: size={:?} n_pages={} flags={:?}", at, size, n_pages, flags);
@@ -79,15 +81,12 @@ impl MemoryManager {
             self.table.map(phys_addr, virt_addr, flags, size);
         }
 
+        let range = at..at.offset(size.to_byte_size() * n_pages);
         self.address_map
-            .alloc(
-                at..at.offset(size.to_byte_size() * n_pages),
-                MemoryRegion::Backed(PhysicalRegion::Unique(backing)),
-                kind,
-            )
+            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), kind)
             .expect("bad address mapping");
 
-        at
+        range
     }
 
     /// Same as [`Self::alloc_region`], except attempts to find a free region
@@ -122,7 +121,7 @@ impl MemoryManager {
         flags: Flags,
         fill: FillOption<'_>,
         kind: AddressRegionKind,
-    ) -> VirtualAddress {
+    ) -> (Range<VirtualAddress>, SharedPhysicalRegion) {
         let at = at.unwrap_or_else(|| self.find_free_region(size, n_pages));
         let mut backing = UniquePhysicalRegion::alloc_sparse(size, n_pages);
 
@@ -138,15 +137,40 @@ impl MemoryManager {
             sfence(Some(virt_addr), None);
         }
 
+        let shared = backing.into_shared_region();
+        let range = at..at.offset(size.to_byte_size() * n_pages);
+
         self.address_map
-            .alloc(
-                at..at.offset(size.to_byte_size() * n_pages),
-                MemoryRegion::Backed(PhysicalRegion::Shared(backing.into_shared_region())),
-                kind,
-            )
+            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(shared.clone())), kind)
             .unwrap();
 
-        at
+        (range, shared)
+    }
+
+    pub fn apply_shared_region(
+        &mut self,
+        at: Option<VirtualAddress>,
+        flags: Flags,
+        region: SharedPhysicalRegion,
+        kind: AddressRegionKind,
+    ) -> Range<VirtualAddress> {
+        let at = at.unwrap_or_else(|| self.find_free_region(region.page_size(), region.n_pages()));
+
+        let iter = region
+            .physical_addresses()
+            .enumerate()
+            .map(|(i, phys)| (phys, at.offset(i * region.page_size().to_byte_size())));
+
+        for (phys_addr, virt_addr) in iter {
+            self.table.map(phys_addr, virt_addr, flags, region.page_size());
+            sfence(Some(virt_addr), None);
+        }
+
+        let range = at..at.offset(region.page_size().to_byte_size() * region.n_pages());
+
+        self.address_map.alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(region)), kind).unwrap();
+
+        range
     }
 
     /// Place a guard page at the given [`VirtualAddress`]
@@ -156,7 +180,8 @@ impl MemoryManager {
     }
 
     /// Deallocate the region specified by the given [`VirtualAddress`]
-    pub fn dealloc_region(&mut self, at: VirtualAddress) {
+    #[track_caller]
+    pub fn dealloc_region(&mut self, at: VirtualAddress) -> MemoryRegion {
         let region = self.address_map.find(at).expect("kernel address passed in");
         assert!(region.region.is_some(), "trying to dealloc an unallocated region");
 
@@ -168,6 +193,8 @@ impl MemoryManager {
             self.table.unmap(virt_addr);
             sfence(Some(virt_addr), None);
         }
+
+        region
     }
 
     /// Returns the [`AddressRegion`] that contains the given

@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+pub mod channel;
+
 use crate::{
     io::{ConsoleDevice, INPUT_QUEUE},
     mem::{
@@ -17,7 +19,7 @@ use crate::{
     trap::TrapFrame,
     utils,
 };
-use core::convert::TryInto;
+use core::{convert::TryInto, num::NonZeroUsize};
 use librust::{
     error::{AccessError, KError},
     message::{Message, MessageKind, Recipient, Sender},
@@ -187,13 +189,13 @@ fn do_syscall(msg: Message, frame: &mut TrapFrame) {
                         AddressRegionKind::UserAllocated,
                     );
 
-                    log::debug!("Allocated memory at {:#p} for user process", allocated_at);
+                    log::debug!("Allocated memory at {:#p} for user process", allocated_at.start);
 
                     Message {
                         sender: Sender::kernel(),
                         kind: MessageKind::Reply(None),
                         fid: 0,
-                        arguments: [allocated_at.as_usize(), 0, 0, 0, 0, 0, 0, 0],
+                        arguments: [allocated_at.start.as_usize(), 0, 0, 0, 0, 0, 0, 0],
                     }
                 }
             };
@@ -204,6 +206,24 @@ fn do_syscall(msg: Message, frame: &mut TrapFrame) {
             fid: 0,
             arguments: [CURRENT_TASK.get().unwrap().value(), 0, 0, 0, 0, 0, 0, 0],
         },
+        const { Syscall::CreateChannel as usize } => loop {
+            let tid = match NonZeroUsize::new(msg.arguments[0]) {
+                Some(tid) => tid,
+                None => break KError::InvalidArgument(0).into(),
+            };
+
+            break channel::create_channel(task, Tid::new(tid)).into();
+        },
+        const { Syscall::CreateChannelMessage as usize } => {
+            channel::create_message(task, msg.arguments[0], msg.arguments[1]).into()
+        }
+        const { Syscall::SendChannelMessage as usize } => {
+            channel::send_message(task, msg.arguments[0], msg.arguments[1], msg.arguments[2]).into()
+        }
+        const { Syscall::ReadChannel as usize } => channel::read_message(task, msg.arguments[0]).into(),
+        const { Syscall::RetireChannelMessage as usize } => {
+            channel::retire_message(task, msg.arguments[0], msg.arguments[1]).into()
+        }
         id => KError::InvalidSyscall(id).into(),
     };
 

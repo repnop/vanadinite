@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod allocation;
+pub mod channel;
 
 use crate::{
     message::{Message, MessageKind, Recipient, Sender},
@@ -23,6 +24,11 @@ pub enum Syscall {
     ReadMessage,
     AllocVirtualMemory,
     GetTid,
+    CreateChannel,
+    ReadChannel,
+    CreateChannelMessage,
+    SendChannelMessage,
+    RetireChannelMessage,
 }
 
 #[no_mangle]

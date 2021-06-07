@@ -8,6 +8,7 @@
 use crate::{
     error::{self, AccessError, KError},
     task::Tid,
+    KResult,
 };
 use core::{convert::TryInto, num::NonZeroUsize};
 
@@ -79,6 +80,71 @@ impl From<Option<KError>> for Message {
     }
 }
 
+impl From<KResult<()>> for Message {
+    fn from(kres: KResult<()>) -> Self {
+        match kres {
+            Ok(_) => Message { sender: Sender::kernel(), kind: MessageKind::Reply(None), fid: 0, arguments: [0; 8] },
+            Err(e) => Message::from(e),
+        }
+    }
+}
+
+impl From<KResult<usize>> for Message {
+    fn from(kres: KResult<usize>) -> Self {
+        match kres {
+            Ok(val) => Message {
+                sender: Sender::kernel(),
+                kind: MessageKind::Reply(None),
+                fid: 0,
+                arguments: [val, 0, 0, 0, 0, 0, 0, 0],
+            },
+            Err(e) => Message::from(e),
+        }
+    }
+}
+
+impl From<KResult<(usize, usize)>> for Message {
+    fn from(kres: KResult<(usize, usize)>) -> Self {
+        match kres {
+            Ok((val1, val2)) => Message {
+                sender: Sender::kernel(),
+                kind: MessageKind::Reply(None),
+                fid: 0,
+                arguments: [val1, val2, 0, 0, 0, 0, 0, 0],
+            },
+            Err(e) => Message::from(e),
+        }
+    }
+}
+
+impl From<KResult<(usize, usize, usize)>> for Message {
+    fn from(kres: KResult<(usize, usize, usize)>) -> Self {
+        match kres {
+            Ok((val1, val2, val3)) => Message {
+                sender: Sender::kernel(),
+                kind: MessageKind::Reply(None),
+                fid: 0,
+                arguments: [val1, val2, val3, 0, 0, 0, 0, 0],
+            },
+            Err(e) => Message::from(e),
+        }
+    }
+}
+
+impl From<KResult<(usize, usize, usize, usize)>> for Message {
+    fn from(kres: KResult<(usize, usize, usize, usize)>) -> Self {
+        match kres {
+            Ok((val1, val2, val3, val4)) => Message {
+                sender: Sender::kernel(),
+                kind: MessageKind::Reply(None),
+                fid: 0,
+                arguments: [val1, val2, val3, val4, 0, 0, 0, 0],
+            },
+            Err(e) => Message::from(e),
+        }
+    }
+}
+
 #[derive(Debug)]
 #[repr(C, usize)]
 #[non_exhaustive]
@@ -139,6 +205,14 @@ impl Sender {
 
     pub fn value(self) -> usize {
         self.0
+    }
+
+    pub fn is_kernel(self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn is_task(self) -> bool {
+        !self.is_kernel()
     }
 }
 
