@@ -144,14 +144,14 @@ impl Task {
             // We use these values to key off of some information (e.g.
             // relocation calculations and calculating the PC)
             let raw_segment_start = VirtualAddress::new(header.vaddr as usize);
-            let raw_segment_end = raw_segment_start.offset(header.memory_size as usize);
+            let raw_segment_end = raw_segment_start.add(header.memory_size as usize);
             let raw_segment_range = raw_segment_start..raw_segment_end;
 
             // The real PC needs calculated from the offset, so we check to see
             // if this is the segment that contains the entry point
             if raw_segment_range.contains(&elf_entry) {
                 let offset = elf_entry.as_usize() - raw_segment_start.as_usize() + segment_load_offset;
-                pc = segment_load_base.offset(offset);
+                pc = segment_load_base.add(offset);
             }
 
             // Find any relocations and fix them up before we write the memory
@@ -197,7 +197,7 @@ impl Task {
                 kind,
             );
 
-            segment_offset = segment_load_base.offset(region_size);
+            segment_offset = segment_load_base.add(region_size);
         }
 
         let tls = elf.program_headers().find(|header| header.r#type == elf64::ProgramSegmentType::Tls).map(|header| {
@@ -232,7 +232,7 @@ impl Task {
                 AddressRegionKind::Tls,
             );
 
-            tls_base.offset(segment_load_offset).as_usize()
+            tls_base.add(segment_load_offset).as_usize()
         });
 
         // We guard the stack on both ends, though a stack underflow is
@@ -245,7 +245,9 @@ impl Task {
                 FillOption::Unitialized,
                 AddressRegionKind::Stack,
             )
-            .offset(16.kib());
+            .add(16.kib());
+
+        log::info!("\n{:#?}", memory_manager.address_map_debug());
 
         let context = Context {
             pc: pc.as_usize(),

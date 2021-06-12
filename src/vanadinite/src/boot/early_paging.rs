@@ -32,6 +32,8 @@ extern "C" {
     static __text_end: LinkerSymbol;
     static __tdata_start: LinkerSymbol;
     static __tdata_end: LinkerSymbol;
+    static __tmp_stack_bottom: LinkerSymbol;
+    static __tmp_stack_top: LinkerSymbol;
     static PHYS_OFFSET_VALUE: usize;
 }
 
@@ -109,6 +111,19 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
         );
     }
 
+    let tmp_stack_start = __tmp_stack_bottom.as_usize();
+    let tmp_stack_end = __tmp_stack_top.as_usize();
+
+    for addr in (tmp_stack_start..tmp_stack_end).step_by(4096) {
+        let addr = PhysicalAddress::new(addr);
+        root_page_table.static_map(
+            addr,
+            crate::kernel_patching::kernel_section_p2v(addr),
+            DIRTY | ACCESSED | READ | WRITE | VALID,
+            PageSize::Kilopage,
+        );
+    }
+
     let text_start = __text_start.as_usize();
     let text_end = __text_end.as_usize();
 
@@ -156,12 +171,10 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     // addresses are identity mapped for page frame allocation
     crate::mem::PHYSICAL_OFFSET.store(PHYS_OFFSET_VALUE, core::sync::atomic::Ordering::Relaxed);
 
-    let sp: usize;
     let gp: usize;
-    asm!("lla {}, __tmp_stack_top", out(reg) sp);
     asm!("lla {}, __global_pointer$", out(reg) gp);
 
-    let new_sp = (sp - phys_load) + page_offset_value;
+    let new_sp = (tmp_stack_end - phys_load) + page_offset_value;
     let new_gp = (gp - phys_load) + page_offset_value;
 
     let kmain_virt = kernel_section_p2v(PhysicalAddress::from_ptr(crate::kmain as *const u8));

@@ -58,7 +58,7 @@ impl BlockDevice {
         entry2.next = desc3 as u16;
 
         let entry3 = &mut self.queue.descriptors[desc3];
-        entry3.address = virt2phys(VirtualAddress::from_ptr(request).offset(16));
+        entry3.address = virt2phys(VirtualAddress::from_ptr(request).add(16));
         entry3.length = 1;
         entry3.flags = DescriptorFlags::Write;
 

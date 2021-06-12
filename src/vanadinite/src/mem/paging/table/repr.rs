@@ -112,8 +112,37 @@ impl VirtualAddress {
         VirtualAddress(addr)
     }
 
-    pub fn offset(self, bytes: usize) -> Self {
-        Self(self.0 + bytes)
+    #[allow(clippy::should_implement_trait)]
+    #[track_caller]
+    pub fn add(self, bytes: usize) -> Self {
+        Self(self.0.checked_add(bytes).unwrap())
+    }
+
+    #[track_caller]
+    pub fn offset(self, offset: isize) -> Self {
+        if offset.is_positive() {
+            self.add(offset as usize)
+        } else {
+            let current = self.0;
+            let offset = (-offset) as usize;
+
+            Self(current.checked_sub(offset).unwrap())
+        }
+    }
+
+    /// # Safety
+    ///
+    /// You must ensure this cannot generate an invalid [`VirtualAddress`], e.g.
+    /// that it does not lie in the address hole between user and kernel space
+    pub unsafe fn unchecked_offset(self, offset: isize) -> Self {
+        if offset.is_positive() {
+            Self(self.0 + offset as usize)
+        } else {
+            let current = self.0;
+            let offset = (-offset) as usize;
+
+            Self(current - offset)
+        }
     }
 
     pub fn from_ptr<T>(ptr: *const T) -> Self {

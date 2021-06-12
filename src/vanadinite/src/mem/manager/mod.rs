@@ -75,13 +75,13 @@ impl MemoryManager {
             FillOption::Unitialized => {}
         }
 
-        let iter = backing.physical_addresses().enumerate().map(|(i, phys)| (phys, at.offset(i * size.to_byte_size())));
+        let iter = backing.physical_addresses().enumerate().map(|(i, phys)| (phys, at.add(i * size.to_byte_size())));
         for (phys_addr, virt_addr) in iter {
             log::debug!("Mapping {:#p} -> {:#p}", phys_addr, virt_addr);
             self.table.map(phys_addr, virt_addr, flags, size);
         }
 
-        let range = at..at.offset(size.to_byte_size() * n_pages);
+        let range = at..at.add(size.to_byte_size() * n_pages);
         self.address_map
             .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), kind)
             .expect("bad address mapping");
@@ -105,7 +105,7 @@ impl MemoryManager {
 
         self.guard(VirtualAddress::new(at.as_usize() - 4.kib()));
         self.alloc_region(Some(at), size, n_pages, flags, fill, kind);
-        self.guard(at.offset(size.to_byte_size() * n_pages));
+        self.guard(at.add(size.to_byte_size() * n_pages));
 
         at
     }
@@ -131,14 +131,14 @@ impl MemoryManager {
             FillOption::Unitialized => {}
         }
 
-        let iter = backing.physical_addresses().enumerate().map(|(i, phys)| (phys, at.offset(i * size.to_byte_size())));
+        let iter = backing.physical_addresses().enumerate().map(|(i, phys)| (phys, at.add(i * size.to_byte_size())));
         for (phys_addr, virt_addr) in iter {
             self.table.map(phys_addr, virt_addr, flags, size);
             sfence(Some(virt_addr), None);
         }
 
         let shared = backing.into_shared_region();
-        let range = at..at.offset(size.to_byte_size() * n_pages);
+        let range = at..at.add(size.to_byte_size() * n_pages);
 
         self.address_map
             .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(shared.clone())), kind)
@@ -159,14 +159,14 @@ impl MemoryManager {
         let iter = region
             .physical_addresses()
             .enumerate()
-            .map(|(i, phys)| (phys, at.offset(i * region.page_size().to_byte_size())));
+            .map(|(i, phys)| (phys, at.add(i * region.page_size().to_byte_size())));
 
         for (phys_addr, virt_addr) in iter {
             self.table.map(phys_addr, virt_addr, flags, region.page_size());
             sfence(Some(virt_addr), None);
         }
 
-        let range = at..at.offset(region.page_size().to_byte_size() * region.n_pages());
+        let range = at..at.add(region.page_size().to_byte_size() * region.n_pages());
 
         self.address_map.alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(region)), kind).unwrap();
 
@@ -175,7 +175,7 @@ impl MemoryManager {
 
     /// Place a guard page at the given [`VirtualAddress`]
     pub fn guard(&mut self, at: VirtualAddress) {
-        self.address_map.alloc(at..at.offset(4.kib()), MemoryRegion::GuardPage, AddressRegionKind::Guard).unwrap();
+        self.address_map.alloc(at..at.add(4.kib()), MemoryRegion::GuardPage, AddressRegionKind::Guard).unwrap();
         self.table.map(PhysicalAddress::null(), at, flags::USER | flags::VALID, PageSize::Kilopage);
     }
 
@@ -188,7 +188,7 @@ impl MemoryManager {
         let span = region.span.clone();
         let region = self.address_map.free(span).expect("tried deallocing an unmapped region");
 
-        let iter = (0..region.page_count()).map(|i| at.offset(i * region.page_size().to_byte_size()));
+        let iter = (0..region.page_count()).map(|i| at.add(i * region.page_size().to_byte_size()));
         for virt_addr in iter {
             self.table.unmap(virt_addr);
             sfence(Some(virt_addr), None);
@@ -351,8 +351,8 @@ impl MemoryManager {
                 continue;
             }
 
-            let above_avail = self.address_map.find(aligned_start.offset(total_bytes)).unwrap().is_unoccupied();
-            let below_avail = self.address_map.find(aligned_start.offset(total_bytes)).unwrap().is_unoccupied();
+            let above_avail = self.address_map.find(aligned_start.add(total_bytes)).unwrap().is_unoccupied();
+            let below_avail = self.address_map.find(aligned_start.add(total_bytes)).unwrap().is_unoccupied();
 
             if !above_avail || !below_avail {
                 continue;
@@ -367,7 +367,7 @@ impl MemoryManager {
 
         for region in self.address_map.unoccupied_regions() {
             let aligned_start_after_guard = VirtualAddress::new(utils::round_up_to_next(
-                region.span.start.offset(4.kib()).as_usize(),
+                region.span.start.add(4.kib()).as_usize(),
                 size.to_byte_size(),
             ));
 
@@ -376,7 +376,7 @@ impl MemoryManager {
             }
 
             let above_avail =
-                self.address_map.find(aligned_start_after_guard.offset(total_bytes)).unwrap().is_unoccupied();
+                self.address_map.find(aligned_start_after_guard.add(total_bytes)).unwrap().is_unoccupied();
 
             if !above_avail {
                 continue;

@@ -47,7 +47,7 @@ impl<Mode: UserPtrMode, T> RawUserPtr<Mode, T> {
             return Err(InvalidUserPtr::Unaligned);
         }
 
-        let addr_range = self.addr..self.addr.offset(core::mem::size_of::<T>());
+        let addr_range = self.addr..self.addr.add(core::mem::size_of::<T>());
 
         match manager.is_user_region_valid(addr_range, |f| f & Mode::FLAGS) {
             Ok(_) => Ok(ValidatedUserPtr { addr: self.addr, typë: self.typë, mode: self.mode }),
@@ -186,7 +186,7 @@ impl<Mode: UserPtrMode, T> RawUserSlice<Mode, T> {
             return Err((self.addr, InvalidUserPtr::Unaligned));
         }
 
-        let addr_range = self.addr..self.addr.offset(core::mem::size_of::<T>() * self.len);
+        let addr_range = self.addr..self.addr.add(core::mem::size_of::<T>() * self.len);
 
         match manager.is_user_region_valid(addr_range, |f| f & Mode::FLAGS) {
             Ok(_) => Ok(ValidatedUserSlice { addr: self.addr, len: self.len, typë: self.typë, mode: self.mode }),

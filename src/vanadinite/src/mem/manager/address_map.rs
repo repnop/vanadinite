@@ -72,6 +72,15 @@ impl AddressMap {
         backing: MemoryRegion,
         kind: AddressRegionKind,
     ) -> Result<(), ()> {
+        // Safety note: we enforce that we only deal with userspace mappings
+        // that never cross into the address hole, so the
+        // `VirtualAddress::unchecked_offset`s are safe.
+        //
+        // The `unchecked_offset(-1)`s are necessary because otherwise for
+        // page-aligned addresses that lie on a region boundary (e.g. we're
+        // unmapping a range), we would otherwise pick up the previous range
+        // which then would cause issues or panic later on.
+
         let key = match self.map.range(subrange.end..).next() {
             Some((_, range))
                 if range.span.start > subrange.start || range.span.end < subrange.end || range.region.is_some() =>
@@ -88,18 +97,27 @@ impl AddressMap {
             // Chop off the start
             (true, false) => {
                 old_range.span = subrange.end..old_range.span.end;
-                self.map.insert(old_range.span.end, old_range);
-                self.map.insert(subrange.end, AddressRegion { region: Some(backing), span: subrange, kind });
+                self.map.insert(unsafe { old_range.span.end.unchecked_offset(-1) }, old_range);
+                self.map.insert(
+                    unsafe { subrange.end.unchecked_offset(-1) },
+                    AddressRegion { region: Some(backing), span: subrange, kind },
+                );
             }
             // Chop off the end
             (false, true) => {
                 old_range.span = old_range.span.start..subrange.start;
-                self.map.insert(old_range.span.end, old_range);
-                self.map.insert(subrange.end, AddressRegion { region: Some(backing), span: subrange, kind });
+                self.map.insert(unsafe { old_range.span.end.unchecked_offset(-1) }, old_range);
+                self.map.insert(
+                    unsafe { subrange.end.unchecked_offset(-1) },
+                    AddressRegion { region: Some(backing), span: subrange, kind },
+                );
             }
             // its the whole ass range
             (true, true) => {
-                self.map.insert(subrange.end, AddressRegion { region: Some(backing), span: subrange, kind });
+                self.map.insert(
+                    unsafe { subrange.end.unchecked_offset(-1) },
+                    AddressRegion { region: Some(backing), span: subrange, kind },
+                );
             }
             // its a true subrange, need to splice out an generate 3 new ranges
             (false, false) => {
@@ -115,9 +133,9 @@ impl AddressMap {
                     kind: AddressRegionKind::Unoccupied,
                 };
 
-                self.map.insert(before.span.end, before);
-                self.map.insert(active.span.end, active);
-                self.map.insert(after.span.end, after);
+                self.map.insert(unsafe { before.span.end.unchecked_offset(-1) }, before);
+                self.map.insert(unsafe { active.span.end.unchecked_offset(-1) }, active);
+                self.map.insert(unsafe { after.span.end.unchecked_offset(-1) }, after);
             }
         }
 
@@ -127,7 +145,7 @@ impl AddressMap {
     /// Free the given range, returning the backing [`MemoryRegion`] or an
     /// `Err(())` if the range wasn't occupied
     pub fn free(&mut self, range: Range<VirtualAddress>) -> Result<MemoryRegion, ()> {
-        match self.map.range(range.end..).next() {
+        match self.map.range(range.start..).next() {
             Some((_, curr_range))
                 if curr_range.span.start != range.start
                     || curr_range.span.end != range.end
@@ -139,11 +157,11 @@ impl AddressMap {
             _ => {}
         }
 
-        let mut range = self.map.remove(&range.end).unwrap();
+        let mut range = self.map.remove(&range.end.offset(-1)).unwrap();
 
         // Coalesce free regions around into a single region
-        while let Some((_, AddressRegion { region: None, .. })) = self.map.range(range.span.start..).next() {
-            let start = self.map.remove(&range.span.start).unwrap().span.start;
+        while let Some((&key, AddressRegion { region: None, .. })) = self.map.range(range.span.start..).next() {
+            let start = self.map.remove(&key).unwrap().span.start;
             range.span.start = start;
         }
 
@@ -154,14 +172,14 @@ impl AddressMap {
 
         let ret = range.region.take().unwrap();
 
-        self.map.insert(range.span.end, range);
+        self.map.insert(unsafe { range.span.end.unchecked_offset(-1) }, range);
 
         Ok(ret)
     }
 
     /// Find the region containing the given [`VirtualAddress`]
     pub fn find(&self, address: VirtualAddress) -> Option<&AddressRegion> {
-        self.map.range(address.offset(1)..).next().map(|(_, r)| r)
+        self.map.range(address..).next().map(|(_, r)| r)
     }
 
     /// Returns the unoccupied regions in the address space

@@ -5,11 +5,11 @@ authors = ["Wesley Norris <repnop@outlook.com>"]
 edition = "2018"
 
 [dependencies]
-crossbeam-queue = { version = "0.3.1", default-features = false, features = ["alloc"] }
+crossbeam-queue = { version = "0.3.2", default-features = false, features = ["alloc"] }
 elf64 = { path = "../elf64" }
-fdt = { git = "https://github.com/repnop/fdt", branch = "master" }
+fdt = "0.1.2"
 librust = { path = "../librust" }
-log = "0.4.11"
+log = "0.4.14"
 sbi = { path = "../sbi" }
 tar = { path = "../tar" }
 vanadinite_macros = { path = "../vanadinite_macros" }

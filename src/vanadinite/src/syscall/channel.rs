@@ -88,8 +88,6 @@ pub fn create_channel(from: &mut Task, to: Tid) -> KResult<usize> {
     from.channels.insert(from_channel_id, from_channel);
     to_task.channels.insert(to_channel_id, to_channel);
 
-    // log::info!("Prepending message for {:?}", to);
-
     to_task.message_queue.push_front(Message {
         sender: Sender::task(current_tid),
         kind: MessageKind::Notification(0),
@@ -121,8 +119,6 @@ pub fn create_message(task: &mut Task, channel_id: usize, size: usize) -> KResul
         AddressRegionKind::Channel,
     );
 
-    // log::info!("region {:?}", region);
-
     let size = n_pages * 4.kib();
 
     channel.write_regions.insert(MessageId::new(message_id), region.clone());
@@ -145,8 +141,6 @@ pub fn send_message(task: &mut Task, channel_id: usize, message_id: usize, len: 
     if range.end.as_usize() - range.start.as_usize() < len {
         return KResult::Err(KError::InvalidArgument(2));
     }
-
-    // log::info!(" range {:?}", range);
 
     let backing = match task.memory_manager.dealloc_region(range.start) {
         MemoryRegion::Backed(PhysicalRegion::Shared(phys_region)) => phys_region,
