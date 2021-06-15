@@ -13,7 +13,7 @@ use core::ops::Range;
 // TODO: probably could split this up slightly more and represent the
 // {un}occupied regions as different types?
 /// A region of memory allocated to a task
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct AddressRegion {
     /// The underlying [`MemoryRegion`], which may or may not be backed by
     /// physical memory. `None` represents an unoccupied region.
@@ -31,7 +31,7 @@ impl AddressRegion {
 }
 
 /// Describes what type of memory the address region contains
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressRegionKind {
     Channel,
     Data,
@@ -71,7 +71,7 @@ impl AddressMap {
         subrange: Range<VirtualAddress>,
         backing: MemoryRegion,
         kind: AddressRegionKind,
-    ) -> Result<(), ()> {
+    ) -> Result<(), AddressMappingError> {
         // Safety note: we enforce that we only deal with userspace mappings
         // that never cross into the address hole, so the
         // `VirtualAddress::unchecked_offset`s are safe.
@@ -81,13 +81,13 @@ impl AddressMap {
         // unmapping a range), we would otherwise pick up the previous range
         // which then would cause issues or panic later on.
 
-        let key = match self.map.range(subrange.end..).next() {
+        let key = match self.map.range(subrange.start..).next() {
             Some((_, range))
                 if range.span.start > subrange.start || range.span.end < subrange.end || range.region.is_some() =>
             {
-                return Err(());
+                return Err(AddressMappingError::Occupied);
             }
-            None => return Err(()),
+            None => return Err(AddressMappingError::OutOfBounds),
             Some((key, _)) => *key,
         };
 
@@ -144,28 +144,28 @@ impl AddressMap {
 
     /// Free the given range, returning the backing [`MemoryRegion`] or an
     /// `Err(())` if the range wasn't occupied
-    pub fn free(&mut self, range: Range<VirtualAddress>) -> Result<MemoryRegion, ()> {
+    pub fn free(&mut self, range: Range<VirtualAddress>) -> Result<MemoryRegion, AddressMappingError> {
         match self.map.range(range.start..).next() {
             Some((_, curr_range))
                 if curr_range.span.start != range.start
                     || curr_range.span.end != range.end
                     || curr_range.region.is_none() =>
             {
-                return Err(());
+                return Err(AddressMappingError::Nonexistent);
             }
-            None => return Err(()),
+            None => return Err(AddressMappingError::OutOfBounds),
             _ => {}
         }
 
         let mut range = self.map.remove(&range.end.offset(-1)).unwrap();
 
         // Coalesce free regions around into a single region
-        while let Some((&key, AddressRegion { region: None, .. })) = self.map.range(range.span.start..).next() {
+        while let Some((&key, AddressRegion { region: None, .. })) = self.map.range(..range.span.start).next() {
             let start = self.map.remove(&key).unwrap().span.start;
             range.span.start = start;
         }
 
-        while let Some((&key, AddressRegion { region: None, .. })) = self.map.range(range.span.end.offset(1)..).next() {
+        while let Some((&key, AddressRegion { region: None, .. })) = self.map.range(range.span.end..).next() {
             let end = self.map.remove(&key).unwrap().span.end;
             range.span.end = end;
         }
@@ -212,5 +212,136 @@ impl core::fmt::Debug for AddressMap {
             }
             false => f.debug_struct("AddressMap").field("map", &self.map).finish(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AddressMappingError {
+    Occupied,
+    Nonexistent,
+    OutOfBounds,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_works() {
+        // Initial allocation, aka splitting into three parts
+        let mut am = AddressMap::new();
+        let subrange = VirtualAddress::new(0x1_0000)..VirtualAddress::new(0x5_0000);
+        am.alloc(subrange.clone(), MemoryRegion::GuardPage, AddressRegionKind::Unoccupied).unwrap();
+
+        assert_eq!(
+            am.occupied_regions().collect::<alloc::vec::Vec<_>>(),
+            alloc::vec![&AddressRegion {
+                region: Some(MemoryRegion::GuardPage),
+                span: subrange.clone(),
+                kind: AddressRegionKind::Unoccupied,
+            }]
+        );
+
+        assert_eq!(
+            am.unoccupied_regions().collect::<alloc::vec::Vec<_>>(),
+            alloc::vec![
+                &AddressRegion {
+                    region: None,
+                    span: VirtualAddress::new(0)..subrange.start,
+                    kind: AddressRegionKind::Unoccupied
+                },
+                &AddressRegion {
+                    region: None,
+                    span: subrange.end..VirtualAddress::userspace_range().end,
+                    kind: AddressRegionKind::Unoccupied,
+                }
+            ]
+        );
+
+        // Full first-subrange allocation
+        let mut am = AddressMap::new();
+        let subrange = VirtualAddress::new(0x1_0000)..VirtualAddress::new(0x5_0000);
+        am.alloc(subrange.clone(), MemoryRegion::GuardPage, AddressRegionKind::Unoccupied).unwrap();
+        am.alloc(VirtualAddress::new(0)..subrange.start, MemoryRegion::GuardPage, AddressRegionKind::Unoccupied)
+            .unwrap();
+
+        assert_eq!(
+            am.occupied_regions().collect::<alloc::vec::Vec<_>>(),
+            alloc::vec![
+                &AddressRegion {
+                    region: Some(MemoryRegion::GuardPage),
+                    span: VirtualAddress::new(0)..subrange.start,
+                    kind: AddressRegionKind::Unoccupied,
+                },
+                &AddressRegion {
+                    region: Some(MemoryRegion::GuardPage),
+                    span: subrange.clone(),
+                    kind: AddressRegionKind::Unoccupied,
+                },
+            ]
+        );
+
+        assert_eq!(
+            am.unoccupied_regions().collect::<alloc::vec::Vec<_>>(),
+            alloc::vec![&AddressRegion {
+                region: None,
+                span: subrange.end..VirtualAddress::userspace_range().end,
+                kind: AddressRegionKind::Unoccupied,
+            }]
+        );
+
+        // Full second-subrange allocation
+        let mut am = AddressMap::new();
+        let subrange = VirtualAddress::new(0x1_0000)..VirtualAddress::new(0x5_0000);
+        am.alloc(subrange.clone(), MemoryRegion::GuardPage, AddressRegionKind::Unoccupied).unwrap();
+        am.alloc(
+            subrange.end..VirtualAddress::userspace_range().end,
+            MemoryRegion::GuardPage,
+            AddressRegionKind::Unoccupied,
+        )
+        .unwrap();
+
+        assert_eq!(
+            am.occupied_regions().collect::<alloc::vec::Vec<_>>(),
+            alloc::vec![
+                &AddressRegion {
+                    region: Some(MemoryRegion::GuardPage),
+                    span: subrange.clone(),
+                    kind: AddressRegionKind::Unoccupied,
+                },
+                &AddressRegion {
+                    region: Some(MemoryRegion::GuardPage),
+                    span: subrange.end..VirtualAddress::userspace_range().end,
+                    kind: AddressRegionKind::Unoccupied,
+                }
+            ]
+        );
+
+        assert_eq!(
+            am.unoccupied_regions().collect::<alloc::vec::Vec<_>>(),
+            alloc::vec![&AddressRegion {
+                region: None,
+                span: VirtualAddress::new(0)..subrange.start,
+                kind: AddressRegionKind::Unoccupied,
+            }]
+        );
+    }
+
+    #[test]
+    fn coalesce_works() {
+        let mut am = AddressMap::new();
+        let subrange = VirtualAddress::new(0x1_0000)..VirtualAddress::new(0x5_0000);
+
+        am.alloc(subrange.clone(), MemoryRegion::GuardPage, AddressRegionKind::Unoccupied).unwrap();
+        am.free(subrange).unwrap();
+
+        assert_eq!(
+            am.unoccupied_regions().next().unwrap(),
+            &AddressRegion {
+                region: None,
+                span: VirtualAddress::userspace_range(),
+                kind: AddressRegionKind::Unoccupied,
+            }
+        );
     }
 }

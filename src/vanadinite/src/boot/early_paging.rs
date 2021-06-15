@@ -177,7 +177,12 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let new_sp = (tmp_stack_end - phys_load) + page_offset_value;
     let new_gp = (gp - phys_load) + page_offset_value;
 
-    let kmain_virt = kernel_section_p2v(PhysicalAddress::from_ptr(crate::kmain as *const u8));
+    #[cfg(not(test))]
+    let kmain = crate::kmain as *const u8;
+    #[cfg(test)]
+    let kmain = crate::tests::ktest as *const u8;
+
+    let kmain_virt = kernel_section_p2v(PhysicalAddress::from_ptr(kmain));
     crate::csr::stvec::set(core::mem::transmute(kmain_virt.as_usize()));
 
     let fdt = crate::mem::phys2virt(PhysicalAddress::from_ptr(fdt)).as_ptr();

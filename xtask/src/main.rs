@@ -25,6 +25,8 @@ enum Arguments {
     Clean(CleanTarget),
     /// Run `vanadinite`
     Run(RunOptions),
+    /// Test `vanadinite`
+    Test(RunOptions),
 }
 
 #[derive(Clap)]
@@ -47,6 +49,9 @@ pub struct VanadiniteBuildOptions {
     #[clap(setting = ArgSettings::AllowEmptyValues)]
     #[clap(long, default_value = "")]
     kernel_features: String,
+
+    #[clap(skip)]
+    test: bool,
 }
 
 #[derive(Clap, Clone, Copy)]
@@ -67,6 +72,7 @@ fn main() -> Result<()> {
         Arguments::Build(target) => build::build(target)?,
         Arguments::Clean(target) => clean(target)?,
         Arguments::Run(target) => runner::run(target)?,
+        Arguments::Test(target) => runner::test(target)?,
     }
 
     Ok(())

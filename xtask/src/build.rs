@@ -52,7 +52,7 @@ impl BuildTarget {
 }
 
 impl BuildTarget {
-    fn env(&self) -> Vec<xshell::Pushenv> {
+    pub fn env(&self) -> Vec<xshell::Pushenv> {
         match self {
             BuildTarget::Userspace => vec![],
             BuildTarget::Vanadinite(opts) => vec![pushenv(
@@ -112,15 +112,20 @@ pub fn build(target: BuildTarget) -> Result<()> {
         BuildTarget::Vanadinite(build_opts) => {
             let features = format!("platform.{} {}", build_opts.platform, build_opts.kernel_features);
 
+            let (subcmd, test) = match build_opts.test {
+                true => ("rustc", &["--", "--test"][..]),
+                false => ("build", &["--release"][..]),
+            };
+
             let _dir = pushd("./src");
             #[rustfmt::skip]
             cmd!("
-                cargo build
+                cargo {subcmd}
                     -p vanadinite
-                    --release
                     --target riscv64gc-unknown-none-elf
                     --no-default-features
                     --features {features}
+                    {test...}
             ").run()?;
         }
         BuildTarget::OpenSBI(_) => {

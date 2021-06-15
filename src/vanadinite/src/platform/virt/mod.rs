@@ -5,6 +5,9 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::{csr::satp, mem::PHYSICAL_OFFSET};
+use core::sync::atomic::Ordering;
+
 #[derive(Debug, Clone, Copy)]
 pub enum ExitStatus {
     Pass,
@@ -68,10 +71,13 @@ enum Finisher {
 /// Update 2020-10-14: QEMU changed the behavior to disallow writes larger than
 /// 4 bytes and smaller than 2 bytes...
 pub fn exit(exit_status: ExitStatus) -> ! {
-    const VIRT_TEST: *mut u32 = 0x10_0000 as *mut u32;
+    let virt_test: *mut u32 = match satp::read().mode {
+        satp::SatpMode::Bare => 0x10_0000 as *mut u32,
+        _ => (PHYSICAL_OFFSET.load(Ordering::Acquire) + 0x10_0000) as *mut u32,
+    };
 
     unsafe {
-        core::ptr::write_volatile(VIRT_TEST, exit_status.to_u32());
+        core::ptr::write_volatile(virt_test, exit_status.to_u32());
     }
 
     unreachable!()

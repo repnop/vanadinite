@@ -43,7 +43,7 @@ fn main() {
             match channel::read_message(*channel_id) {
                 Ok(Some(_)) => {} //println!("[INIT] Someone sent a message on {:?}", channel_id),
                 Ok(None) => {}
-                Err(e) => {} //println!("Error reading message from channel: {:?}", e),
+                Err(_) => {} //println!("Error reading message from channel: {:?}", e),
             }
         }
     }

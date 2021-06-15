@@ -12,7 +12,7 @@ use crate::mem::{
 };
 use alloc::{sync::Arc, vec::Vec};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum MemoryRegion {
     Backed(PhysicalRegion),
     Lazy { page_size: PageSize, n_pages: usize },
@@ -37,7 +37,7 @@ impl MemoryRegion {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum PhysicalRegion {
     Shared(SharedPhysicalRegion),
     Unique(UniquePhysicalRegion),
@@ -67,13 +67,13 @@ impl PhysicalRegion {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum PhysicalRegionKind {
     Contiguous(PhysicalPage),
     Sparse(Vec<PhysicalPage>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct UniquePhysicalRegion {
     kind: PhysicalRegionKind,
     page_size: PageSize,
@@ -180,7 +180,7 @@ impl Drop for UniquePhysicalRegion {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SharedPhysicalRegion {
     region: Arc<UniquePhysicalRegion>,
 }

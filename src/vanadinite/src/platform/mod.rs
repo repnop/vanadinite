@@ -37,6 +37,15 @@ pub enum ExitStatus<'a> {
     Error(&'a dyn core::fmt::Display),
 }
 
+#[cfg(feature = "platform.virt")]
+pub fn exit(status: ExitStatus) -> ! {
+    virt::exit(match status {
+        ExitStatus::Ok => virt::ExitStatus::Pass,
+        ExitStatus::Error(_) => virt::ExitStatus::Fail(1),
+    })
+}
+
+#[cfg(not(feature = "platform.virt"))]
 pub fn exit(status: ExitStatus) -> ! {
     use sbi::{
         probe_extension,

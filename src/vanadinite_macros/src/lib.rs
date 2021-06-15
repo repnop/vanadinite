@@ -11,7 +11,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
     parse::{Parse, ParseStream},
-    Expr, Ident, LitStr, Token,
+    Expr, Ident, ItemFn, LitStr, Token,
 };
 
 fn to_color_code<'a, 'b>(name: &'a str, clear: &'b str) -> &'b str {
@@ -362,4 +362,23 @@ pub fn error(input: TokenStream) -> TokenStream {
     let extra_comma = if !named_colors.is_empty() && !args.is_empty() { quote!(,) } else { quote!() };
 
     TokenStream::from(quote!(log::error!(#output_str, #(#args),* #extra_comma #(#named_colors),*)))
+}
+
+#[proc_macro_attribute]
+pub fn test(_: TokenStream, input: TokenStream) -> TokenStream {
+    let input = syn::parse_macro_input!(input as ItemFn);
+    let name = &input.sig.ident;
+    let body = &input.block;
+
+    TokenStream::from(quote! {
+        #[test_case]
+        fn #name() {
+            crate::print!(
+                "test {} ... ",
+                concat!(module_path!(), "::", stringify!(#name)).trim_start_matches("vanadinite::")
+            );
+            #body
+            crate::println!("{}ok{}", crate::io::terminal::GREEN, crate::io::terminal::CLEAR);
+        }
+    })
 }

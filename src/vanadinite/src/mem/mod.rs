@@ -18,6 +18,8 @@ pub mod region;
 pub mod user;
 pub mod paging {
     mod table;
+    #[cfg(test)]
+    mod tests;
 
     use crate::csr::satp::SatpMode;
     pub use table::*;

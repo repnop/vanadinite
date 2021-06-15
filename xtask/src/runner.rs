@@ -6,8 +6,8 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    build::{self, BuildTarget},
-    Platform, Result, Simulator, VanadiniteBuildOptions,
+    build::{self, BuildTarget, Platform},
+    Result, Simulator, VanadiniteBuildOptions,
 };
 use clap::{ArgSettings, Clap};
 use std::path::PathBuf;
@@ -57,7 +57,11 @@ impl Default for RunOptions {
             kernel_args: String::new(),
             no_build: false,
             ram: 512,
-            vanadinite_options: VanadiniteBuildOptions { platform: Platform::Virt, kernel_features: String::new() },
+            vanadinite_options: VanadiniteBuildOptions {
+                platform: Platform::Virt,
+                kernel_features: String::new(),
+                test: false,
+            },
             with: Simulator::Qemu,
         }
     }
@@ -124,6 +128,48 @@ pub fn run(options: RunOptions) -> Result<()> {
             ").run()?;
         }
     };
+
+    Ok(())
+}
+
+pub fn test(mut options: RunOptions) -> Result<()> {
+    options.vanadinite_options.test = true;
+    options.vanadinite_options.platform = Platform::Virt;
+
+    let build_opts = &options.vanadinite_options;
+    build::build(BuildTarget::Vanadinite(build_opts.clone()))?;
+
+    let _dir = xshell::pushd("./src");
+
+    let platform = options.vanadinite_options.platform.to_string();
+    let cpu_count = options.cpus.to_string();
+    let ram = options.ram.to_string();
+    let kernel_args = options.kernel_args;
+
+    let debug_log = match &options.debug_log {
+        Some(path) => vec![
+            String::from("-d"),
+            String::from("guest_errors,trace:riscv_trap,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int"),
+            String::from("-D"),
+            format!("../{}", path.display()),
+            String::from("-monitor"),
+            String::from("stdio"),
+        ],
+        None => vec![String::from("-serial"), String::from("mon:stdio"), String::from("-nographic")],
+    };
+
+    #[rustfmt::skip]
+    cmd!("
+        qemu-system-riscv64
+            -machine {platform}
+            -cpu rv64
+            -smp {cpu_count}
+            -m {ram}M
+            -append {kernel_args}
+            -bios ../opensbi-riscv64-generic-fw_jump.bin 
+            -kernel target/riscv64gc-unknown-none-elf/debug/vanadinite
+            {debug_log...}
+    ").run()?;
 
     Ok(())
 }

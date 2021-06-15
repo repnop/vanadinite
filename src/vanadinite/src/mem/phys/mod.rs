@@ -62,7 +62,7 @@ pub unsafe trait PhysicalMemoryAllocator {
     unsafe fn set_unused(&mut self, page: PhysicalPage);
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(transparent)]
 pub struct PhysicalPage(PhysicalAddress);
 

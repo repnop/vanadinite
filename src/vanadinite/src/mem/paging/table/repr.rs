@@ -115,18 +115,52 @@ impl VirtualAddress {
     #[allow(clippy::should_implement_trait)]
     #[track_caller]
     pub fn add(self, bytes: usize) -> Self {
-        Self(self.0.checked_add(bytes).unwrap())
+        match self.checked_add(bytes) {
+            Some(address) => address,
+            None => panic!("invalid virtual address: self={:#p}, bytes={}", self, bytes),
+        }
+    }
+
+    pub fn checked_add(self, bytes: usize) -> Option<Self> {
+        let new = Self(self.0.checked_add(bytes)?);
+
+        let same_region = new.is_kernel_region() == self.is_kernel_region();
+        let not_hole = new.is_kernel_region() || Self::userspace_range().contains(&new);
+
+        // We shouldn't ever end up in the address space hole, nor should an
+        // addition take us from userspace to kernelspace
+        if !same_region || !not_hole {
+            return None;
+        }
+
+        Some(new)
     }
 
     #[track_caller]
     pub fn offset(self, offset: isize) -> Self {
-        if offset.is_positive() {
-            self.add(offset as usize)
-        } else {
-            let current = self.0;
-            let offset = (-offset) as usize;
+        match self.checked_offset(offset) {
+            Some(address) => address,
+            None => panic!("invalid virtual address: self={:#p}, offset={}", self, offset),
+        }
+    }
 
-            Self(current.checked_sub(offset).unwrap())
+    pub fn checked_offset(self, offset: isize) -> Option<Self> {
+        if offset.is_positive() {
+            self.checked_add(offset as usize)
+        } else {
+            let offset = (-offset) as usize;
+            let new = Self(self.0.checked_sub(offset)?);
+
+            let same_region = new.is_kernel_region() == self.is_kernel_region();
+            let not_hole = Self::kernelspace_range().contains(&new) || Self::userspace_range().contains(&new);
+
+            // We shouldn't ever end up in the address space hole, nor should a
+            // subtraction take us from kernelspace to userspace
+            if !same_region || !not_hole {
+                return None;
+            }
+
+            Some(new)
         }
     }
 
@@ -194,16 +228,20 @@ impl VirtualAddress {
         }
     }
 
-    pub fn from_vpns(vpns: [usize; N_VPN]) -> Self {
+    pub const fn from_vpns(vpns: [usize; N_VPN]) -> Self {
         #[cfg(feature = "paging.sv57")]
         compile_error!("sv57 stuff");
 
         let mut addr = 0;
         let mut shift = 12;
 
-        for vpn in core::array::IntoIter::new(vpns) {
-            addr |= vpn << shift;
+        // Replace this with a `for` once that's available in `const fn`s
+        let mut i = 0;
+        while i < N_VPN {
+            addr |= vpns[i] << shift;
             shift += 9;
+
+            i += 1;
         }
 
         let top_most_bit = 1 << (12 + N_VPN * 9 - 1);
@@ -220,6 +258,14 @@ impl VirtualAddress {
 
     pub const fn userspace_range() -> Range<VirtualAddress> {
         VirtualAddress::new(0)..VirtualAddress::new(1 << (12 + N_VPN * 9 - 1))
+    }
+
+    pub const fn kernelspace_range() -> Range<VirtualAddress> {
+        let mut vpns = [0; N_VPN];
+        vpns[N_VPN - 1] = 256;
+
+        // This should probably be a `..=` range, but...
+        VirtualAddress::from_vpns(vpns)..VirtualAddress::new(usize::MAX)
     }
 }
 

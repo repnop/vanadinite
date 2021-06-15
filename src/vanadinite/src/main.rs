@@ -16,6 +16,7 @@
     const_fn_fn_ptr_basics,
     const_fn_trait_bound,
     const_generics,
+    custom_test_frameworks,
     destructuring_assignment,
     extern_types,
     fn_align,
@@ -24,16 +25,19 @@
     maybe_uninit_ref,
     naked_functions,
     new_uninit,
-    raw_ref_op,
     thread_local
 )]
 #![no_std]
 #![no_main]
+#![test_runner(crate::tests::test_runner)]
+#![reexport_test_harness_main = "test_main"]
 
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("vanadinite assumes a 64-bit pointer size, cannot compile on non-64 bit systems");
 
 extern crate alloc;
+#[cfg_attr(test, macro_use)]
+extern crate vanadinite_macros;
 
 pub mod asm;
 pub mod boot;
@@ -48,6 +52,8 @@ pub mod scheduler;
 pub mod sync;
 pub mod syscall;
 pub mod task;
+#[cfg(debug_assertions)]
+pub mod tests;
 pub mod trap;
 pub mod utils;
 
@@ -296,6 +302,12 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     csr::sscratch::write(ptr as *mut _ as usize);
 
+    #[cfg(test)]
+    {
+        log::info!("Running tests");
+        test_main();
+    }
+
     csr::sstatus::set_fs(csr::sstatus::FloatingPointStatus::Initial);
     csr::sie::enable();
 
@@ -407,7 +419,8 @@ unsafe extern "C" fn other_hart_boot() -> ! {
     );
 }
 
-#[panic_handler]
+#[cfg(not(test))]
+#[cfg_attr(not(test), panic_handler)]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     // this is pretty awful but it seems to work well enough for the moment...
     // debugging the early paging code is not fun when you don't know where you
