@@ -25,15 +25,12 @@ impl Uart16550 {
         self.int_id_fifo_control.write(0x01);
         self.interrupt_enable.write(0x01);
 
-        let divisor: u16 = 592;
-        let divisor_least: u8 = (divisor & 0xff) as u8;
-        let divisor_most: u8 = (divisor >> 8) as u8;
-
         let lcr = self.line_control.read();
         self.line_control.write(lcr | (1 << 7));
 
-        self.data_register.write(divisor_least);
-        self.interrupt_enable.write(divisor_most);
+        // Full speed, baybee
+        self.data_register.write(1);
+        self.interrupt_enable.write(0);
 
         self.line_control.write(lcr);
 
