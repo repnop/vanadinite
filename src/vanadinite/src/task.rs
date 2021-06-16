@@ -247,8 +247,6 @@ impl Task {
             )
             .add(16.kib());
 
-        log::info!("\n{:#?}", memory_manager.address_map_debug());
-
         let context = Context {
             pc: pc.as_usize(),
             gp_regs: Registers { sp: sp.as_usize(), tp: tls.unwrap_or(0), ..Default::default() },
