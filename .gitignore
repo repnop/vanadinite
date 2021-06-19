@@ -11,3 +11,4 @@ opensbi-*.*
 initfs.tar
 spike
 todo.txt
+*.bin

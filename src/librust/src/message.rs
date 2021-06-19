@@ -7,142 +7,238 @@
 
 use crate::{
     error::{self, AccessError, KError},
+    syscalls::{channel::ChannelId, Syscall},
     task::Tid,
-    KResult,
 };
 use core::{convert::TryInto, num::NonZeroUsize};
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
 pub struct Message {
-    /// `t1`
-    pub sender: Sender,
-    /// Descriminant `t2`, value `t3`
-    pub kind: MessageKind,
-    /// `t4`
-    pub fid: usize,
-    /// `a0`-`a7`
-    pub arguments: [usize; 8],
+    pub contents: [usize; 13],
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct SyscallRequest {
+    pub syscall: Syscall,
+    pub arguments: [usize; 12],
+}
+
+impl From<SyscallRequest> for Message {
+    fn from(req: SyscallRequest) -> Self {
+        let mut contents = [0; 13];
+        contents[1..].copy_from_slice(&req.arguments);
+        contents[0] = req.syscall as usize;
+
+        Self { contents }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[must_use]
+pub enum SyscallResult<T, E = KError> {
+    Ok(T),
+    Err(E),
+}
+
+impl<T, E> core::ops::Try for SyscallResult<T, E> {
+    type Output = T;
+    type Residual = SyscallResult<!, E>;
+
+    fn from_output(output: Self::Output) -> Self {
+        Self::Ok(output)
+    }
+
+    fn branch(self) -> core::ops::ControlFlow<Self::Residual, Self::Output> {
+        match self {
+            Self::Ok(t) => core::ops::ControlFlow::Continue(t),
+            Self::Err(e) => core::ops::ControlFlow::Break(SyscallResult::Err(e)),
+        }
+    }
+}
+
+impl<T, E, F: From<E>> core::ops::FromResidual<SyscallResult<!, E>> for SyscallResult<T, F> {
+    fn from_residual(residual: SyscallResult<!, E>) -> Self {
+        match residual {
+            SyscallResult::Ok(_) => unreachable!(),
+            SyscallResult::Err(e) => Self::Err(From::from(e)),
+        }
+    }
+}
+
+impl<T, E: core::fmt::Debug> SyscallResult<T, E> {
+    #[track_caller]
+    pub fn unwrap(self) -> T {
+        match self {
+            SyscallResult::Ok(t) => t,
+            SyscallResult::Err(e) => panic!("unwrapped a syscall error: {:?}", e),
+        }
+    }
+}
+
+impl<T, E> SyscallResult<T, E> {
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> SyscallResult<U, E> {
+        match self {
+            Self::Ok(t) => SyscallResult::Ok(f(t)),
+            Self::Err(e) => SyscallResult::Err(e),
+        }
+    }
 }
 
 impl From<KError> for Message {
     fn from(kerror: KError) -> Self {
         match kerror {
-            KError::InvalidRecipient => Self {
-                // TODO: is this ok?
-                sender: Sender::kernel(),
-                kind: MessageKind::Reply(Some(error::INVALID_RECIPIENT.try_into().unwrap())),
-                fid: 0,
-                arguments: [0; 8],
-            },
-            KError::InvalidMessage => Self {
-                sender: Sender::kernel(),
-                kind: MessageKind::Reply(Some(error::INVALID_MESSAGE.try_into().unwrap())),
-                fid: 0,
-                arguments: [0; 8],
-            },
+            KError::InvalidRecipient => {
+                Self { contents: [error::INVALID_RECIPIENT, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
+            }
+            KError::InvalidMessage => Self { contents: [error::INVALID_MESSAGE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
             KError::InvalidAccess(access_error) => match access_error {
                 AccessError::Read(ptr) => Self {
-                    sender: Sender::kernel(),
-                    kind: MessageKind::Reply(Some(error::INVALID_ACCESS.try_into().unwrap())),
-                    fid: 0,
-                    arguments: [0, ptr as usize, 0, 0, 0, 0, 0, 0],
+                    contents: [
+                        error::INVALID_ACCESS,
+                        error::ACCESS_ERROR_READ,
+                        ptr as usize,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                    ],
                 },
                 AccessError::Write(ptr) => Self {
-                    sender: Sender::kernel(),
-                    kind: MessageKind::Reply(Some(error::INVALID_ACCESS.try_into().unwrap())),
-                    fid: 0,
-                    arguments: [1, ptr as usize, 0, 0, 0, 0, 0, 0],
+                    contents: [
+                        error::INVALID_ACCESS,
+                        error::ACCESS_ERROR_WRITE,
+                        ptr as usize,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                    ],
                 },
             },
-            KError::InvalidSyscall(id) => Self {
-                sender: Sender::kernel(),
-                kind: MessageKind::Reply(Some(error::INVALID_SYSCALL.try_into().unwrap())),
-                fid: 0,
-                arguments: [id, 0, 0, 0, 0, 0, 0, 0],
-            },
-            KError::InvalidArgument(idx) => Self {
-                sender: Sender::kernel(),
-                kind: MessageKind::Reply(Some(error::INVALID_ARGUMENT.try_into().unwrap())),
-                fid: 0,
-                arguments: [idx, 0, 0, 0, 0, 0, 0, 0],
-            },
+            KError::InvalidSyscall(id) => {
+                Self { contents: [error::INVALID_SYSCALL, id, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
+            }
+            KError::InvalidArgument(idx) => {
+                Self { contents: [error::INVALID_ARGUMENT, idx, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
+            }
+            KError::NoMessages => Self { contents: [error::NO_MESSAGES, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
         }
     }
 }
 
-impl From<Option<KError>> for Message {
-    fn from(kerror: Option<KError>) -> Self {
-        match kerror {
-            Some(kerror) => Self::from(kerror),
-            None => Self { sender: Sender::kernel(), kind: MessageKind::Reply(None), fid: 0, arguments: [0; 8] },
-        }
-    }
-}
-
-impl From<KResult<()>> for Message {
-    fn from(kres: KResult<()>) -> Self {
+impl<T: Into<Message>, E: Into<Message>> From<SyscallResult<T, E>> for Message {
+    fn from(kres: SyscallResult<T, E>) -> Self {
         match kres {
-            Ok(_) => Message { sender: Sender::kernel(), kind: MessageKind::Reply(None), fid: 0, arguments: [0; 8] },
-            Err(e) => Message::from(e),
+            SyscallResult::Ok(val) => val.into(),
+            SyscallResult::Err(e) => e.into(),
         }
     }
 }
 
-impl From<KResult<usize>> for Message {
-    fn from(kres: KResult<usize>) -> Self {
-        match kres {
-            Ok(val) => Message {
-                sender: Sender::kernel(),
-                kind: MessageKind::Reply(None),
-                fid: 0,
-                arguments: [val, 0, 0, 0, 0, 0, 0, 0],
-            },
-            Err(e) => Message::from(e),
+impl<T: From<Message>, E: From<Message>> From<(bool, Message)> for SyscallResult<T, E> {
+    fn from((err, msg): (bool, Message)) -> Self {
+        match err {
+            false => SyscallResult::Ok(T::from(msg)),
+            true => SyscallResult::Err(E::from(msg)),
         }
     }
 }
 
-impl From<KResult<(usize, usize)>> for Message {
-    fn from(kres: KResult<(usize, usize)>) -> Self {
-        match kres {
-            Ok((val1, val2)) => Message {
-                sender: Sender::kernel(),
-                kind: MessageKind::Reply(None),
-                fid: 0,
-                arguments: [val1, val2, 0, 0, 0, 0, 0, 0],
-            },
-            Err(e) => Message::from(e),
-        }
+impl From<Message> for () {
+    fn from(_: Message) -> Self {}
+}
+
+impl From<()> for Message {
+    fn from(_: ()) -> Self {
+        Self { contents: [0; 13] }
     }
 }
 
-impl From<KResult<(usize, usize, usize)>> for Message {
-    fn from(kres: KResult<(usize, usize, usize)>) -> Self {
-        match kres {
-            Ok((val1, val2, val3)) => Message {
-                sender: Sender::kernel(),
-                kind: MessageKind::Reply(None),
-                fid: 0,
-                arguments: [val1, val2, val3, 0, 0, 0, 0, 0],
-            },
-            Err(e) => Message::from(e),
-        }
+impl From<usize> for Message {
+    fn from(t: usize) -> Self {
+        let mut contents = [0; 13];
+        contents[0] = t;
+
+        Self { contents }
     }
 }
 
-impl From<KResult<(usize, usize, usize, usize)>> for Message {
-    fn from(kres: KResult<(usize, usize, usize, usize)>) -> Self {
-        match kres {
-            Ok((val1, val2, val3, val4)) => Message {
-                sender: Sender::kernel(),
-                kind: MessageKind::Reply(None),
-                fid: 0,
-                arguments: [val1, val2, val3, val4, 0, 0, 0, 0],
-            },
-            Err(e) => Message::from(e),
-        }
+impl From<Message> for usize {
+    fn from(msg: Message) -> Self {
+        msg.contents[0]
     }
+}
+
+impl<T> From<Message> for *mut T {
+    fn from(msg: Message) -> Self {
+        msg.contents[0] as *mut T
+    }
+}
+
+impl<T> From<Message> for *const T {
+    fn from(msg: Message) -> Self {
+        msg.contents[0] as *const T
+    }
+}
+
+macro_rules! impl_trait_for_tuples {
+    (
+        $(
+            $ty:ty
+            =>
+            (
+                $($t:tt),*
+            )
+        ),+
+    ) => {
+        $(
+            impl From<$ty> for Message {
+                fn from(t: $ty) -> Self {
+                    let mut contents = [0; 13];
+
+                    $(
+                        contents[$t] = t.$t;
+                    )*
+
+                    Self { contents }
+                }
+            }
+
+            impl From<Message> for $ty {
+                fn from(msg: Message) -> $ty {
+                    ($(msg.contents[$t]),*,)
+                }
+            }
+        )+
+    };
+}
+
+impl_trait_for_tuples! {
+    (usize,) => (0),
+    (usize, usize) => (0, 1),
+    (usize, usize, usize) => (0, 1, 2),
+    (usize, usize, usize, usize) => (0, 1, 2, 3),
+    (usize, usize, usize, usize, usize) => (0, 1, 2, 3, 4),
+    (usize, usize, usize, usize, usize, usize) => (0, 1, 2, 3, 4, 5),
+    (usize, usize, usize, usize, usize, usize, usize) => (0, 1, 2, 3, 4, 5, 6),
+    (usize, usize, usize, usize, usize, usize, usize, usize) => (0, 1, 2, 3, 4, 5, 6, 7),
+    (usize, usize, usize, usize, usize, usize, usize, usize, usize) => (0, 1, 2, 3, 4, 5, 6, 7, 8),
+    (usize, usize, usize, usize, usize, usize, usize, usize, usize, usize) => (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+    (usize, usize, usize, usize, usize, usize, usize, usize, usize, usize, usize) => (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 }
 
 #[derive(Debug)]
@@ -246,26 +342,65 @@ impl Recipient {
     }
 }
 
-// #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-// pub enum Sender {
-//     Kernel,
-//     Task(Tid),
-// }
+#[derive(Debug, Clone, Copy)]
+#[repr(C, usize)]
+pub enum KernelNotification {
+    ChannelRequest(Tid),
+    ChannelOpened(ChannelId),
+    ChannelRequestDenied,
+    InterruptOccurred(usize),
+    NewChannelMessage(ChannelId),
+}
 
-// impl Sender {
-//     pub fn into_raw(self) -> raw::Sender {
-//         match self {
-//             Sender::Kernel => raw::Sender::kernel(),
-//             Self::Task(tid) => raw::Sender::task(tid),
-//         }
-//     }
-// }
+pub const NOTIFICATION_CHANNEL_REQUEST: usize = 0;
+pub const NOTIFICATION_CHANNEL_OPENED: usize = 1;
+pub const NOTIFICATION_CHANNEL_REQUEST_DENIED: usize = 2;
+pub const NOTIFICATION_INTERRUPT_OCCURRED: usize = 3;
+pub const NOTIFICATION_NEW_CHANNEL_MESSAGE: usize = 4;
 
-// impl From<raw::Sender> for Sender {
-//     fn from(s: raw::Sender) -> Self {
-//         match s.0 {
-//             0 => Sender::Kernel,
-//             tid => Sender::Task(Tid::new(NonZeroUsize::new(tid).unwrap())),
-//         }
-//     }
-// }
+impl From<Message> for KernelNotification {
+    fn from(message: Message) -> Self {
+        match message.contents[0] {
+            NOTIFICATION_CHANNEL_REQUEST => {
+                KernelNotification::ChannelRequest(Tid::new(message.contents[1].try_into().unwrap()))
+            }
+            NOTIFICATION_CHANNEL_OPENED => KernelNotification::ChannelOpened(ChannelId::new(message.contents[1])),
+            NOTIFICATION_CHANNEL_REQUEST_DENIED => KernelNotification::ChannelRequestDenied,
+            NOTIFICATION_INTERRUPT_OCCURRED => KernelNotification::InterruptOccurred(message.contents[1]),
+            NOTIFICATION_NEW_CHANNEL_MESSAGE => {
+                KernelNotification::NewChannelMessage(ChannelId::new(message.contents[1]))
+            }
+            _ => unreachable!("bad KernelNotification or used this impl one something that wasn't "),
+        }
+    }
+}
+
+impl From<KernelNotification> for Message {
+    fn from(notif: KernelNotification) -> Self {
+        let mut contents = [0; 13];
+
+        match notif {
+            KernelNotification::ChannelRequest(tid) => {
+                contents[0] = NOTIFICATION_CHANNEL_REQUEST;
+                contents[1] = tid.value();
+            }
+            KernelNotification::ChannelOpened(id) => {
+                contents[0] = NOTIFICATION_CHANNEL_OPENED;
+                contents[1] = id.value();
+            }
+            KernelNotification::ChannelRequestDenied => {
+                contents[0] = NOTIFICATION_CHANNEL_REQUEST_DENIED;
+            }
+            KernelNotification::InterruptOccurred(n) => {
+                contents[0] = NOTIFICATION_INTERRUPT_OCCURRED;
+                contents[1] = n;
+            }
+            KernelNotification::NewChannelMessage(id) => {
+                contents[0] = NOTIFICATION_NEW_CHANNEL_MESSAGE;
+                contents[1] = id.value();
+            }
+        }
+
+        Self { contents }
+    }
+}

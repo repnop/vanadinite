@@ -6,13 +6,13 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    message::{Message, MessageKind, Recipient, Sender},
+    error::KError,
+    message::{Recipient, SyscallRequest, SyscallResult},
     syscalls::{syscall, Syscall},
     task::Tid,
-    KResult,
 };
-use core::convert::TryFrom;
 
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct ChannelMessage {
     pub id: MessageId,
@@ -48,79 +48,57 @@ impl MessageId {
     }
 }
 
-pub fn create_channel(with: Tid) -> KResult<ChannelId> {
-    KResult::try_from(syscall(
+pub fn create_channel(with: Tid) -> SyscallResult<ChannelId, KError> {
+    syscall(
         Recipient::kernel(),
-        Message {
-            sender: Sender::dummy(),
-            kind: MessageKind::Request(None),
-            fid: Syscall::CreateChannel as usize,
-            arguments: [with.value(), 0, 0, 0, 0, 0, 0, 0],
-        },
-    ))
-    .expect("bad KResult returned by kernel or something is out of sync")
-    .map(|m| ChannelId::new(m.arguments[0]))
+        SyscallRequest { syscall: Syscall::CreateChannel, arguments: [with.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    )
+    .1
+    .map(ChannelId)
 }
 
-pub fn create_message(channel: ChannelId, size: usize) -> KResult<ChannelMessage> {
-    KResult::try_from(syscall(
+pub fn create_message(channel: ChannelId, size: usize) -> SyscallResult<ChannelMessage, KError> {
+    syscall(
         Recipient::kernel(),
-        Message {
-            sender: Sender::dummy(),
-            kind: MessageKind::Request(None),
-            fid: Syscall::CreateChannelMessage as usize,
-            arguments: [channel.value(), size, 0, 0, 0, 0, 0, 0],
+        SyscallRequest {
+            syscall: Syscall::CreateChannelMessage,
+            arguments: [channel.value(), size, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         },
-    ))
-    .expect("bad KResult returned by kernel or something is out of sync")
-    .map(|m| ChannelMessage {
-        id: MessageId::new(m.arguments[0]),
-        ptr: m.arguments[1] as *mut u8,
-        len: m.arguments[2],
+    )
+    .1
+    .map(|(id, ptr, len)| ChannelMessage { id: MessageId::new(id), ptr: ptr as *mut u8, len })
+}
+
+pub fn send_message(channel: ChannelId, message: MessageId, message_len: usize) -> SyscallResult<(), KError> {
+    syscall(
+        Recipient::kernel(),
+        SyscallRequest {
+            syscall: Syscall::SendChannelMessage,
+            arguments: [channel.value(), message.value(), message_len, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        },
+    )
+    .1
+}
+
+pub fn read_message(channel: ChannelId) -> SyscallResult<Option<ChannelMessage>, KError> {
+    syscall(
+        Recipient::kernel(),
+        SyscallRequest { syscall: Syscall::ReadChannel, arguments: [channel.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    )
+    .1
+    .map(|res| match res {
+        (0, 0, 0) => None,
+        (id, ptr, len) => Some(ChannelMessage { id: MessageId::new(id), ptr: ptr as *mut u8, len }),
     })
 }
 
-pub fn send_message(channel: ChannelId, message: MessageId, message_len: usize) -> KResult<()> {
-    KResult::try_from(syscall(
+pub fn retire_message(channel: ChannelId, message: MessageId) -> SyscallResult<(), KError> {
+    syscall(
         Recipient::kernel(),
-        Message {
-            sender: Sender::dummy(),
-            kind: MessageKind::Request(None),
-            fid: Syscall::SendChannelMessage as usize,
-            arguments: [channel.value(), message.value(), message_len, 0, 0, 0, 0, 0],
+        SyscallRequest {
+            syscall: Syscall::RetireChannelMessage,
+            arguments: [channel.value(), message.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         },
-    ))
-    .expect("bad KResult returned by kernel or something is out of sync")
-    .map(drop)
-}
-
-pub fn read_message(channel: ChannelId) -> KResult<Option<ChannelMessage>> {
-    KResult::try_from(syscall(
-        Recipient::kernel(),
-        Message {
-            sender: Sender::dummy(),
-            kind: MessageKind::Request(None),
-            fid: Syscall::ReadChannel as usize,
-            arguments: [channel.value(), 0, 0, 0, 0, 0, 0, 0],
-        },
-    ))
-    .expect("bad KResult returned by kernel or something is out of sync")
-    .map(|m| match [m.arguments[0], m.arguments[1], m.arguments[2]] {
-        [0, 0, 0] => None,
-        [id, ptr, len] => Some(ChannelMessage { id: MessageId::new(id), ptr: ptr as *mut u8, len }),
-    })
-}
-
-pub fn retire_message(channel: ChannelId, message: MessageId) -> KResult<()> {
-    KResult::try_from(syscall(
-        Recipient::kernel(),
-        Message {
-            sender: Sender::dummy(),
-            kind: MessageKind::Request(None),
-            fid: Syscall::RetireChannelMessage as usize,
-            arguments: [channel.value(), message.value(), 0, 0, 0, 0, 0, 0],
-        },
-    ))
-    .expect("bad KResult returned by kernel or something is out of sync")
-    .map(drop)
+    )
+    .1
 }

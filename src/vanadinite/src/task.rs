@@ -22,7 +22,11 @@ use alloc::{
     collections::{BTreeMap, VecDeque},
 };
 use elf64::{Elf, ProgramSegmentType, Relocation};
-use librust::{capabilities::Capability, message::Message, syscalls::channel::ChannelId};
+use librust::{
+    capabilities::Capability,
+    message::{Message, Sender},
+    syscalls::channel::ChannelId,
+};
 
 #[derive(Debug)]
 #[repr(C)]
@@ -70,7 +74,7 @@ pub struct Task {
     pub context: Context,
     pub memory_manager: MemoryManager,
     pub state: TaskState,
-    pub message_queue: VecDeque<Message>,
+    pub message_queue: VecDeque<(Sender, Message)>,
     pub channels: BTreeMap<ChannelId, UserspaceChannel>,
     pub capabilities: [Capability; 32],
 }

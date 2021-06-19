@@ -5,21 +5,21 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(asm)]
-
-use core::num::NonZeroUsize;
-use std::librust::{self, syscalls::channel, task::Tid};
+use std::librust::{
+    self,
+    message::SyscallResult,
+    syscalls::{channel, ReadMessage},
+};
 
 fn main() {
     let mut channels = Vec::new();
     loop {
         let msg = librust::syscalls::receive_message();
 
-        if let Ok(Some(msg)) = msg {
+        if let Some(ReadMessage::User(tid, msg)) = msg {
             //println!("\n[INIT] We received a message");
 
-            if msg.fid == 1 {
-                let tid = Tid::new(NonZeroUsize::new(msg.sender.value()).unwrap());
+            if msg.contents[0] == 1 {
                 //println!("[INIT] {:?} has asked us to open a channel!", tid);
 
                 let channel_id = channel::create_channel(tid).unwrap();
@@ -41,9 +41,9 @@ fn main() {
 
         for channel_id in &channels {
             match channel::read_message(*channel_id) {
-                Ok(Some(_)) => {} //println!("[INIT] Someone sent a message on {:?}", channel_id),
-                Ok(None) => {}
-                Err(_) => {} //println!("Error reading message from channel: {:?}", e),
+                SyscallResult::Ok(Some(_)) => {} //println!("[INIT] Someone sent a message on {:?}", channel_id),
+                SyscallResult::Ok(None) => {}
+                SyscallResult::Err(_) => {} //println!("Error reading message from channel: {:?}", e),
             }
         }
     }

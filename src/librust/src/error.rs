@@ -5,14 +5,16 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::message::{Message, MessageKind};
-use core::convert::TryFrom;
+use crate::message::Message;
 
-pub(crate) const INVALID_ACCESS: usize = 1;
-pub(crate) const INVALID_MESSAGE: usize = 2;
-pub(crate) const INVALID_RECIPIENT: usize = 3;
-pub(crate) const INVALID_SYSCALL: usize = 4;
-pub(crate) const INVALID_ARGUMENT: usize = 5;
+pub const INVALID_ACCESS: usize = 1;
+pub const INVALID_MESSAGE: usize = 2;
+pub const INVALID_RECIPIENT: usize = 3;
+pub const INVALID_SYSCALL: usize = 4;
+pub const INVALID_ARGUMENT: usize = 5;
+pub const NO_MESSAGES: usize = 6;
+
+pub const IS_KERROR: usize = 1;
 
 #[derive(Debug)]
 pub enum KError {
@@ -21,43 +23,23 @@ pub enum KError {
     InvalidRecipient,
     InvalidSyscall(usize),
     InvalidArgument(usize),
+    NoMessages,
 }
 
-impl TryFrom<Message> for KError {
-    type Error = &'static str;
-
-    fn try_from(msg: Message) -> Result<Self, Self::Error> {
-        match msg.kind {
-            MessageKind::Reply(Some(err)) => match err.get() {
-                const { INVALID_MESSAGE } => Ok(Self::InvalidMessage),
-                const { INVALID_RECIPIENT } => Ok(Self::InvalidRecipient),
-                const { INVALID_SYSCALL } => Ok(Self::InvalidSyscall(msg.arguments[0])),
-                const { INVALID_ARGUMENT } => Ok(Self::InvalidArgument(msg.arguments[0])),
-                const { INVALID_ACCESS } => Ok(Self::InvalidAccess(match msg.arguments[0] {
-                    0 => AccessError::Read(msg.arguments[1] as _),
-                    1 => AccessError::Write(msg.arguments[1] as _),
-                    _ => return Err("invalid error cause for access error"),
-                })),
+impl From<Message> for KError {
+    fn from(msg: Message) -> Self {
+        match msg.contents[0] {
+            const { INVALID_MESSAGE } => Self::InvalidMessage,
+            const { INVALID_RECIPIENT } => Self::InvalidRecipient,
+            const { INVALID_SYSCALL } => Self::InvalidSyscall(msg.contents[1]),
+            const { INVALID_ARGUMENT } => Self::InvalidArgument(msg.contents[1]),
+            const { INVALID_ACCESS } => Self::InvalidAccess(match msg.contents[1] {
+                0 => AccessError::Read(msg.contents[2] as _),
+                1 => AccessError::Write(msg.contents[2] as _),
                 _ => unreachable!(),
-            },
-            MessageKind::Reply(None) => Err("no kernel error reported!"),
-            MessageKind::Request(_) => Err("requests are not replies :squint:"),
-            MessageKind::ApplicationSpecific(_) => Err("application specifics are not replies :squint:"),
-            MessageKind::Notification(_) => Err("notifications are not replies :squint:"),
-        }
-    }
-}
-
-impl TryFrom<Message> for Option<KError> {
-    type Error = &'static str;
-
-    fn try_from(msg: Message) -> Result<Self, Self::Error> {
-        match msg.kind {
-            MessageKind::Reply(Some(_)) => Ok(Some(KError::try_from(msg)?)),
-            MessageKind::Reply(None) => Ok(None),
-            MessageKind::Request(_) => Err("requests are not replies :squint:"),
-            MessageKind::ApplicationSpecific(_) => Err("application specifics are not replies :squint:"),
-            MessageKind::Notification(_) => Err("notifications are not replies :squint:"),
+            }),
+            const { NO_MESSAGES } => Self::NoMessages,
+            _ => unreachable!(),
         }
     }
 }
@@ -68,3 +50,6 @@ pub enum AccessError {
     Read(*const u8),
     Write(*mut u8),
 }
+
+pub const ACCESS_ERROR_READ: usize = 0;
+pub const ACCESS_ERROR_WRITE: usize = 1;

@@ -22,7 +22,7 @@ use crate::{
 use core::{convert::TryInto, num::NonZeroUsize};
 use librust::{
     error::{AccessError, KError},
-    message::{Message, MessageKind, Recipient, Sender},
+    message::{Message, Recipient, Sender, SyscallRequest, SyscallResult},
     syscalls::{
         allocation::{AllocationOptions, MemoryPermissions},
         Syscall,
@@ -31,53 +31,51 @@ use librust::{
 };
 
 pub fn handle(frame: &mut TrapFrame) {
-    log::debug!("Handling syscall..");
+    log::trace!("Handling syscall..");
 
-    let recipient = Recipient::new(frame.registers.t0);
-    let message = match parse_message(frame) {
-        Some(mut msg) => {
-            msg.sender = Sender::task(CURRENT_TASK.get().unwrap());
-            msg
-        }
-        None => {
-            log::debug!("Bad message from userspace");
-            return apply_message(KError::InvalidMessage.into(), frame);
-        }
-    };
+    let (recipient, message) = get_message(frame);
 
     match recipient {
-        const { Recipient::kernel() } => do_syscall(message, frame),
+        const { Recipient::kernel() } => match do_syscall(message) {
+            SyscallResult::Ok((sender, msg)) => apply_message(false, sender, msg, frame),
+            SyscallResult::Err(e) => report_error(e, frame),
+        },
         _ => match TASKS.get(Tid::new(recipient.value().try_into().unwrap())) {
             Some(task) => {
                 let mut task = task.lock();
 
                 if task.state.is_dead() {
-                    return apply_message(KError::InvalidRecipient.into(), frame);
+                    return report_error(KError::InvalidRecipient, frame);
                 }
 
                 log::debug!("Adding message to task (tid: {}): {:?}", recipient.value(), message);
 
-                task.message_queue.push_back(message);
-                apply_message(None.into(), frame);
+                task.message_queue.push_back((Sender::new(CURRENT_TASK.get().unwrap().value()), message));
+                apply_message(false, Sender::kernel(), (), frame);
             }
-            None => apply_message(KError::InvalidRecipient.into(), frame),
+            None => report_error(KError::InvalidRecipient, frame),
         },
     }
 }
 
-fn do_syscall(msg: Message, frame: &mut TrapFrame) {
-    log::debug!("Doing syscall: {:?}", msg);
+fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
+    log::trace!("Doing syscall: {:?}", msg);
 
-    if let MessageKind::ApplicationSpecific(_) | MessageKind::Reply(_) = msg.kind {
-        return apply_message(KError::InvalidMessage.into(), frame);
-    }
-
+    let mut sender = Sender::kernel();
     let task_lock = TASKS.get(CURRENT_TASK.get().unwrap()).unwrap();
     let mut task_lock = task_lock.lock();
     let task = &mut *task_lock;
 
-    let mut msg = match msg.fid {
-        const { Syscall::Exit as usize } => {
+    let syscall_req = SyscallRequest {
+        syscall: match Syscall::from_usize(msg.contents[0]) {
+            Some(syscall) => syscall,
+            None => return SyscallResult::Err(KError::InvalidSyscall(msg.contents[0])),
+        },
+        arguments: msg.contents[1..].try_into().unwrap(),
+    };
+
+    let msg: Message = match syscall_req.syscall {
+        Syscall::Exit => {
             log::info!("Active process exited");
             task.state = TaskState::Dead;
             task.message_queue.clear();
@@ -86,38 +84,38 @@ fn do_syscall(msg: Message, frame: &mut TrapFrame) {
 
             SCHEDULER.schedule()
         }
-        const { Syscall::Print as usize } => {
-            let start = VirtualAddress::new(msg.arguments[0]);
-            let len = msg.arguments[1];
+        Syscall::Print => {
+            let start = VirtualAddress::new(syscall_req.arguments[0]);
+            let len = syscall_req.arguments[1];
             let user_slice = RawUserSlice::readable(start, len);
             let user_slice = match unsafe { user_slice.validate(&task.memory_manager) } {
                 Ok(slice) => slice,
                 Err((addr, e)) => {
                     log::error!("Bad memory from process: {:?}", e);
-                    return apply_message(KError::InvalidAccess(AccessError::Read(addr.as_ptr())).into(), frame);
+                    return SyscallResult::Err(KError::InvalidAccess(AccessError::Read(addr.as_ptr())));
                 }
             };
 
-            log::debug!("Attempting to print memory at {:#p} (len={})", start, len);
+            log::trace!("Attempting to print memory at {:#p} (len={})", start, len);
 
             let mut console = crate::io::CONSOLE.lock();
             user_slice.with(|bytes| bytes.iter().copied().for_each(|b| console.write(b)));
 
-            None.into()
+            Message::default()
         }
-        const { Syscall::ReadStdin as usize } => {
-            let start = VirtualAddress::new(msg.arguments[0]);
-            let len = msg.arguments[1];
+        Syscall::ReadStdin => {
+            let start = VirtualAddress::new(syscall_req.arguments[0]);
+            let len = syscall_req.arguments[1];
             let user_slice = RawUserSlice::writable(start, len);
             let mut user_slice = match unsafe { user_slice.validate(&task.memory_manager) } {
                 Ok(slice) => slice,
                 Err((addr, e)) => {
                     log::error!("Bad memory from process: {:?}", e);
-                    return apply_message(KError::InvalidAccess(AccessError::Write(addr.as_mut_ptr())).into(), frame);
+                    return SyscallResult::Err(KError::InvalidAccess(AccessError::Write(addr.as_mut_ptr())));
                 }
             };
 
-            log::debug!("Attempting to write to memory at {:#p} (len={})", start, len);
+            log::trace!("Attempting to write to memory at {:#p} (len={})", start, len);
 
             let mut n_written = 0;
             user_slice.with(|bytes| {
@@ -131,54 +129,43 @@ fn do_syscall(msg: Message, frame: &mut TrapFrame) {
                 }
             });
 
-            let mut msg: Message = None.into();
-            msg.arguments[0] = n_written;
-
-            msg
+            Message::from(n_written)
         }
-        const { Syscall::ReadMessage as usize } => {
-            // Avoid accidentally overwriting sender later on
-            return apply_message(
-                match task.message_queue.pop_front() {
-                    Some(msg) => msg,
-                    None => {
-                        let mut msg: Message = None.into();
-                        msg.sender = Sender::kernel();
+        Syscall::ReadMessage => match task.message_queue.pop_front() {
+            Some((sender_, msg)) => {
+                sender = sender_;
+                msg
+            }
+            None => return SyscallResult::Err(KError::NoMessages),
+        },
+        Syscall::AllocVirtualMemory => {
+            let size = syscall_req.arguments[0];
+            let options = AllocationOptions::new(syscall_req.arguments[1]);
+            let permissions = MemoryPermissions::new(syscall_req.arguments[2]);
 
-                        msg
-                    }
-                },
-                frame,
-            );
-        }
-        const { Syscall::AllocVirtualMemory as usize } => loop {
-            let size = msg.arguments[0];
-            let options = AllocationOptions::new(msg.arguments[1]);
-            let permissions = MemoryPermissions::new(msg.arguments[2]);
-
-            if permissions & MemoryPermissions::Write && !(permissions & MemoryPermissions::Read) {
-                break KError::InvalidArgument(2).into();
+            if permissions & MemoryPermissions::WRITE && !(permissions & MemoryPermissions::READ) {
+                return SyscallResult::Err(KError::InvalidArgument(2));
             }
 
             let mut flags = flags::VALID | flags::USER;
 
-            if permissions & MemoryPermissions::Read {
+            if permissions & MemoryPermissions::READ {
                 flags |= flags::READ;
             }
 
-            if permissions & MemoryPermissions::Write {
+            if permissions & MemoryPermissions::WRITE {
                 flags |= flags::WRITE;
             }
 
-            if permissions & MemoryPermissions::Execute {
+            if permissions & MemoryPermissions::EXECUTE {
                 flags |= flags::EXECUTE;
             }
 
             let page_size =
                 if options & AllocationOptions::LargePage { PageSize::Megapage } else { PageSize::Kilopage };
 
-            break match size {
-                0 => KError::InvalidArgument(0).into(),
+            match size {
+                0 => return SyscallResult::Err(KError::InvalidArgument(0)),
                 _ => {
                     let allocated_at = task.memory_manager.alloc_region(
                         None,
@@ -191,78 +178,78 @@ fn do_syscall(msg: Message, frame: &mut TrapFrame) {
 
                     log::debug!("Allocated memory at {:#p} for user process", allocated_at.start);
 
-                    Message {
-                        sender: Sender::kernel(),
-                        kind: MessageKind::Reply(None),
-                        fid: 0,
-                        arguments: [allocated_at.start.as_usize(), 0, 0, 0, 0, 0, 0, 0],
-                    }
+                    Message::from(allocated_at.start.as_usize())
                 }
-            };
-        },
-        const { Syscall::GetTid as usize } => Message {
-            sender: Sender::kernel(),
-            kind: MessageKind::Reply(None),
-            fid: 0,
-            arguments: [CURRENT_TASK.get().unwrap().value(), 0, 0, 0, 0, 0, 0, 0],
-        },
-        const { Syscall::CreateChannel as usize } => loop {
-            let tid = match NonZeroUsize::new(msg.arguments[0]) {
+            }
+        }
+        Syscall::GetTid => (CURRENT_TASK.get().unwrap().value()).into(),
+        Syscall::CreateChannel => {
+            let tid = match NonZeroUsize::new(syscall_req.arguments[0]) {
                 Some(tid) => tid,
-                None => break KError::InvalidArgument(0).into(),
+                None => return SyscallResult::Err(KError::InvalidArgument(0)),
             };
 
-            break channel::create_channel(task, Tid::new(tid)).into();
-        },
-        const { Syscall::CreateChannelMessage as usize } => {
-            channel::create_message(task, msg.arguments[0], msg.arguments[1]).into()
+            Message::from(channel::create_channel(task, Tid::new(tid))?)
         }
-        const { Syscall::SendChannelMessage as usize } => {
-            channel::send_message(task, msg.arguments[0], msg.arguments[1], msg.arguments[2]).into()
+        Syscall::CreateChannelMessage => {
+            Message::from(channel::create_message(task, syscall_req.arguments[0], syscall_req.arguments[1])?)
         }
-        const { Syscall::ReadChannel as usize } => channel::read_message(task, msg.arguments[0]).into(),
-        const { Syscall::RetireChannelMessage as usize } => {
-            channel::retire_message(task, msg.arguments[0], msg.arguments[1]).into()
+        Syscall::SendChannelMessage => Message::from(channel::send_message(
+            task,
+            syscall_req.arguments[0],
+            syscall_req.arguments[1],
+            syscall_req.arguments[2],
+        )?),
+        Syscall::ReadChannel => Message::from(channel::read_message(task, syscall_req.arguments[0])?),
+        Syscall::RetireChannelMessage => {
+            Message::from(channel::retire_message(task, syscall_req.arguments[0], syscall_req.arguments[1])?)
         }
-        id => KError::InvalidSyscall(id).into(),
     };
 
-    msg.sender = Sender::kernel();
-
-    log::debug!("Replying with {:x?}", msg);
-
-    apply_message(msg, frame)
+    SyscallResult::Ok((sender, msg))
 }
 
-fn parse_message(frame: &TrapFrame) -> Option<Message> {
-    Some(Message {
-        sender: Sender::task(CURRENT_TASK.get().unwrap()),
-        kind: MessageKind::from_parts(frame.registers.t2, frame.registers.t3)?,
-        fid: frame.registers.t4,
-        arguments: [
-            frame.registers.a0,
-            frame.registers.a1,
-            frame.registers.a2,
-            frame.registers.a3,
-            frame.registers.a4,
-            frame.registers.a5,
-            frame.registers.a6,
-            frame.registers.a7,
-        ],
-    })
+fn get_message(frame: &TrapFrame) -> (Recipient, Message) {
+    let mut contents = [0; 13];
+
+    let recipient = Recipient::new(frame.registers.t0);
+    contents[0] = frame.registers.t2;
+    contents[1] = frame.registers.t3;
+    contents[2] = frame.registers.t4;
+    contents[3] = frame.registers.t5;
+    contents[4] = frame.registers.t6;
+    contents[5] = frame.registers.a0;
+    contents[6] = frame.registers.a1;
+    contents[7] = frame.registers.a2;
+    contents[8] = frame.registers.a3;
+    contents[9] = frame.registers.a4;
+    contents[10] = frame.registers.a5;
+    contents[11] = frame.registers.a6;
+    contents[12] = frame.registers.a7;
+
+    (recipient, Message { contents })
 }
 
-fn apply_message(msg: Message, frame: &mut TrapFrame) {
-    frame.registers.t1 = msg.sender.value();
-    (frame.registers.t2, frame.registers.t3) = msg.kind.into_parts();
-    frame.registers.t4 = msg.fid;
+fn apply_message<T: Into<Message>>(is_err: bool, sender: Sender, msg: T, frame: &mut TrapFrame) {
+    frame.registers.t0 = is_err as usize;
+    frame.registers.t1 = sender.value();
 
-    frame.registers.a0 = msg.arguments[0];
-    frame.registers.a1 = msg.arguments[1];
-    frame.registers.a2 = msg.arguments[2];
-    frame.registers.a3 = msg.arguments[3];
-    frame.registers.a4 = msg.arguments[4];
-    frame.registers.a5 = msg.arguments[5];
-    frame.registers.a6 = msg.arguments[6];
-    frame.registers.a7 = msg.arguments[7];
+    let msg = msg.into();
+    frame.registers.t2 = msg.contents[0];
+    frame.registers.t3 = msg.contents[1];
+    frame.registers.t4 = msg.contents[2];
+    frame.registers.t5 = msg.contents[3];
+    frame.registers.t6 = msg.contents[4];
+    frame.registers.a0 = msg.contents[5];
+    frame.registers.a1 = msg.contents[6];
+    frame.registers.a2 = msg.contents[7];
+    frame.registers.a3 = msg.contents[8];
+    frame.registers.a4 = msg.contents[9];
+    frame.registers.a5 = msg.contents[10];
+    frame.registers.a6 = msg.contents[11];
+    frame.registers.a7 = msg.contents[12];
+}
+
+fn report_error<T: Into<Message>>(error: T, frame: &mut TrapFrame) {
+    apply_message(true, Sender::kernel(), error, frame)
 }

@@ -10,7 +10,10 @@ use core::{
     cell::Cell,
     ptr::{self, NonNull},
 };
-use librust::syscalls::allocation::{self, AllocationOptions, MemoryPermissions};
+use librust::{
+    message::SyscallResult,
+    syscalls::allocation::{self, AllocationOptions, MemoryPermissions},
+};
 
 #[derive(Clone, Copy)]
 pub struct TaskLocal(core::marker::PhantomData<*mut ()>);
@@ -75,7 +78,7 @@ impl TaskLocalAllocator {
             //println!("Adding new memory region for slab of size {}", slab.0);
 
             let mem_size = slab.0 * 64;
-            let perms = MemoryPermissions::Read | MemoryPermissions::Write;
+            let perms = MemoryPermissions::READ | MemoryPermissions::WRITE;
             let mut options = AllocationOptions::None;
 
             if mem_size >= 2 * 1024 * 1024 {
@@ -83,7 +86,10 @@ impl TaskLocalAllocator {
                 options = options | AllocationOptions::LargePage;
             }
 
-            let new_mem = allocation::alloc_virtual_memory(mem_size, options, perms).map_err(|_| AllocError)?;
+            let new_mem = match allocation::alloc_virtual_memory(mem_size, options, perms) {
+                SyscallResult::Ok(new_mem) => new_mem,
+                SyscallResult::Err(_) => return Err(AllocError),
+            };
 
             //println!("New mem is at {:#p}", new_mem);
 

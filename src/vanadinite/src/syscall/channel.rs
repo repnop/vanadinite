@@ -22,10 +22,9 @@ use core::{
 };
 use librust::{
     error::KError,
-    message::{Message, MessageKind, Sender},
+    message::{KernelNotification, Sender, SyscallResult},
     syscalls::channel::{ChannelId, MessageId},
     task::Tid,
-    KResult,
 };
 
 pub const MAX_CHANNEL_BYTES: usize = 4096;
@@ -44,24 +43,24 @@ impl UserspaceChannel {
     }
 }
 
-pub fn create_channel(from: &mut Task, to: Tid) -> KResult<usize> {
+pub fn create_channel(from: &mut Task, to: Tid) -> SyscallResult<usize, KError> {
     let current_tid = CURRENT_TASK.get().unwrap();
 
     // Doesn't make sense to make a shared memory channel with itself and we'd
     // also end up deadlocking ourselves
     if current_tid == to {
-        return KResult::Err(KError::InvalidArgument(0));
+        return SyscallResult::Err(KError::InvalidArgument(0));
     }
 
     let to_task = match TASKS.get(to) {
         Some(task) => task,
-        None => return KResult::Err(KError::InvalidRecipient),
+        None => return SyscallResult::Err(KError::InvalidRecipient),
     };
 
     let mut to_task = to_task.lock();
 
     if to_task.state.is_dead() {
-        return KResult::Err(KError::InvalidRecipient);
+        return SyscallResult::Err(KError::InvalidRecipient);
     }
 
     let counter = Arc::new(AtomicUsize::new(0));
@@ -88,23 +87,18 @@ pub fn create_channel(from: &mut Task, to: Tid) -> KResult<usize> {
     from.channels.insert(from_channel_id, from_channel);
     to_task.channels.insert(to_channel_id, to_channel);
 
-    to_task.message_queue.push_front(Message {
-        sender: Sender::task(current_tid),
-        kind: MessageKind::Notification(0),
-        fid: 0,
-        arguments: [0; 8],
-    });
+    to_task.message_queue.push_front((Sender::kernel(), KernelNotification::ChannelOpened(to_channel_id).into()));
 
-    Ok(from_channel_id.value())
+    SyscallResult::Ok(from_channel_id.value())
 }
 
 // FIXME: Definitely should be a way to return tuple values that can be
 // converted into `usize` so its a lot more clear what's what
-pub fn create_message(task: &mut Task, channel_id: usize, size: usize) -> KResult<(usize, usize, usize)> {
+pub fn create_message(task: &mut Task, channel_id: usize, size: usize) -> SyscallResult<(usize, usize, usize), KError> {
     let channel_id = ChannelId::new(channel_id);
     let channel = match task.channels.get_mut(&channel_id) {
         Some(channel) => channel,
-        None => return KResult::Err(KError::InvalidArgument(0)),
+        None => return SyscallResult::Err(KError::InvalidArgument(0)),
     };
 
     let n_pages = utils::round_up_to_next(size, 4.kib()) / 4.kib();
@@ -123,23 +117,23 @@ pub fn create_message(task: &mut Task, channel_id: usize, size: usize) -> KResul
 
     channel.write_regions.insert(MessageId::new(message_id), region.clone());
 
-    Ok((message_id, region.start.as_usize(), size))
+    SyscallResult::Ok((message_id, region.start.as_usize(), size))
 }
 
-pub fn send_message(task: &mut Task, channel_id: usize, message_id: usize, len: usize) -> KResult<()> {
+pub fn send_message(task: &mut Task, channel_id: usize, message_id: usize, len: usize) -> SyscallResult<(), KError> {
     let channel_id = ChannelId::new(channel_id);
     let channel = match task.channels.get_mut(&channel_id) {
         Some(channel) => channel,
-        None => return KResult::Err(KError::InvalidArgument(0)),
+        None => return SyscallResult::Err(KError::InvalidArgument(0)),
     };
 
     let range = match channel.write_regions.remove(&MessageId::new(message_id)) {
         Some(range) => range,
-        None => return KResult::Err(KError::InvalidArgument(1)),
+        None => return SyscallResult::Err(KError::InvalidArgument(1)),
     };
 
     if range.end.as_usize() - range.start.as_usize() < len {
-        return KResult::Err(KError::InvalidArgument(2));
+        return SyscallResult::Err(KError::InvalidArgument(2));
     }
 
     let backing = match task.memory_manager.dealloc_region(range.start) {
@@ -160,35 +154,35 @@ pub fn send_message(task: &mut Task, channel_id: usize, message_id: usize, len: 
     let other_channel = other.channels.get_mut(&channel.other_channel_id).unwrap();
     other_channel.read_regions.insert(MessageId::new(message_id), (region, len));
 
-    Ok(())
+    SyscallResult::Ok(())
 }
 
-pub fn read_message(task: &mut Task, channel_id: usize) -> KResult<(usize, usize, usize)> {
+pub fn read_message(task: &mut Task, channel_id: usize) -> SyscallResult<(usize, usize, usize), KError> {
     let id = ChannelId::new(channel_id);
     let channel = match task.channels.get_mut(&id) {
         Some(channel) => channel,
-        None => return KResult::Err(KError::InvalidArgument(0)),
+        None => return SyscallResult::Err(KError::InvalidArgument(0)),
     };
 
     // TODO: need to be able to return more than just the first one
     match channel.read_regions.iter().next() {
-        Some((id, (region, len))) => Ok((id.value(), region.start.as_usize(), *len)),
-        None => Ok((0, 0, 0)),
+        Some((id, (region, len))) => SyscallResult::Ok((id.value(), region.start.as_usize(), *len)),
+        None => SyscallResult::Ok((0, 0, 0)),
     }
 }
 
-pub fn retire_message(task: &mut Task, channel_id: usize, message_id: usize) -> KResult<()> {
+pub fn retire_message(task: &mut Task, channel_id: usize, message_id: usize) -> SyscallResult<(), KError> {
     let id = ChannelId::new(channel_id);
     let channel = match task.channels.get_mut(&id) {
         Some(channel) => channel,
-        None => return KResult::Err(KError::InvalidArgument(0)),
+        None => return SyscallResult::Err(KError::InvalidArgument(0)),
     };
 
     match channel.read_regions.remove(&MessageId::new(message_id)) {
         Some(region) => {
             task.memory_manager.dealloc_region(region.0.start);
-            Ok(())
+            SyscallResult::Ok(())
         }
-        None => KResult::Err(KError::InvalidArgument(1)),
+        None => SyscallResult::Err(KError::InvalidArgument(1)),
     }
 }

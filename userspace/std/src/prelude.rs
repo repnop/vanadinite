@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod rust_2018 {
-    pub use crate::{print, println};
+    pub use crate::{dbg, print, println};
     pub use alloc::collections::VecDeque;
     pub use alloc::prelude::v1::*;
     pub use core::prelude::v1::*;

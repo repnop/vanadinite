@@ -7,20 +7,18 @@
 
 use super::{syscall, Syscall};
 use crate::{
-    message::{Message, MessageKind, Recipient, Sender},
-    KResult,
+    error::KError,
+    message::{Recipient, SyscallRequest, SyscallResult},
 };
-use core::convert::TryFrom;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
 pub struct MemoryPermissions(usize);
 
-#[allow(non_upper_case_globals)]
 impl MemoryPermissions {
-    pub const Read: Self = Self(0);
-    pub const Write: Self = Self(1);
-    pub const Execute: Self = Self(2);
+    pub const READ: Self = Self(0);
+    pub const WRITE: Self = Self(1);
+    pub const EXECUTE: Self = Self(2);
 
     pub fn new(flags: usize) -> Self {
         Self(flags)
@@ -90,16 +88,13 @@ pub fn alloc_virtual_memory(
     size_in_bytes: usize,
     options: AllocationOptions,
     perms: MemoryPermissions,
-) -> KResult<*mut u8> {
-    KResult::try_from(syscall(
+) -> SyscallResult<*mut u8, KError> {
+    syscall(
         Recipient::kernel(),
-        Message {
-            sender: Sender::dummy(),
-            kind: MessageKind::Request(None),
-            fid: Syscall::AllocVirtualMemory as usize,
-            arguments: [size_in_bytes, options.value(), perms.value(), 0, 0, 0, 0, 0],
+        SyscallRequest {
+            syscall: Syscall::AllocVirtualMemory,
+            arguments: [size_in_bytes, options.value(), perms.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0],
         },
-    ))
-    .expect("bad KResult returned by kernel or something is out of sync")
-    .map(|m| m.arguments[0] as *mut u8)
+    )
+    .1
 }

@@ -10,9 +10,10 @@
 extern crate alloc;
 
 use core::num::NonZeroUsize;
+use std::librust::message::{KernelNotification, SyscallResult};
 use std::librust::syscalls::{channel::ChannelId, *};
 use std::librust::{
-    message::{Message, MessageKind, Sender},
+    message::Message,
     syscalls::{
         allocation::{alloc_virtual_memory, AllocationOptions, MemoryPermissions},
         channel,
@@ -99,33 +100,24 @@ fn main() {
                 }
                 Ok(tidn) => {
                     let tid = Tid::new(NonZeroUsize::new(tidn).unwrap());
-                    let ret = send_message(
-                        tid,
-                        Message {
-                            sender: Sender::dummy(),
-                            kind: MessageKind::Notification(0),
-                            fid: 0,
-                            arguments: [0; 8],
-                        },
-                    );
+                    let ret = send_message(tid, Message { contents: [0; 13] });
 
                     match ret {
-                        Ok(_) => println!("Message sent to TID {}!", tidn),
-                        Err(e) => println!("Couldn't send message: {:?}", e),
+                        SyscallResult::Ok(_) => println!("Message sent to TID {}!", tidn),
+                        SyscallResult::Err(e) => println!("Couldn't send message: {:?}", e),
                     }
                 }
             },
             "read" => match receive_message() {
-                Ok(Some(msg)) => println!("We had a message! {:?}", msg),
-                Ok(None) => println!("No messages :("),
-                Err(e) => println!("Error receiving message: {:?}", e),
+                Some(msg) => println!("We had a message! {:?}", msg),
+                None => println!("No messages :("),
             },
             "test_alloc_mem" => match alloc_virtual_memory(
                 4096,
                 AllocationOptions::None,
-                MemoryPermissions::Read | MemoryPermissions::Write,
+                MemoryPermissions::READ | MemoryPermissions::WRITE,
             ) {
-                Ok(ptr) => {
+                SyscallResult::Ok(ptr) => {
                     println!("Kernel returned us address: {:#p}", ptr);
                     println!("Testing read/write...");
 
@@ -140,7 +132,7 @@ fn main() {
                         println!();
                     }
                 }
-                Err(e) => println!("Kernel returned error: {:?}", e),
+                SyscallResult::Err(e) => println!("Kernel returned error: {:?}", e),
             },
             "test_std_allocator" => {
                 println!("Testing Box...");
@@ -181,33 +173,22 @@ fn main() {
                 }
                 Ok(tidn) => {
                     let tid = Tid::new(NonZeroUsize::new(tidn).unwrap());
-                    let ret = send_message(
-                        tid,
-                        Message {
-                            sender: Sender::dummy(),
-                            kind: MessageKind::Request(None),
-                            fid: 1,
-                            arguments: [0; 8],
-                        },
-                    );
+                    let ret = send_message(tid, Message { contents: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] });
 
                     match ret {
-                        Ok(_) => println!("Message sent to TID {}!", tidn),
-                        Err(e) => println!("Couldn't send message: {:?}", e),
+                        SyscallResult::Ok(_) => println!("Message sent to TID {}!", tidn),
+                        SyscallResult::Err(e) => println!("Couldn't send message: {:?}", e),
                     }
 
                     println!("Waiting for response with channel ID");
                     let channel_id = loop {
-                        match receive_message() {
-                            Ok(Some(msg)) if msg.sender == Sender::task(tid) => {
-                                break ChannelId::new(msg.arguments[0]);
-                            }
-                            _ => {}
+                        if let Some(ReadMessage::Kernel(KernelNotification::ChannelOpened(id))) = receive_message() {
+                            break id;
                         }
                     };
 
                     match channel::read_message(channel_id) {
-                        Ok(Some(msg)) => {
+                        SyscallResult::Ok(Some(msg)) => {
                             let slice = unsafe { core::slice::from_raw_parts(msg.ptr, msg.len) };
                             println!("A message already! Contents: {:?}", slice);
 
@@ -217,11 +198,11 @@ fn main() {
 
                             println!("Channel ID with {:?}: {:?}", tid, channel_id);
                         }
-                        Ok(None) => {
+                        SyscallResult::Ok(None) => {
                             channels.push(channel_id);
                             println!("Channel ID with {:?}: {:?}", tid, channel_id);
                         }
-                        Err(_) => println!("Didn't get back a valid channel ID :("),
+                        SyscallResult::Err(_) => println!("Didn't get back a valid channel ID :("),
                     }
                 }
             },
@@ -235,7 +216,7 @@ fn main() {
                     match channels.iter().find(|c| **c == channel_id) {
                         None => println!("Not a channel I know about :("),
                         Some(_) => match channel::read_message(channel_id) {
-                            Ok(Some(msg)) => {
+                            SyscallResult::Ok(Some(msg)) => {
                                 let slice = unsafe { core::slice::from_raw_parts(msg.ptr, msg.len) };
 
                                 match core::str::from_utf8(slice) {
@@ -245,8 +226,8 @@ fn main() {
 
                                 channel::retire_message(channel_id, msg.id).unwrap();
                             }
-                            Ok(None) => println!("No message waiting on channel"),
-                            Err(_) => println!("Didn't get back a valid channel ID :("),
+                            SyscallResult::Ok(None) => println!("No message waiting on channel"),
+                            SyscallResult::Err(_) => println!("Didn't get back a valid channel ID :("),
                         },
                     }
                 }
@@ -283,12 +264,12 @@ fn read_input(current_cmd: Option<&str>) -> Option<Input> {
 
     while read < max_len {
         let mut c = [0u8];
-        while let Ok(0) = read_stdin(&mut c[..]) {}
+        while let SyscallResult::Ok(0) = read_stdin(&mut c[..]) {}
 
         if c[0] == b'\x1B' {
             let mut ctrl_seq = [b'\x1B', 0, 0];
             for byte in &mut ctrl_seq[1..] {
-                while let Ok(0) = read_stdin(&mut c[..]) {}
+                while let SyscallResult::Ok(0) = read_stdin(&mut c[..]) {}
                 *byte = c[0];
             }
 

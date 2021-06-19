@@ -33,6 +33,15 @@ macro_rules! println {
     ($($arg:tt)*) => ($crate::print!("{}\r\n", format_args!($($arg)*)));
 }
 
+#[macro_export]
+macro_rules! dbg {
+    ($e:expr) => {{
+        let e = $e;
+        println!("{} = {:?}", stringify!($e), $e);
+        $e
+    }};
+}
+
 #[doc(hidden)]
 pub fn _print(args: core::fmt::Arguments) {
     use core::fmt::Write;
@@ -41,7 +50,7 @@ pub fn _print(args: core::fmt::Arguments) {
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    println!("PANIC: {:?}", info);
+    println!("PANIC: {}", info);
     librust::syscalls::exit()
 }
 

@@ -22,7 +22,6 @@
     fn_align,
     inline_const,
     map_first_last,
-    maybe_uninit_ref,
     naked_functions,
     new_uninit,
     thread_local
