@@ -261,7 +261,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     if let Some((device, interrupts, ptr)) = stdout_interrupts {
         for interrupt in interrupts {
-            device.register_isr(interrupt, ptr.as_usize());
+            device.register_isr(interrupt.number, ptr.as_usize());
         }
     }
 
@@ -284,9 +284,9 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
             if let Some(plic) = &*PLIC.lock() {
                 for interrupt in child.interrupts().unwrap() {
-                    plic.enable_interrupt(platform::current_plic_context(), interrupt);
-                    plic.set_interrupt_priority(interrupt, 1);
-                    interrupts::isr::register_isr(interrupt, 0, drivers::virtio::block::BlockDevice::isr);
+                    plic.enable_interrupt(platform::current_plic_context(), interrupt.number);
+                    plic.set_interrupt_priority(interrupt.number, 1);
+                    interrupts::isr::register_isr(interrupt.number, 0, drivers::virtio::block::BlockDevice::isr);
                 }
             }
         }
@@ -487,7 +487,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     error!("{}", info);
     error!("Shutting hart down");
 
-    sbi::hart_state_management::hart_stop().unwrap()
+    platform::exit(platform::ExitStatus::Error(&"panicked"))
 }
 
 #[no_mangle]

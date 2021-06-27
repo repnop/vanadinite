@@ -32,6 +32,10 @@ pub mod virtio {
     }
 }
 
+pub mod sunxi {
+    pub mod uart;
+}
+
 pub trait CompatibleWith {
     fn compatible_with() -> &'static [&'static str];
 }

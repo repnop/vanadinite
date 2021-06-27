@@ -12,3 +12,4 @@ tar = "0.4"
 walkdir = "2.3"
 xshell = "0.1"
 signal-hook = "0.3.7"
+bytemuck = { version="1.7.0", features=["derive", "min_const_generics"] }

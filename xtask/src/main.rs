@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod build;
+pub mod platforms;
 pub mod runner;
 
 use build::{BuildTarget, Platform};

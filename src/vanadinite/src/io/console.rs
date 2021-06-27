@@ -6,7 +6,9 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    drivers::{generic::uart16550::Uart16550, sifive::fu540_c000::uart::SifiveUart, CompatibleWith},
+    drivers::{
+        generic::uart16550::Uart16550, sifive::fu540_c000::uart::SifiveUart, sunxi::uart::SunxiUart, CompatibleWith,
+    },
     interrupts::isr::register_isr,
     sync::SpinMutex,
 };
@@ -14,6 +16,9 @@ use crate::{
 pub trait ConsoleDevice: 'static {
     fn init(&mut self);
     fn read(&self) -> u8;
+    fn try_read(&self) -> Option<u8> {
+        Some(self.read())
+    }
     fn write(&mut self, n: u8);
 }
 
@@ -89,6 +94,7 @@ pub fn set_console(device: &'static mut dyn ConsoleDevice) {
 pub enum ConsoleDevices {
     Uart16550,
     SifiveUart,
+    SunxiUart,
 }
 
 impl ConsoleDevices {
@@ -97,6 +103,8 @@ impl ConsoleDevices {
             Some(ConsoleDevices::Uart16550)
         } else if compatible.all().any(|s| SifiveUart::compatible_with().contains(&s)) {
             Some(ConsoleDevices::SifiveUart)
+        } else if compatible.all().any(|s| SunxiUart::compatible_with().contains(&s)) {
+            Some(ConsoleDevices::SunxiUart)
         } else {
             None
         }
@@ -109,6 +117,7 @@ impl ConsoleDevices {
         match self {
             ConsoleDevices::Uart16550 => set_raw_console(ptr as *mut Uart16550),
             ConsoleDevices::SifiveUart => set_raw_console(ptr as *mut SifiveUart),
+            ConsoleDevices::SunxiUart => set_raw_console(ptr as *mut SunxiUart),
         }
     }
 
@@ -116,6 +125,7 @@ impl ConsoleDevices {
         match self {
             ConsoleDevices::Uart16550 => register_isr(interrupt_id, private, console_interrupt),
             ConsoleDevices::SifiveUart => register_isr(interrupt_id, private, console_interrupt),
+            &ConsoleDevices::SunxiUart => register_isr(interrupt_id, private, sunxi_console_interrupt),
         }
 
         if let Some(plic) = &*crate::interrupts::PLIC.lock() {
@@ -129,7 +139,26 @@ fn console_interrupt(_: usize, _: usize) -> Result<(), &'static str> {
     super::INPUT_QUEUE.push(CONSOLE.lock().read()).map_err(|_| "failed to write to input queue")
 }
 
+fn sunxi_console_interrupt(_: usize, _: usize) -> Result<(), &'static str> {
+    let console = CONSOLE.lock();
+    while let Some(data) = console.try_read() {
+        let _ = super::INPUT_QUEUE.push(data);
+    }
+
+    Ok(())
+}
+
 pub struct LegacySbiConsoleOut;
+
+impl core::fmt::Write for LegacySbiConsoleOut {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for b in s.as_bytes() {
+            sbi::legacy::console_putchar(*b);
+        }
+
+        Ok(())
+    }
+}
 
 impl ConsoleDevice for LegacySbiConsoleOut {
     fn init(&mut self) {}

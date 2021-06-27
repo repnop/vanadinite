@@ -75,12 +75,7 @@ impl Plic {
     }
 
     pub const fn max_priority() -> usize {
-        #[cfg(all(not(feature = "platform.virt"), not(feature = "platform.sifive_u")))]
-        compile_error!("Update PLIC max priority for new platform");
-
-        // This value is fixed for the platforms we currently support, but may
-        // need `#[cfg]`'d in the future
-        7
+        crate::platform::plic_max_priority()
     }
 }
 
@@ -128,6 +123,7 @@ mod registers {
         pub fn enable(&self, interrupt_id: usize) {
             let (u32_index, bit_index) = (interrupt_id / 32, interrupt_id % 32);
 
+            log::info!("Writing to: {:#p} for interrupt_id={}", &self.0[u32_index], interrupt_id);
             let val = self.0[u32_index].read() | (1 << bit_index);
             self.0[u32_index].write(val);
         }

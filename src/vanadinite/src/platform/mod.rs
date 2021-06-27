@@ -6,31 +6,18 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 #[cfg(feature = "platform.virt")]
-pub mod virt;
+#[path = "virt.rs"]
+mod impl_;
 
-// FIXME: this is kind of hacky because contexts aren't currently standardized,
-// should look for a better way to do it in the future
-pub fn current_plic_context() -> usize {
-    #[cfg(not(feature = "platform.sifive_u"))]
-    return 1 + 2 * crate::HART_ID.get();
+#[cfg(feature = "platform.sifive_u")]
+#[path = "sifive_u.rs"]
+mod impl_;
 
-    // first context is M-mode E51 monitor core which doesn't support S-mode so
-    // we'll always be on hart >=1 which ends up working out to remove the +1
-    // from the other fn
-    #[cfg(feature = "platform.sifive_u")]
-    return 2 * crate::HART_ID.get();
-}
+#[cfg(feature = "platform.nezha")]
+#[path = "nezha.rs"]
+mod impl_;
 
-pub fn plic_context_for(hart_id: usize) -> usize {
-    #[cfg(not(feature = "platform.sifive_u"))]
-    return 1 + 2 * hart_id;
-
-    // first context is M-mode E51 monitor core which doesn't support S-mode so
-    // we'll always be on hart >=1 which ends up working out to remove the +1
-    // from the other fn
-    #[cfg(feature = "platform.sifive_u")]
-    return 2 * hart_id;
-}
+pub use impl_::*;
 
 pub enum ExitStatus<'a> {
     Ok,
@@ -39,9 +26,9 @@ pub enum ExitStatus<'a> {
 
 #[cfg(feature = "platform.virt")]
 pub fn exit(status: ExitStatus) -> ! {
-    virt::exit(match status {
-        ExitStatus::Ok => virt::ExitStatus::Pass,
-        ExitStatus::Error(_) => virt::ExitStatus::Fail(1),
+    impl_::exit(match status {
+        ExitStatus::Ok => impl_::ExitStatus::Pass,
+        ExitStatus::Error(_) => impl_::ExitStatus::Fail(1),
     })
 }
 

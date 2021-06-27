@@ -1,6 +1,10 @@
 [workspace]
-members = ["hax", "init", "rt0", "shell", "std", "template"]
+#members = ["hax", "init", "rt0", "shell", "std", "template"]
+members = ["rt0", "shell", "std"]
 resolver = "2"
 
 [profile.release]
-debug = true
+# debug = true
+lto = "thin"
+codegen-units = 1
+panic = "abort"
