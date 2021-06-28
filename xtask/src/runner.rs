@@ -112,7 +112,7 @@ pub fn run(options: RunOptions) -> Result<()> {
                     -append {kernel_args}
                     {enable_virtio_block_device...}
                     -bios opensbi-riscv64-generic-fw_jump.bin 
-                    -kernel src/target/riscv64gc-unknown-none-elf/release/vanadinite
+                    -kernel src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite
                     {debug_log...}
             ").run()?;
         }

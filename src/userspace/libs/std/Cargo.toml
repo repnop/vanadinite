@@ -1,0 +1,11 @@
+[package]
+name = "std"
+version = "0.1.0"
+authors = ["repnop <repnop@repnop.dev>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+librust = { path="../../../shared/librust", features=["alloc"] }
+rt0 = { path="../rt0" }

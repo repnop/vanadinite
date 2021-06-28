@@ -79,13 +79,13 @@ pub fn build(target: BuildTarget) -> Result<()> {
 
             rm_rf(&init_tar)?;
 
-            let _dir = pushd("./userspace")?;
+            let _dir = pushd("src/userspace")?;
             cmd!("cargo build --release --workspace").run()?;
 
             let out = fs::File::create(init_tar)?;
             let mut archive = Builder::new(out);
 
-            for (bin, path) in walkdir::WalkDir::new("./target/riscv64gc-unknown-none-elf/release/")
+            for (bin, path) in walkdir::WalkDir::new("target/riscv64gc-unknown-none-elf/release/")
                 .max_depth(1)
                 .into_iter()
                 .filter_entry(|e| !e.file_name().to_str().map(|s| s.starts_with('.')).unwrap_or(false))
@@ -117,7 +117,7 @@ pub fn build(target: BuildTarget) -> Result<()> {
                 false => ("build", &["--release"][..]),
             };
 
-            let _dir = pushd("./src");
+            let _dir = pushd("./src/kernel");
             #[rustfmt::skip]
             cmd!("
                 cargo {subcmd}
@@ -129,13 +129,13 @@ pub fn build(target: BuildTarget) -> Result<()> {
             ").run()?;
         }
         BuildTarget::OpenSBI(_) => {
-            cmd!("riscv64-unknown-elf-objcopy -O binary src/target/riscv64gc-unknown-none-elf/release/vanadinite src/target/riscv64gc-unknown-none-elf/release/vanadinite.bin --set-start 0x80200000").run()?;
+            cmd!("riscv64-unknown-elf-objcopy -O binary src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite src/target/riscv64gc-unknown-none-elf/release/vanadinite.bin --set-start 0x80200000").run()?;
 
             cmd!("git submodule init submodules/opensbi").run()?;
             cmd!("git submodule update --remote submodules/opensbi").run()?;
             let _dir = pushd("./submodules/opensbi")?;
 
-            cmd!("make PLATFORM=generic FW_PIC=no FW_PAYLOAD_PATH=../../src/target/riscv64gc-unknown-none-elf/release/vanadinite.bin").run()?;
+            cmd!("make PLATFORM=generic FW_PIC=no FW_PAYLOAD_PATH=../../src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite.bin").run()?;
 
             cp("build/platform/generic/firmware/fw_jump.bin", "../../opensbi-riscv64-generic-fw_jump.bin")?;
             cp("build/platform/generic/firmware/fw_jump.elf", "../../opensbi-riscv64-generic-fw_jump.elf")?;
