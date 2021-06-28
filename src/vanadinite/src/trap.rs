@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    csr::sstatus,
     interrupts::{isr::isr_entry, PLIC},
     mem::{
         manager::AddressRegion,
@@ -14,12 +15,12 @@ use crate::{
     },
     scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
     syscall,
-    task::{Context, TaskState},
+    task::TaskState,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
-pub struct Registers {
+pub struct GeneralRegisters {
     pub ra: usize,
     pub sp: usize,
     pub gp: usize,
@@ -53,7 +54,7 @@ pub struct Registers {
     pub t6: usize,
 }
 
-impl Registers {
+impl GeneralRegisters {
     pub fn sp(&self) -> *mut u8 {
         self.sp as *mut u8
     }
@@ -100,8 +101,7 @@ pub struct FloatingPointRegisters {
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 pub struct TrapFrame {
-    pub registers: Registers,
-    pub fp_registers: FloatingPointRegisters,
+    pub registers: GeneralRegisters,
 }
 
 const INTERRUPT_BIT: usize = 1 << 63;
@@ -191,8 +191,15 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
     match trap_kind {
         Trap::SupervisorTimerInterrupt => {
             if CURRENT_TASK.get().is_some() {
-                TASKS.active_on_cpu().unwrap().lock().context =
-                    Context { pc: sepc as usize, gp_regs: regs.registers, fp_regs: regs.fp_registers };
+                let lock = TASKS.active_on_cpu().unwrap();
+                let mut lock = lock.lock();
+
+                lock.context.pc = sepc;
+                lock.context.gp_regs = regs.registers;
+
+                if let sstatus::FloatingPointStatus::Dirty = sstatus::fs() {
+                    save_fp_registers(&mut lock.context.fp_regs);
+                }
             }
 
             SCHEDULER.schedule()
@@ -299,7 +306,7 @@ pub unsafe extern "C" fn stvec_trap_shim() -> ! {
         ld sp, 0(s0)
         ld tp, 8(s0)
 
-        addi sp, sp, -512
+        addi sp, sp, -248
 
         sd x1, 0(sp)
 
@@ -350,41 +357,6 @@ pub unsafe extern "C" fn stvec_trap_shim() -> ! {
         sd x29, 224(sp)
         sd x30, 232(sp)
         sd x31, 240(sp)
-        fsd f0, 248(sp)
-        fsd f1, 256(sp)
-        fsd f2, 264(sp)
-        fsd f3, 272(sp)
-        fsd f4, 280(sp)
-        fsd f5, 288(sp)
-        fsd f6, 296(sp)
-        fsd f7, 304(sp)
-        fsd f8, 312(sp)
-        fsd f9, 320(sp)
-        fsd f10, 328(sp)
-        fsd f11, 336(sp)
-        fsd f12, 344(sp)
-        fsd f13, 352(sp)
-        fsd f14, 360(sp)
-        fsd f15, 368(sp)
-        fsd f16, 376(sp)
-        fsd f17, 384(sp)
-        fsd f18, 392(sp)
-        fsd f19, 400(sp)
-        fsd f20, 408(sp)
-        fsd f21, 416(sp)
-        fsd f22, 424(sp)
-        fsd f23, 432(sp)
-        fsd f24, 440(sp)
-        fsd f25, 448(sp)
-        fsd f26, 456(sp)
-        fsd f27, 464(sp)
-        fsd f28, 472(sp)
-        fsd f29, 480(sp)
-        fsd f30, 488(sp)
-        fsd f31, 496(sp)
-
-        frcsr t0
-        sd t0, 504(sp)
 
         mv a0, sp
         csrr a1, sepc
@@ -438,4 +410,50 @@ pub unsafe extern "C" fn stvec_trap_shim() -> ! {
         # gtfo
         sret
     ", options(noreturn));
+}
+
+#[rustfmt::skip]
+extern "C" fn save_fp_registers(fp_regs: &mut FloatingPointRegisters) {
+    unsafe {
+        asm!("
+                fsd f0, 0({regs})
+                fsd f1, 8({regs})
+                fsd f2, 16({regs})
+                fsd f3, 24({regs})
+                fsd f4, 32({regs})
+                fsd f5, 40({regs})
+                fsd f6, 48({regs})
+                fsd f7, 56({regs})
+                fsd f8, 64({regs})
+                fsd f9, 72({regs})
+                fsd f10, 80({regs})
+                fsd f11, 88({regs})
+                fsd f12, 96({regs})
+                fsd f13, 104({regs})
+                fsd f14, 112({regs})
+                fsd f15, 120({regs})
+                fsd f16, 128({regs})
+                fsd f17, 136({regs})
+                fsd f18, 144({regs})
+                fsd f19, 152({regs})
+                fsd f20, 160({regs})
+                fsd f21, 168({regs})
+                fsd f22, 176({regs})
+                fsd f23, 184({regs})
+                fsd f24, 192({regs})
+                fsd f25, 200({regs})
+                fsd f26, 208({regs})
+                fsd f27, 216({regs})
+                fsd f28, 224({regs})
+                fsd f29, 232({regs})
+                fsd f30, 240({regs})
+                fsd f31, 248({regs})
+
+                frcsr {0}
+                sd {0}, 256({regs})
+            ",
+            out(reg) _,
+            regs = in(reg) fp_regs,
+        );
+    }
 }

@@ -82,7 +82,7 @@ impl Scheduler for RoundRobinScheduler {
                 csr::satp::write(Satp { mode: SATP_MODE, asid: tid.value() as u16, root_page_table });
                 mem::sfence(None, None);
 
-                unsafe { super::return_to_usermode(&context.gp_regs, context.pc) }
+                unsafe { super::return_to_usermode(&context) }
             }
             None => {
                 // !! RELEASE LOCK BEFORE CONTEXT SWITCHING !!

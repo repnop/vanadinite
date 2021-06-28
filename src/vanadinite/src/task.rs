@@ -14,7 +14,7 @@ use crate::{
         },
     },
     syscall::channel::UserspaceChannel,
-    trap::{FloatingPointRegisters, Registers},
+    trap::{FloatingPointRegisters, GeneralRegisters},
     utils::{round_up_to_next, Units},
 };
 use alloc::{
@@ -63,10 +63,11 @@ unsafe impl Send for ThreadControlBlock {}
 unsafe impl Sync for ThreadControlBlock {}
 
 #[derive(Debug, Clone)]
+#[repr(C)]
 pub struct Context {
-    pub pc: usize,
-    pub gp_regs: Registers,
+    pub gp_regs: GeneralRegisters,
     pub fp_regs: FloatingPointRegisters,
+    pub pc: usize,
 }
 
 pub struct Task {
@@ -253,7 +254,7 @@ impl Task {
 
         let context = Context {
             pc: pc.as_usize(),
-            gp_regs: Registers { sp: sp.as_usize(), tp: tls.unwrap_or(0), ..Default::default() },
+            gp_regs: GeneralRegisters { sp: sp.as_usize(), tp: tls.unwrap_or(0), ..Default::default() },
             fp_regs: FloatingPointRegisters::default(),
         };
 

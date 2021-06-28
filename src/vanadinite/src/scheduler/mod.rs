@@ -10,7 +10,7 @@ pub mod round_robin;
 use crate::{
     cpu_local,
     sync::{SpinMutex, SpinRwLock},
-    task::Task,
+    task::{Context, Task},
     utils::ticks_per_us,
 };
 use alloc::{collections::BTreeMap, sync::Arc};
@@ -103,17 +103,21 @@ fn sleep() -> ! {
 
 #[naked]
 #[no_mangle]
-unsafe extern "C" fn return_to_usermode(_registers: &crate::trap::Registers, _sepc: usize) -> ! {
+unsafe extern "C" fn return_to_usermode(_registers: &Context) -> ! {
     #[rustfmt::skip]
     asm!("
-        csrw sepc, a1
-
         li t0, 1 << 8
         csrc sstatus, t0
         li t0, 1 << 19
         csrs sstatus, t0
         li t0, 1 << 5
         csrs sstatus, t0
+
+        ld t0, 504(a0)
+        fscsr x0, t0
+
+        ld t0, 512(a0)
+        csrw sepc, t0
         
         ld x1, 0(a0)
         ld x2, 8(a0)
@@ -145,6 +149,39 @@ unsafe extern "C" fn return_to_usermode(_registers: &crate::trap::Registers, _se
         ld x29, 224(a0)
         ld x30, 232(a0)
         ld x31, 240(a0)
+
+        fld f0, 248(a0)
+        fld f1, 256(a0)
+        fld f2, 264(a0)
+        fld f3, 272(a0)
+        fld f4, 280(a0)
+        fld f5, 288(a0)
+        fld f6, 296(a0)
+        fld f7, 304(a0)
+        fld f8, 312(a0)
+        fld f9, 320(a0)
+        fld f10, 328(a0)
+        fld f11, 336(a0)
+        fld f12, 344(a0)
+        fld f13, 352(a0)
+        fld f14, 360(a0)
+        fld f15, 368(a0)
+        fld f16, 376(a0)
+        fld f17, 384(a0)
+        fld f18, 392(a0)
+        fld f19, 400(a0)
+        fld f20, 408(a0)
+        fld f21, 416(a0)
+        fld f22, 424(a0)
+        fld f23, 432(a0)
+        fld f24, 440(a0)
+        fld f25, 448(a0)
+        fld f26, 456(a0)
+        fld f27, 464(a0)
+        fld f28, 472(a0)
+        fld f29, 480(a0)
+        fld f30, 488(a0)
+        fld f31, 496(a0)
 
         ld x10, 72(a0)
 
