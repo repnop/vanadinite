@@ -73,6 +73,7 @@ impl ColoredPrint {
                         }
                         Some(':') => {
                             output_str.push(':');
+                            #[allow(clippy::while_let_on_iterator)]
                             while let Some(c) = chars.next() {
                                 match c {
                                     '}' => {
