@@ -2,6 +2,8 @@
     "rust-analyzer.checkOnSave.allTargets": false,
     "rust-analyzer.linkedProjects": [
         "src/kernel/Cargo.toml",
-        "src/userspace/Cargo.toml"
+        "src/userspace/Cargo.toml",
+        "xtask/Cargo.toml",
+        "src/userspace/init/Cargo.toml",
     ]
 }

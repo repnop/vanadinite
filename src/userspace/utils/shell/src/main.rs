@@ -10,6 +10,7 @@
 extern crate alloc;
 
 use core::num::NonZeroUsize;
+use std::ipc;
 use std::librust::message::{KernelNotification, SyscallResult};
 use std::librust::syscalls::{channel::ChannelId, *};
 use std::librust::{
@@ -22,6 +23,12 @@ use std::librust::{
 };
 
 fn main() {
+    print!("Our args are: ");
+    for arg in std::env::args() {
+        print!("{} ", arg);
+    }
+    println!();
+
     let mut history: VecDeque<String> = VecDeque::new();
     let mut history_index = None;
     let mut curr_history: Option<&str> = None;
@@ -173,65 +180,24 @@ fn main() {
                 }
                 Ok(tidn) => {
                     let tid = Tid::new(NonZeroUsize::new(tidn).unwrap());
-                    let ret = send_message(tid, Message { contents: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] });
-
-                    match ret {
-                        SyscallResult::Ok(_) => println!("Message sent to TID {}!", tidn),
-                        SyscallResult::Err(e) => println!("Couldn't send message: {:?}", e),
-                    }
-
-                    println!("Waiting for response with channel ID");
-                    let channel_id = loop {
-                        if let Some(ReadMessage::Kernel(KernelNotification::ChannelOpened(id))) = receive_message() {
-                            break id;
-                        }
-                    };
-
-                    match channel::read_message(channel_id) {
-                        SyscallResult::Ok(Some(msg)) => {
-                            let slice = unsafe { core::slice::from_raw_parts(msg.ptr, msg.len) };
-                            println!("A message already! Contents: {:?}", slice);
-
-                            channel::retire_message(channel_id, msg.id).unwrap();
-
-                            channels.push(channel_id);
-
-                            println!("Channel ID with {:?}: {:?}", tid, channel_id);
-                        }
-                        SyscallResult::Ok(None) => {
-                            channels.push(channel_id);
-                            println!("Channel ID with {:?}: {:?}", tid, channel_id);
-                        }
-                        SyscallResult::Err(_) => println!("Didn't get back a valid channel ID :("),
+                    match ipc::IpcChannel::open(tid) {
+                        Ok(channel) => channels.push(channel),
+                        Err(e) => println!("Error opening channel: {:?}", e),
                     }
                 }
             },
-            "read_channel" => match args.trim().parse::<usize>() {
-                Err(_) => {
-                    println!("Need valid channel ID :(")
-                }
-                Ok(cid) => {
-                    let channel_id = ChannelId::new(cid);
-
-                    match channels.iter().find(|c| **c == channel_id) {
-                        None => println!("Not a channel I know about :("),
-                        Some(_) => match channel::read_message(channel_id) {
-                            SyscallResult::Ok(Some(msg)) => {
-                                let slice = unsafe { core::slice::from_raw_parts(msg.ptr, msg.len) };
-
-                                match core::str::from_utf8(slice) {
-                                    Err(_) => println!("A message! Contents: {:?}", slice),
-                                    Ok(s) => println!("A message! It says: {}", s),
-                                }
-
-                                channel::retire_message(channel_id, msg.id).unwrap();
-                            }
-                            SyscallResult::Ok(None) => println!("No message waiting on channel"),
-                            SyscallResult::Err(_) => println!("Didn't get back a valid channel ID :("),
+            "read_channels" => {
+                for channel in &channels {
+                    match channel.read() {
+                        Ok(Some(msg)) => match core::str::from_utf8(msg.as_bytes()) {
+                            Err(_) => println!("A message! Contents: {:?}", msg.as_bytes()),
+                            Ok(s) => println!("A message! It says: {}", s),
                         },
+                        Ok(None) => {}
+                        Err(_) => {}
                     }
                 }
-            },
+            }
             _ => println!("unknown command :("),
         }
 

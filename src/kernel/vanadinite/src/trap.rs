@@ -206,7 +206,14 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
         }
         Trap::UserModeEnvironmentCall => {
             syscall::handle(regs);
-            sepc + 4
+            let lock = TASKS.active_on_cpu().unwrap();
+            let mut lock = lock.lock();
+
+            lock.context.pc = sepc + 4;
+            lock.context.gp_regs = regs.registers;
+
+            drop(lock);
+            SCHEDULER.schedule()
         }
         Trap::SupervisorExternalInterrupt => {
             // FIXME: there has to be a better way
@@ -272,7 +279,12 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                             sepc
                         }
                         false => {
-                            log::error!("Process died to a {:?} @ {:#p}", trap_kind, stval);
+                            log::error!(
+                                "Process {:?} died to a {:?} @ {:#p}",
+                                CURRENT_TASK.get().unwrap(),
+                                trap_kind,
+                                stval
+                            );
                             active_task.state = TaskState::Dead;
 
                             drop(active_task);

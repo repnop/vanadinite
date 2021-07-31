@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod channel;
+pub mod vmspace;
 
 use crate::{
     io::{ConsoleDevice, INPUT_QUEUE},
@@ -24,7 +25,7 @@ use librust::{
     error::{AccessError, KError},
     message::{Message, Recipient, Sender, SyscallRequest, SyscallResult},
     syscalls::{
-        allocation::{AllocationOptions, MemoryPermissions},
+        allocation::{AllocationOptions, DmaAllocationOptions, MemoryPermissions},
         Syscall,
     },
     task::Tid,
@@ -171,6 +172,7 @@ fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
                         None,
                         page_size,
                         utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
+                        false,
                         flags,
                         if options & AllocationOptions::Zero { FillOption::Zeroed } else { FillOption::Unitialized },
                         AddressRegionKind::UserAllocated,
@@ -204,6 +206,58 @@ fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
         Syscall::RetireChannelMessage => {
             Message::from(channel::retire_message(task, syscall_req.arguments[0], syscall_req.arguments[1])?)
         }
+        Syscall::RequestChannel => {
+            let tid = match NonZeroUsize::new(syscall_req.arguments[0]) {
+                Some(tid) => tid,
+                None => return SyscallResult::Err(KError::InvalidArgument(0)),
+            };
+
+            channel::request_channel(task, Tid::new(tid))?
+        }
+        Syscall::AllocDmaMemory => {
+            let size = syscall_req.arguments[0];
+            let options = DmaAllocationOptions::new(syscall_req.arguments[1]);
+            let page_size = PageSize::Kilopage;
+
+            match size {
+                0 => return SyscallResult::Err(KError::InvalidArgument(0)),
+                _ => {
+                    let allocated_at = task.memory_manager.alloc_region(
+                        None,
+                        page_size,
+                        utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
+                        true,
+                        flags::VALID | flags::USER | flags::READ | flags::WRITE,
+                        if options & DmaAllocationOptions::ZERO { FillOption::Zeroed } else { FillOption::Unitialized },
+                        AddressRegionKind::Dma,
+                    );
+
+                    let phys = task.memory_manager.resolve(allocated_at.start).unwrap();
+
+                    log::debug!("Allocated DMA memory at {:#p} for user process", allocated_at.start);
+
+                    Message::from((phys.as_usize(), allocated_at.start.as_usize()))
+                }
+            }
+        }
+        Syscall::CreateVmspace => Message::from(vmspace::create_vmspace(task)?),
+        Syscall::AllocVmspaceObject => Message::from(vmspace::alloc_vmspace_object(
+            task,
+            syscall_req.arguments[0],
+            syscall_req.arguments[1],
+            syscall_req.arguments[2],
+            syscall_req.arguments[3],
+        )?),
+        Syscall::SpawnVmspace => Message::from(vmspace::spawn_vmspace(
+            task,
+            syscall_req.arguments[0],
+            syscall_req.arguments[1],
+            syscall_req.arguments[2],
+            syscall_req.arguments[3],
+            syscall_req.arguments[4],
+            syscall_req.arguments[5],
+            syscall_req.arguments[6],
+        )?),
     };
 
     SyscallResult::Ok((sender, msg))

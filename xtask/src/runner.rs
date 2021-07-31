@@ -98,7 +98,7 @@ pub fn run(options: RunOptions) -> Result<()> {
                     String::from("guest_errors,trace:riscv_trap,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int"),
                     String::from("-D"),
                     format!("{}", path.display()),
-                    String::from("-monitor"), String::from("stdio")
+                    String::from("-monitor"), String::from("stdio"),
                 ],
                 None => vec![String::from("-serial"), String::from("mon:stdio"), String::from("-nographic")],
             };

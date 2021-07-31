@@ -65,12 +65,12 @@ use {
         paging::{PhysicalAddress, VirtualAddress},
         phys2virt,
     },
-    sync::SpinMutex,
     utils::Units,
 };
 
+use core::sync::atomic::AtomicU64;
+
 use alloc::boxed::Box;
-use drivers::InterruptServicable;
 use fdt::Fdt;
 use mem::kernel_patching::kernel_section_v2p;
 use sbi::{hart_state_management::hart_start, probe_extension, ExtensionAvailability};
@@ -78,9 +78,8 @@ use scheduler::Scheduler;
 pub use vanadinite_macros::{debug, error, info, trace, warn};
 
 static N_CPUS: AtomicUsize = AtomicUsize::new(1);
-static TIMER_FREQ: AtomicUsize = AtomicUsize::new(0);
-static INIT_FS: &[u8] = include_bytes!("../../../../initfs.tar");
-static BLOCK_DEV: SpinMutex<Option<drivers::virtio::block::BlockDevice>> = SpinMutex::new(None);
+static TIMER_FREQ: AtomicU64 = AtomicU64::new(0);
+static INIT: &[u8] = include_bytes!("../../../../init");
 
 cpu_local! {
     static HART_ID: core::cell::Cell<usize> = core::cell::Cell::new(0);
@@ -91,28 +90,29 @@ cpu_local! {
 extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     csr::stvec::set(trap::stvec_trap_shim);
 
-    unsafe { crate::cpu_local::init_thread_locals() };
+    unsafe { cpu_local::init_thread_locals() };
     HART_ID.set(hart_id);
 
-    crate::io::logging::init_logging();
+    io::logging::init_logging();
 
     let (heap_start, heap_end) = mem::heap::HEAP_ALLOCATOR.init(64.mib());
 
+    platform::FDT.store(fdt, Ordering::Release);
     let fdt: Fdt<'static> = match unsafe { Fdt::from_ptr(fdt) } {
         Ok(fdt) => fdt,
-        Err(e) => crate::platform::exit(crate::platform::ExitStatus::Error(&e)),
+        Err(e) => platform::exit(platform::ExitStatus::Error(&e)),
     };
 
     let current_cpu = fdt.cpus().find(|cpu| cpu.ids().first() == hart_id).unwrap();
     let timebase_frequency = current_cpu.timebase_frequency();
-    TIMER_FREQ.store(timebase_frequency, Ordering::Relaxed);
+    TIMER_FREQ.store(timebase_frequency as u64, Ordering::Relaxed);
 
     let mut stdout_interrupts = None;
     let stdout = fdt.chosen().stdout();
     if let Some((node, reg, compatible)) = stdout.and_then(|n| Some((n, n.reg()?.next()?, n.compatible()?))) {
         let stdout_addr = reg.starting_address as *mut u8;
 
-        if let Some(device) = crate::io::ConsoleDevices::from_compatible(compatible) {
+        if let Some(device) = io::ConsoleDevices::from_compatible(compatible) {
             let stdout_phys = PhysicalAddress::from_ptr(stdout_addr);
             let ptr = phys2virt(stdout_phys);
 
@@ -126,7 +126,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
-    let mut init_path = "init";
+    let mut init_args = None;
     if let Some(args) = fdt.chosen().bootargs() {
         let split_args = args.split(' ').map(|s| {
             let mut parts = s.splitn(2, '=');
@@ -137,7 +137,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             match option {
                 "log-filter" => io::logging::parse_log_filter(value),
                 "init" => match value {
-                    Some(path) => init_path = path,
+                    Some(path) => init_args = Some(path.split(',')),
                     None => log::warn!("No path provided for init process! Defaulting to `init`"),
                 },
                 "no-color" | "no-colour" => io::logging::USE_COLOR.store(false, Ordering::Relaxed),
@@ -264,33 +264,6 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
-    for child in fdt.find_all_nodes("/soc/virtio_mmio") {
-        use drivers::virtio::mmio::{
-            block::VirtIoBlockDevice,
-            common::{DeviceType, VirtIoHeader},
-        };
-        let reg = child.reg().unwrap().next().unwrap();
-
-        let virtio_mmio_phys = PhysicalAddress::from_ptr(reg.starting_address);
-        let virtio_mmio_virt = phys2virt(virtio_mmio_phys);
-
-        let device: &'static VirtIoHeader = unsafe { &*(virtio_mmio_virt.as_ptr().cast()) };
-
-        if let Some(DeviceType::BlockDevice) = device.device_type() {
-            let block_device = unsafe { &*(device as *const _ as *const VirtIoBlockDevice) };
-
-            *BLOCK_DEV.lock() = Some(drivers::virtio::block::BlockDevice::new(block_device).unwrap());
-
-            if let Some(plic) = &*PLIC.lock() {
-                for interrupt in child.interrupts().unwrap() {
-                    plic.enable_interrupt(platform::current_plic_context(), interrupt);
-                    plic.set_interrupt_priority(interrupt, 1);
-                    interrupts::isr::register_isr(interrupt, 0, drivers::virtio::block::BlockDevice::isr);
-                }
-            }
-        }
-    }
-
     let ptr = Box::leak(Box::new(task::ThreadControlBlock {
         kernel_stack: mem::alloc_kernel_stack(8.kib()),
         kernel_thread_local: cpu_local::tp(),
@@ -310,12 +283,13 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     csr::sstatus::set_fs(csr::sstatus::FloatingPointStatus::Initial);
     csr::sie::enable();
 
-    let tar = tar::Archive::new(INIT_FS).unwrap();
-
     //scheduler::init_scheduler(Box::new(scheduler::round_robin::RoundRobinScheduler::new()));
 
-    scheduler::SCHEDULER
-        .enqueue(task::Task::load(init_path, &elf64::Elf::new(tar.file(init_path).unwrap().contents).unwrap()));
+    scheduler::SCHEDULER.enqueue(task::Task::load(
+        "init",
+        &elf64::Elf::new(INIT).unwrap(),
+        init_args.into_iter().flatten(),
+    ));
 
     let other_hart_boot_phys = unsafe { kernel_section_v2p(VirtualAddress::from_ptr(other_hart_boot as *const u8)) };
 
@@ -358,12 +332,6 @@ extern "C" fn kalt(hart_id: usize) -> ! {
     csr::sstatus::set_fs(csr::sstatus::FloatingPointStatus::Initial);
     csr::sie::enable();
 
-    let tar = tar::Archive::new(INIT_FS).unwrap();
-
-    scheduler::SCHEDULER.enqueue(task::Task::load(
-        &alloc::format!("init{}", hart_id),
-        &elf64::Elf::new(tar.file("init").unwrap().contents).unwrap(),
-    ));
     scheduler::SCHEDULER.schedule();
 }
 

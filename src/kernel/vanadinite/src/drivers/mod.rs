@@ -16,22 +16,6 @@ pub mod generic {
     pub mod uart16550;
 }
 
-pub mod virtio {
-    pub mod mmio {
-        pub mod block;
-        pub mod common;
-    }
-
-    pub mod block;
-    pub mod queue;
-
-    #[derive(Debug)]
-    pub enum VirtIoDeviceError {
-        FeaturesNotRecognized,
-        DeviceError,
-    }
-}
-
 pub trait CompatibleWith {
     fn compatible_with() -> &'static [&'static str];
 }

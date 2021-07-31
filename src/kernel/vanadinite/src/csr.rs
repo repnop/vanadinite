@@ -98,8 +98,8 @@ pub mod sstatus {
 }
 
 pub mod time {
-    pub fn read() -> usize {
-        let value: usize;
+    pub fn read() -> u64 {
+        let value: u64;
 
         unsafe { asm!("csrr {}, time", out(reg) value) };
 

@@ -74,7 +74,8 @@ impl CompatibleWith for SifiveUart {
 }
 
 mod registers {
-    use crate::utils::volatile::Volatile;
+    use volatile::Volatile;
+
     #[derive(Debug)]
     #[repr(transparent)]
     pub struct TxData(Volatile<u32>);

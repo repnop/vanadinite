@@ -12,7 +12,7 @@ use crate::{
         region::{MemoryRegion, PhysicalRegion},
     },
     scheduler::{CURRENT_TASK, TASKS},
-    task::Task,
+    task::{Task, TaskState},
     utils::{self, Units},
 };
 use alloc::{collections::BTreeMap, sync::Arc};
@@ -22,7 +22,7 @@ use core::{
 };
 use librust::{
     error::KError,
-    message::{KernelNotification, Sender, SyscallResult},
+    message::{KernelNotification, Message, Sender, SyscallResult},
     syscalls::channel::{ChannelId, MessageId},
     task::Tid,
 };
@@ -41,6 +41,37 @@ impl UserspaceChannel {
     fn next_message_id(&self) -> usize {
         self.message_id_counter.fetch_add(1, Ordering::AcqRel)
     }
+}
+
+pub fn request_channel(from: &mut Task, to: Tid) -> SyscallResult<Message, KError> {
+    let current_tid = CURRENT_TASK.get().unwrap();
+
+    // Doesn't make sense to make a shared memory channel with itself and we'd
+    // also end up deadlocking ourselves
+    if current_tid == to {
+        return SyscallResult::Err(KError::InvalidArgument(0));
+    }
+
+    let to_task = match TASKS.get(to) {
+        Some(task) => task,
+        None => return SyscallResult::Err(KError::InvalidRecipient),
+    };
+
+    let mut to_task = to_task.lock();
+
+    if to_task.state.is_dead() {
+        return SyscallResult::Err(KError::InvalidRecipient);
+    } else if !to_task.promiscuous {
+        return SyscallResult::Ok(KernelNotification::ChannelRequestDenied.into());
+    }
+
+    to_task.incoming_channel_request.insert(current_tid);
+    to_task.message_queue.push_back((Sender::kernel(), KernelNotification::ChannelRequest(current_tid).into()));
+
+    log::info!("blocking {:?}", current_tid);
+    from.state = TaskState::Blocked;
+
+    SyscallResult::Ok(Message::default())
 }
 
 pub fn create_channel(from: &mut Task, to: Tid) -> SyscallResult<usize, KError> {
@@ -83,6 +114,11 @@ pub fn create_channel(from: &mut Task, to: Tid) -> SyscallResult<usize, KError> 
         write_regions: BTreeMap::new(),
         read_regions: BTreeMap::new(),
     };
+
+    if from.incoming_channel_request.remove(&to) {
+        log::info!("unblocking {:?}", to);
+        to_task.state = TaskState::Running;
+    }
 
     from.channels.insert(from_channel_id, from_channel);
     to_task.channels.insert(to_channel_id, to_channel);

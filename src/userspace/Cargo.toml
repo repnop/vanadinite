@@ -1,6 +1,7 @@
 [workspace]
 members = ["libs/*", "servers/*", "utils/*"]
 resolver = "2"
+exclude = ["init"]
 
 [profile.release]
 debug = true

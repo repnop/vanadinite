@@ -7,6 +7,7 @@
 
 pub mod allocation;
 pub mod channel;
+pub mod vmspace;
 
 use crate::{
     error::KError,
@@ -29,6 +30,11 @@ pub enum Syscall {
     CreateChannelMessage = 8,
     SendChannelMessage = 9,
     RetireChannelMessage = 10,
+    RequestChannel = 11,
+    AllocDmaMemory = 12,
+    CreateVmspace = 13,
+    AllocVmspaceObject = 14,
+    SpawnVmspace = 15,
 }
 
 impl Syscall {
@@ -45,6 +51,11 @@ impl Syscall {
             8 => Some(Self::CreateChannelMessage),
             9 => Some(Self::SendChannelMessage),
             10 => Some(Self::RetireChannelMessage),
+            11 => Some(Self::RequestChannel),
+            12 => Some(Self::AllocDmaMemory),
+            13 => Some(Self::CreateVmspace),
+            14 => Some(Self::AllocVmspaceObject),
+            15 => Some(Self::SpawnVmspace),
             _ => None,
         }
     }

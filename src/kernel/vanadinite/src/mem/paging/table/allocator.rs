@@ -30,7 +30,7 @@ unsafe impl alloc::alloc::Allocator for PageTableAllocator {
 
     #[track_caller]
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        assert_eq!(layout.align(), 4096, "attempted to allocate something other than a page table");
+        assert_eq!(layout.align(), 4096, "attempted to deallocate something other than a page table");
 
         PHYSICAL_MEMORY_ALLOCATOR.lock().dealloc(
             PhysicalPage::from_ptr(virt2phys(VirtualAddress::from_ptr(ptr.as_ptr())).as_mut_ptr()),

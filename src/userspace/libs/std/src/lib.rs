@@ -10,13 +10,19 @@
 #![allow(incomplete_features)]
 
 extern crate alloc;
+
+#[cfg(feature = "rt0")]
 extern crate rt0;
 
+pub mod env;
 pub mod heap;
 pub mod io;
+pub mod ipc;
 pub mod prelude;
 mod task_local;
+pub mod vmspace;
 
+pub use alloc::collections;
 pub use librust;
 
 #[prelude_import]
@@ -37,7 +43,7 @@ macro_rules! println {
 macro_rules! dbg {
     ($e:expr) => {{
         let e = $e;
-        println!("{} = {:?}", stringify!($e), $e);
+        $crate::println!("{} = {:?}", stringify!($e), e);
         $e
     }};
 }

@@ -49,21 +49,6 @@ pub fn sfence(vaddr: Option<paging::VirtualAddress>, asid: Option<u16>) {
     }
 }
 
-pub enum FenceMode {
-    Full,
-    Read,
-    Write,
-}
-
-#[inline(always)]
-pub fn fence(mode: FenceMode) {
-    match mode {
-        FenceMode::Full => unsafe { asm!("fence iorw, iorw") },
-        FenceMode::Read => unsafe { asm!("fence ir, ir") },
-        FenceMode::Write => unsafe { asm!("fence ow, ow") },
-    }
-}
-
 pub fn alloc_kernel_stack(size: usize) -> *mut u8 {
     assert!(size.is_power_of_two());
     assert_eq!(size % 4096, 0);

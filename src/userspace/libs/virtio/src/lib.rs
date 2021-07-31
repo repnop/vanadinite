@@ -5,9 +5,10 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::utils::volatile::{Read, ReadWrite, Volatile, Write};
+pub mod splitqueue;
 
 pub use registers::StatusFlag;
+use volatile::{Read, ReadWrite, Volatile, Write};
 
 #[repr(C)]
 pub struct VirtIoHeader {
@@ -118,7 +119,7 @@ impl DeviceType {
 
 mod registers {
     use super::*;
-    use crate::mem::paging::PhysicalAddress;
+    use librust::mem::PhysicalAddress;
 
     #[derive(Debug)]
     #[repr(transparent)]
@@ -193,7 +194,7 @@ mod registers {
 
         pub fn set_flag(&self, flag: StatusFlag) {
             self.0.write(self.0.read() | flag as u32);
-            crate::mem::fence(crate::mem::FenceMode::Write);
+            librust::mem::fence(librust::mem::FenceMode::Write);
         }
 
         pub fn failed(&self) -> bool {
@@ -260,4 +261,10 @@ mod registers {
             self.0[1].write(high);
         }
     }
+}
+
+#[derive(Debug)]
+pub enum VirtIoDeviceError {
+    FeaturesNotRecognized,
+    DeviceError,
 }

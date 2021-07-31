@@ -42,7 +42,7 @@ pub extern "C" fn ktest(hart_id: usize, fdt: *const u8) -> ! {
 
     let current_cpu = fdt.cpus().find(|cpu| cpu.ids().first() == hart_id).unwrap();
     let timebase_frequency = current_cpu.timebase_frequency();
-    TIMER_FREQ.store(timebase_frequency, Ordering::Relaxed);
+    TIMER_FREQ.store(timebase_frequency as u64, Ordering::Relaxed);
 
     let stdout = fdt.chosen().stdout();
     if let Some((_, reg, compatible)) = stdout.and_then(|n| Some((n, n.reg()?.next()?, n.compatible()?))) {

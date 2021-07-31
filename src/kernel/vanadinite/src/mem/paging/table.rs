@@ -43,7 +43,7 @@ impl PageTable {
 
     #[track_caller]
     pub fn map(&mut self, from: PhysicalAddress, to: VirtualAddress, flags: Flags, size: PageSize) {
-        log::debug!("Mapping {:#p} -> {:#p}", from, to);
+        log::trace!("Mapping {:#p} -> {:#p}", from, to);
 
         size.assert_addr_aligned(from.as_usize());
         size.assert_addr_aligned(to.as_usize());
@@ -59,7 +59,7 @@ impl PageTable {
                     panic!("attempted to map an already-mapped virtual address: {:#p} -> {:#p}", from, to);
                 }
 
-                log::debug!("Map successful: {:#p} to {:#p}", from, to);
+                log::trace!("Map successful: {:#p} to {:#p}", from, to);
 
                 entry.set_flags(flags);
                 entry.set_ppn(from);
@@ -233,7 +233,7 @@ impl PageTable {
         let current: *const repr::PageTable = { phys2virt(crate::csr::satp::read().root_page_table).as_ptr().cast() };
 
         // FIXME: this address should be available somewhere else and not hardcoded
-        let start_idx = *VirtualAddress::new(0xFFFFFFC000000000).vpns().last().unwrap();
+        let start_idx = *VirtualAddress::kernelspace_range().start.vpns().last().unwrap();
         for i in start_idx..512 {
             self.root.entries[i] = unsafe { (*current).entries[i] };
         }

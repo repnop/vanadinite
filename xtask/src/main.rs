@@ -97,12 +97,12 @@ fn clean(target: CleanTarget) -> Result<()> {
             println!("Cleaned Spike");
         }
         CleanTarget::Userspace => {
-            let _dir = pushd("./userspace")?;
+            let _dir = pushd("./src/userspace")?;
             rm_rf("./target")?;
             println!("Cleaned userspace");
         }
         CleanTarget::Vanadinite => {
-            let _dir = pushd("./src")?;
+            let _dir = pushd("./src/kernel")?;
             rm_rf("./target")?;
             println!("Cleaned vanadinite");
         }

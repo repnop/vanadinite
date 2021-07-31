@@ -84,6 +84,13 @@ impl<T, E> SyscallResult<T, E> {
             Self::Err(e) => SyscallResult::Err(e),
         }
     }
+
+    pub fn map_err<U>(self, f: impl FnOnce(E) -> U) -> SyscallResult<T, U> {
+        match self {
+            Self::Ok(t) => SyscallResult::Ok(t),
+            Self::Err(e) => SyscallResult::Err(f(e)),
+        }
+    }
 }
 
 impl From<KError> for Message {
@@ -211,7 +218,7 @@ macro_rules! impl_trait_for_tuples {
                     let mut contents = [0; 13];
 
                     $(
-                        contents[$t] = t.$t;
+                        contents[$t] = t.$t as _;
                     )*
 
                     Self { contents }
@@ -220,7 +227,7 @@ macro_rules! impl_trait_for_tuples {
 
             impl From<Message> for $ty {
                 fn from(msg: Message) -> $ty {
-                    ($(msg.contents[$t]),*,)
+                    ($(msg.contents[$t] as _),*,)
                 }
             }
         )+
@@ -238,7 +245,18 @@ impl_trait_for_tuples! {
     (usize, usize, usize, usize, usize, usize, usize, usize) => (0, 1, 2, 3, 4, 5, 6, 7),
     (usize, usize, usize, usize, usize, usize, usize, usize, usize) => (0, 1, 2, 3, 4, 5, 6, 7, 8),
     (usize, usize, usize, usize, usize, usize, usize, usize, usize, usize) => (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
-    (usize, usize, usize, usize, usize, usize, usize, usize, usize, usize, usize) => (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+    (usize, usize, usize, usize, usize, usize, usize, usize, usize, usize, usize) => (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
+    (*mut u8,) => (0),
+    (*mut u8, *mut u8) => (0, 1),
+    (*mut u8, *mut u8, *mut u8) => (0, 1, 2),
+    (*mut u8, *mut u8, *mut u8, *mut u8) => (0, 1, 2, 3),
+    (*mut u8, *mut u8, *mut u8, *mut u8, *mut u8) => (0, 1, 2, 3, 4),
+    (*mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8) => (0, 1, 2, 3, 4, 5),
+    (*mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8) => (0, 1, 2, 3, 4, 5, 6),
+    (*mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8) => (0, 1, 2, 3, 4, 5, 6, 7),
+    (*mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8) => (0, 1, 2, 3, 4, 5, 6, 7, 8),
+    (*mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8) => (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+    (*mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8) => (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 }
 
 #[derive(Debug)]

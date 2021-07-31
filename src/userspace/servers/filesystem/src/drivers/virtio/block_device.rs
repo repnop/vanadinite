@@ -5,14 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{
-    drivers::virtio::{
-        mmio::common::{StatusFlag, VirtIoHeader},
-        queue::SplitVirtqueue,
-        VirtIoDeviceError,
-    },
-    utils::volatile::{Read, ReadWrite, Volatile},
-};
+use virtio::{splitqueue::SplitVirtqueue, StatusFlag, VirtIoDeviceError, VirtIoHeader};
+use volatile::{Read, ReadWrite, Volatile};
 
 #[repr(C)]
 pub struct VirtIoBlockDevice {
@@ -64,9 +58,9 @@ impl VirtIoBlockDevice {
 
         self.header.queue_select.write(queue_select);
         self.header.queue_size.write(queue.queue_size());
-        self.header.queue_descriptor.set(queue.descriptor_physical_address());
-        self.header.queue_available.set(queue.available_physical_address());
-        self.header.queue_used.set(queue.used_physical_address());
+        self.header.queue_descriptor.set(queue.descriptors.physical_address());
+        self.header.queue_available.set(queue.available.physical_address());
+        self.header.queue_used.set(queue.used.physical_address());
 
         self.header.queue_ready.ready();
 

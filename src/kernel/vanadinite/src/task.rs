@@ -13,19 +13,23 @@ use crate::{
             PageSize, VirtualAddress,
         },
     },
-    syscall::channel::UserspaceChannel,
+    platform::FDT,
+    syscall::{channel::UserspaceChannel, vmspace::VmspaceObject},
     trap::{FloatingPointRegisters, GeneralRegisters},
     utils::{round_up_to_next, Units},
 };
 use alloc::{
     boxed::Box,
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    vec::Vec,
 };
 use elf64::{Elf, ProgramSegmentType, Relocation};
+use fdt::Fdt;
 use librust::{
     capabilities::Capability,
     message::{Message, Sender},
-    syscalls::channel::ChannelId,
+    syscalls::{channel::ChannelId, vmspace::VmspaceObjectId},
+    task::Tid,
 };
 
 #[derive(Debug)]
@@ -76,12 +80,19 @@ pub struct Task {
     pub memory_manager: MemoryManager,
     pub state: TaskState,
     pub message_queue: VecDeque<(Sender, Message)>,
+    pub promiscuous: bool,
+    pub incoming_channel_request: BTreeSet<Tid>,
     pub channels: BTreeMap<ChannelId, UserspaceChannel>,
+    pub vmspace_objects: BTreeMap<VmspaceObjectId, VmspaceObject>,
+    pub vmspace_next_id: usize,
     pub capabilities: [Capability; 32],
 }
 
 impl Task {
-    pub fn load(name: &str, elf: &Elf) -> Self {
+    pub fn load<'a, I>(name: &str, elf: &Elf, args: I) -> Self
+    where
+        I: Iterator<Item = &'a str> + Clone,
+    {
         let mut memory_manager = MemoryManager::new();
 
         let capabilities = Default::default();
@@ -197,6 +208,7 @@ impl Task {
                 Some(segment_load_base),
                 PageSize::Kilopage,
                 region_size / 4.kib(),
+                false,
                 flags,
                 FillOption::Data(&segment_data[..segment_len]),
                 kind,
@@ -232,6 +244,7 @@ impl Task {
                 Some(tls_base),
                 PageSize::Kilopage,
                 n_pages_needed,
+                false,
                 USER | READ | WRITE | VALID,
                 FillOption::Data(&segment_data[..segment_len]),
                 AddressRegionKind::Tls,
@@ -246,15 +259,71 @@ impl Task {
             .alloc_guarded_region(
                 PageSize::Kilopage,
                 4,
+                false,
                 USER | READ | WRITE | VALID,
                 FillOption::Unitialized,
                 AddressRegionKind::Stack,
             )
             .add(16.kib());
 
+        let fdt_ptr = FDT.load(core::sync::atomic::Ordering::Acquire);
+        let fdt_loc = {
+            let fdt = unsafe { Fdt::from_ptr(fdt_ptr) }.unwrap();
+            let slice = unsafe { core::slice::from_raw_parts(fdt_ptr, fdt.total_size()) };
+            memory_manager.alloc_region(
+                None,
+                PageSize::Kilopage,
+                round_up_to_next(fdt.total_size(), 4.kib()) / 4.kib(),
+                false,
+                USER | READ | VALID,
+                FillOption::Data(slice),
+                AddressRegionKind::Data,
+            )
+        };
+
+        let arg_count = args.clone().count();
+        let (a0, a1) = match arg_count {
+            0 => (0, 0),
+            n => {
+                let total_size = args.clone().fold(0, |total, s| total + s.len());
+                let concatenated = args.clone().flat_map(|s| s.bytes()).collect::<Vec<_>>();
+                let storage = memory_manager.alloc_guarded_region(
+                    PageSize::Kilopage,
+                    round_up_to_next(total_size, 4.kib()) / 4.kib(),
+                    false,
+                    USER | READ | VALID,
+                    FillOption::Data(&concatenated),
+                    AddressRegionKind::ReadOnly,
+                );
+                let (_, ptr_list) = args.fold((storage, Vec::new()), |(ptr, mut v), s| {
+                    v.extend_from_slice(&ptr.as_usize().to_ne_bytes());
+                    v.extend_from_slice(&s.len().to_ne_bytes());
+
+                    (ptr.add(s.len()), v)
+                });
+                let ptrs = memory_manager.alloc_guarded_region(
+                    PageSize::Kilopage,
+                    round_up_to_next(n * 16, 4.kib()) / 4.kib(),
+                    false,
+                    USER | READ | VALID,
+                    FillOption::Data(&ptr_list),
+                    AddressRegionKind::ReadOnly,
+                );
+
+                (n, ptrs.as_usize())
+            }
+        };
+
         let context = Context {
             pc: pc.as_usize(),
-            gp_regs: GeneralRegisters { sp: sp.as_usize(), tp: tls.unwrap_or(0), ..Default::default() },
+            gp_regs: GeneralRegisters {
+                sp: sp.as_usize(),
+                tp: tls.unwrap_or(0),
+                a0,
+                a1,
+                a2: fdt_loc.start.as_usize(),
+                ..Default::default()
+            },
             fp_regs: FloatingPointRegisters::default(),
         };
 
@@ -263,8 +332,12 @@ impl Task {
             context,
             memory_manager,
             state: TaskState::Running,
+            promiscuous: true,
+            incoming_channel_request: BTreeSet::new(),
             channels: BTreeMap::new(),
             message_queue: VecDeque::new(),
+            vmspace_objects: BTreeMap::new(),
+            vmspace_next_id: 0,
             capabilities,
         }
     }

@@ -108,7 +108,11 @@ impl core::fmt::Pointer for PhysicalAddress {
 pub struct VirtualAddress(usize);
 
 impl VirtualAddress {
-    pub const fn new(addr: usize) -> Self {
+    pub const fn new(mut addr: usize) -> Self {
+        let top_most_bit = 1 << (12 + N_VPN * 9 - 1);
+        if addr & top_most_bit == top_most_bit {
+            addr |= usize::MAX << (12 + N_VPN * 9 - 1);
+        }
         VirtualAddress(addr)
     }
 
@@ -195,6 +199,10 @@ impl VirtualAddress {
         self.0 as *mut u8
     }
 
+    pub fn is_null(self) -> bool {
+        self.0 == 0
+    }
+
     pub fn align_down_to(self, size: PageSize) -> Self {
         Self(self.0 & !(size.to_byte_size() - 1))
     }
@@ -226,6 +234,10 @@ impl VirtualAddress {
             PageSize::Megapage => self.0 & (2.mib() - 1),
             PageSize::Kilopage => self.0 & (4.kib() - 1),
         }
+    }
+
+    pub fn is_aligned(self, page_size: PageSize) -> bool {
+        self.offset_into_page(page_size) == 0
     }
 
     pub const fn from_vpns(vpns: [usize; N_VPN]) -> Self {

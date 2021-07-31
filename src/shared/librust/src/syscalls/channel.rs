@@ -48,6 +48,14 @@ impl MessageId {
     }
 }
 
+pub fn request_channel(with: Tid) -> SyscallResult<(), KError> {
+    syscall(
+        Recipient::kernel(),
+        SyscallRequest { syscall: Syscall::RequestChannel, arguments: [with.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    )
+    .1
+}
+
 pub fn create_channel(with: Tid) -> SyscallResult<ChannelId, KError> {
     syscall(
         Recipient::kernel(),

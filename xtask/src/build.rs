@@ -108,6 +108,10 @@ pub fn build(target: BuildTarget) -> Result<()> {
             }
 
             archive.finish()?;
+
+            let _dir = pushd("init/");
+            cmd!("cargo build --release").run()?;
+            cp("target/riscv64gc-unknown-none-elf/release/init", "../../../init")?;
         }
         BuildTarget::Vanadinite(build_opts) => {
             let features = format!("platform.{} {}", build_opts.platform, build_opts.kernel_features);
@@ -129,7 +133,7 @@ pub fn build(target: BuildTarget) -> Result<()> {
             ").run()?;
         }
         BuildTarget::OpenSBI(_) => {
-            cmd!("riscv64-unknown-elf-objcopy -O binary src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite src/target/riscv64gc-unknown-none-elf/release/vanadinite.bin --set-start 0x80200000").run()?;
+            cmd!("riscv64-unknown-elf-objcopy -O binary src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite.bin --set-start 0x80200000").run()?;
 
             cmd!("git submodule init submodules/opensbi").run()?;
             cmd!("git submodule update --remote submodules/opensbi").run()?;

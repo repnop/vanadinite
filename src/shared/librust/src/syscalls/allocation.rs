@@ -8,6 +8,7 @@
 use super::{syscall, Syscall};
 use crate::{
     error::KError,
+    mem::PhysicalAddress,
     message::{Recipient, SyscallRequest, SyscallResult},
 };
 
@@ -97,4 +98,50 @@ pub fn alloc_virtual_memory(
         },
     )
     .1
+}
+
+pub struct DmaAllocationOptions(usize);
+
+impl DmaAllocationOptions {
+    pub const NONE: Self = Self(0);
+    pub const ZERO: Self = Self(1 << 1);
+
+    pub fn new(flags: usize) -> Self {
+        Self(flags)
+    }
+
+    pub fn value(self) -> usize {
+        self.0
+    }
+}
+
+impl core::ops::BitOr for DmaAllocationOptions {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl core::ops::BitAnd for DmaAllocationOptions {
+    type Output = bool;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        self.0 & rhs.0 == rhs.0
+    }
+}
+
+pub fn alloc_dma_memory(
+    size_in_bytes: usize,
+    options: DmaAllocationOptions,
+) -> SyscallResult<(PhysicalAddress, *mut u8), KError> {
+    syscall(
+        Recipient::kernel(),
+        SyscallRequest {
+            syscall: Syscall::AllocDmaMemory,
+            arguments: [size_in_bytes, options.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        },
+    )
+    .1
+    .map(|(phys, virt)| (PhysicalAddress::new(phys), virt as *mut u8))
 }

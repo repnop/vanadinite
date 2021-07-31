@@ -8,7 +8,7 @@
 pub mod round_robin;
 
 use crate::{
-    cpu_local,
+    cpu_local, csr,
     sync::{SpinMutex, SpinRwLock},
     task::{Context, Task},
     utils::ticks_per_us,
@@ -83,14 +83,14 @@ cpu_local! {
 
 pub trait Scheduler: Send {
     fn schedule(&self) -> !;
-    fn enqueue(&self, task: Task);
+    fn enqueue(&self, task: Task) -> Tid;
     fn dequeue(&self, tid: Tid);
 }
 
 fn sleep() -> ! {
-    sbi::timer::set_timer(ticks_per_us(10_000, crate::TIMER_FREQ.load(Ordering::Relaxed)) as u64).unwrap();
-    crate::csr::sie::enable();
-    crate::csr::sstatus::enable_interrupts();
+    sbi::timer::set_timer(csr::time::read() + ticks_per_us(10_000, crate::TIMER_FREQ.load(Ordering::Relaxed))).unwrap();
+    csr::sie::enable();
+    csr::sstatus::enable_interrupts();
 
     #[rustfmt::skip]
     unsafe {
@@ -112,6 +112,9 @@ unsafe extern "C" fn return_to_usermode(_registers: &Context) -> ! {
         csrs sstatus, t0
         li t0, 1 << 5
         csrs sstatus, t0
+
+        li t0, 0x222
+        csrw sie, t0
 
         ld t0, 504(a0)
         fscsr x0, t0

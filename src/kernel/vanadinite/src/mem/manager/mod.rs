@@ -59,6 +59,7 @@ impl MemoryManager {
         at: Option<VirtualAddress>,
         size: PageSize,
         n_pages: usize,
+        contiguous: bool,
         flags: Flags,
         fill: FillOption<'_>,
         kind: AddressRegionKind,
@@ -67,7 +68,11 @@ impl MemoryManager {
 
         log::debug!("Allocating region at {:#p}: size={:?} n_pages={} flags={:?}", at, size, n_pages, flags);
 
-        let mut backing = UniquePhysicalRegion::alloc_sparse(size, n_pages);
+        let mut backing = if contiguous {
+            UniquePhysicalRegion::alloc_contiguous(size, n_pages)
+        } else {
+            UniquePhysicalRegion::alloc_sparse(size, n_pages)
+        };
 
         match fill {
             FillOption::Data(data) => backing.copy_data_into(data),
@@ -77,7 +82,7 @@ impl MemoryManager {
 
         let iter = backing.physical_addresses().enumerate().map(|(i, phys)| (phys, at.add(i * size.to_byte_size())));
         for (phys_addr, virt_addr) in iter {
-            log::debug!("Mapping {:#p} -> {:#p}", phys_addr, virt_addr);
+            log::trace!("Mapping {:#p} -> {:#p}", phys_addr, virt_addr);
             self.table.map(phys_addr, virt_addr, flags, size);
         }
 
@@ -95,6 +100,7 @@ impl MemoryManager {
         &mut self,
         size: PageSize,
         n_pages: usize,
+        contiguous: bool,
         flags: Flags,
         fill: FillOption<'_>,
         kind: AddressRegionKind,
@@ -104,7 +110,7 @@ impl MemoryManager {
         log::debug!("Allocating guarded region at {:#p}: size={:?} n_pages={} flags={:?}", at, size, n_pages, flags);
 
         self.guard(VirtualAddress::new(at.as_usize() - 4.kib()));
-        self.alloc_region(Some(at), size, n_pages, flags, fill, kind);
+        self.alloc_region(Some(at), size, n_pages, contiguous, flags, fill, kind);
         self.guard(at.add(size.to_byte_size() * n_pages));
 
         at
@@ -291,7 +297,8 @@ impl MemoryManager {
         // Try to find a hole big enough 100 times, fall back to linear search otherwise.
         for _ in 0..100 {
             // FIXME: this needs replaced by proper RNG
-            let jittered_start = (crate::csr::time::read() * 717) % VirtualAddress::userspace_range().end.as_usize();
+            let jittered_start =
+                (crate::csr::time::read() as usize * 717) % VirtualAddress::userspace_range().end.as_usize();
 
             let region = match self.address_map.find(VirtualAddress::new(jittered_start)) {
                 Some(r) => r.span.clone(),
@@ -338,7 +345,8 @@ impl MemoryManager {
         // Try to find a hole big enough 100 times, fall back to linear search otherwise.
         for _ in 0..100 {
             // FIXME: this needs replaced by proper RNG
-            let jittered_start = (crate::csr::time::read() * 717) % VirtualAddress::userspace_range().end.as_usize();
+            let jittered_start =
+                (crate::csr::time::read() as usize * 717) % VirtualAddress::userspace_range().end.as_usize();
 
             let region = match self.address_map.find(VirtualAddress::new(jittered_start)) {
                 Some(r) => r.span.clone(),
