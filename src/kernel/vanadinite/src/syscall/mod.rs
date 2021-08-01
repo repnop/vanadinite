@@ -11,7 +11,7 @@ pub mod vmspace;
 use crate::{
     io::{ConsoleDevice, INPUT_QUEUE},
     mem::{
-        manager::{AddressRegionKind, FillOption},
+        manager::{AddressRegionKind, FillOption, RegionDescription},
         paging::{flags, PageSize, VirtualAddress},
         user::RawUserSlice,
     },
@@ -170,12 +170,18 @@ fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
                 _ => {
                     let allocated_at = task.memory_manager.alloc_region(
                         None,
-                        page_size,
-                        utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
-                        false,
-                        flags,
-                        if options & AllocationOptions::Zero { FillOption::Zeroed } else { FillOption::Unitialized },
-                        AddressRegionKind::UserAllocated,
+                        RegionDescription {
+                            size: page_size,
+                            len: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
+                            contiguous: false,
+                            flags,
+                            fill: if options & AllocationOptions::Zero {
+                                FillOption::Zeroed
+                            } else {
+                                FillOption::Unitialized
+                            },
+                            kind: AddressRegionKind::UserAllocated,
+                        },
                     );
 
                     log::debug!("Allocated memory at {:#p} for user process", allocated_at.start);
@@ -224,12 +230,18 @@ fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
                 _ => {
                     let allocated_at = task.memory_manager.alloc_region(
                         None,
-                        page_size,
-                        utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
-                        true,
-                        flags::VALID | flags::USER | flags::READ | flags::WRITE,
-                        if options & DmaAllocationOptions::ZERO { FillOption::Zeroed } else { FillOption::Unitialized },
-                        AddressRegionKind::Dma,
+                        RegionDescription {
+                            size: page_size,
+                            len: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
+                            contiguous: true,
+                            flags: flags::VALID | flags::USER | flags::READ | flags::WRITE,
+                            fill: if options & DmaAllocationOptions::ZERO {
+                                FillOption::Zeroed
+                            } else {
+                                FillOption::Unitialized
+                            },
+                            kind: AddressRegionKind::Dma,
+                        },
                     );
 
                     let phys = task.memory_manager.resolve(allocated_at.start).unwrap();

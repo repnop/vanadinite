@@ -7,7 +7,7 @@
 
 use crate::{
     mem::{
-        manager::{AddressRegionKind, FillOption},
+        manager::{AddressRegionKind, FillOption, RegionDescription},
         paging::{flags, PageSize, VirtualAddress},
         region::{MemoryRegion, PhysicalRegion},
     },
@@ -142,11 +142,14 @@ pub fn create_message(task: &mut Task, channel_id: usize, size: usize) -> Syscal
     let message_id = channel.next_message_id();
     let (region, _) = task.memory_manager.alloc_shared_region(
         None,
-        PageSize::Kilopage,
-        n_pages,
-        flags::READ | flags::WRITE | flags::USER | flags::VALID,
-        FillOption::Zeroed,
-        AddressRegionKind::Channel,
+        RegionDescription {
+            size: PageSize::Kilopage,
+            len: n_pages,
+            contiguous: false,
+            flags: flags::READ | flags::WRITE | flags::USER | flags::VALID,
+            fill: FillOption::Zeroed,
+            kind: AddressRegionKind::Channel,
+        },
     );
 
     let size = n_pages * 4.kib();

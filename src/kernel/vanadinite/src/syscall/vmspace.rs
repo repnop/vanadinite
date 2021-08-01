@@ -7,7 +7,7 @@
 
 use crate::{
     mem::{
-        manager::{AddressRegionKind, FillOption, MemoryManager},
+        manager::{AddressRegionKind, FillOption, MemoryManager, RegionDescription},
         paging::{flags, PageSize, VirtualAddress},
     },
     scheduler::{Scheduler, CURRENT_TASK, SCHEDULER},
@@ -94,11 +94,14 @@ pub fn alloc_vmspace_object(
 
     let (at, region) = object.memory_manager.alloc_shared_region(
         at,
-        PageSize::Kilopage,
-        size / 4.kib(),
-        flags,
-        FillOption::Zeroed,
-        kind,
+        RegionDescription {
+            size: PageSize::Kilopage,
+            len: size / 4.kib(),
+            contiguous: false,
+            flags,
+            fill: FillOption::Zeroed,
+            kind,
+        },
     );
 
     let range = task.memory_manager.apply_shared_region(

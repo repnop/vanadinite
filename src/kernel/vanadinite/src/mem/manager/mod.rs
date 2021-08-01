@@ -35,6 +35,15 @@ pub enum InvalidRegion {
     InvalidPermissions,
 }
 
+pub struct RegionDescription<'a> {
+    pub size: PageSize,
+    pub len: usize,
+    pub contiguous: bool,
+    pub flags: Flags,
+    pub fill: FillOption<'a>,
+    pub kind: AddressRegionKind,
+}
+
 #[derive(Debug)]
 pub struct MemoryManager {
     table: PageTable,
@@ -57,21 +66,17 @@ impl MemoryManager {
     pub fn alloc_region(
         &mut self,
         at: Option<VirtualAddress>,
-        size: PageSize,
-        n_pages: usize,
-        contiguous: bool,
-        flags: Flags,
-        fill: FillOption<'_>,
-        kind: AddressRegionKind,
+        description: RegionDescription,
     ) -> Range<VirtualAddress> {
-        let at = at.unwrap_or_else(|| self.find_free_region(size, n_pages));
+        let RegionDescription { size, len, contiguous, flags, fill, kind } = description;
+        let at = at.unwrap_or_else(|| self.find_free_region(size, len));
 
-        log::debug!("Allocating region at {:#p}: size={:?} n_pages={} flags={:?}", at, size, n_pages, flags);
+        log::debug!("Allocating region at {:#p}: size={:?} n_pages={} flags={:?}", at, size, len, flags);
 
         let mut backing = if contiguous {
-            UniquePhysicalRegion::alloc_contiguous(size, n_pages)
+            UniquePhysicalRegion::alloc_contiguous(size, len)
         } else {
-            UniquePhysicalRegion::alloc_sparse(size, n_pages)
+            UniquePhysicalRegion::alloc_sparse(size, len)
         };
 
         match fill {
@@ -86,7 +91,7 @@ impl MemoryManager {
             self.table.map(phys_addr, virt_addr, flags, size);
         }
 
-        let range = at..at.add(size.to_byte_size() * n_pages);
+        let range = at..at.add(size.to_byte_size() * len);
         self.address_map
             .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), kind)
             .expect("bad address mapping");
@@ -96,22 +101,15 @@ impl MemoryManager {
 
     /// Same as [`Self::alloc_region`], except attempts to find a free region
     /// with available space above and below the region to place guard pages.
-    pub fn alloc_guarded_region(
-        &mut self,
-        size: PageSize,
-        n_pages: usize,
-        contiguous: bool,
-        flags: Flags,
-        fill: FillOption<'_>,
-        kind: AddressRegionKind,
-    ) -> VirtualAddress {
-        let at = self.find_free_region_with_guards(size, n_pages);
+    pub fn alloc_guarded_region(&mut self, description: RegionDescription) -> VirtualAddress {
+        let RegionDescription { size, len, contiguous, flags, fill, kind } = description;
+        let at = self.find_free_region_with_guards(size, len);
 
-        log::debug!("Allocating guarded region at {:#p}: size={:?} n_pages={} flags={:?}", at, size, n_pages, flags);
+        log::debug!("Allocating guarded region at {:#p}: size={:?} len={} flags={:?}", at, size, len, flags);
 
         self.guard(VirtualAddress::new(at.as_usize() - 4.kib()));
-        self.alloc_region(Some(at), size, n_pages, contiguous, flags, fill, kind);
-        self.guard(at.add(size.to_byte_size() * n_pages));
+        self.alloc_region(Some(at), RegionDescription { size, len, contiguous, flags, fill, kind });
+        self.guard(at.add(size.to_byte_size() * len));
 
         at
     }
@@ -122,14 +120,15 @@ impl MemoryManager {
     pub fn alloc_shared_region(
         &mut self,
         at: Option<VirtualAddress>,
-        size: PageSize,
-        n_pages: usize,
-        flags: Flags,
-        fill: FillOption<'_>,
-        kind: AddressRegionKind,
+        description: RegionDescription,
     ) -> (Range<VirtualAddress>, SharedPhysicalRegion) {
-        let at = at.unwrap_or_else(|| self.find_free_region(size, n_pages));
-        let mut backing = UniquePhysicalRegion::alloc_sparse(size, n_pages);
+        let RegionDescription { size, len, contiguous, flags, fill, kind } = description;
+        let at = at.unwrap_or_else(|| self.find_free_region(size, len));
+        let mut backing = if contiguous {
+            UniquePhysicalRegion::alloc_contiguous(size, len)
+        } else {
+            UniquePhysicalRegion::alloc_sparse(size, len)
+        };
 
         match fill {
             FillOption::Data(data) => backing.copy_data_into(data),
@@ -144,7 +143,7 @@ impl MemoryManager {
         }
 
         let shared = backing.into_shared_region();
-        let range = at..at.add(size.to_byte_size() * n_pages);
+        let range = at..at.add(size.to_byte_size() * len);
 
         self.address_map
             .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(shared.clone())), kind)

@@ -7,7 +7,7 @@
 
 use crate::{
     mem::{
-        manager::{AddressRegionKind, FillOption, MemoryManager},
+        manager::{AddressRegionKind, FillOption, MemoryManager, RegionDescription},
         paging::{
             flags::{EXECUTE, READ, USER, VALID, WRITE},
             PageSize, VirtualAddress,
@@ -206,12 +206,14 @@ impl Task {
 
             memory_manager.alloc_region(
                 Some(segment_load_base),
-                PageSize::Kilopage,
-                region_size / 4.kib(),
-                false,
-                flags,
-                FillOption::Data(&segment_data[..segment_len]),
-                kind,
+                RegionDescription {
+                    size: PageSize::Kilopage,
+                    len: region_size / 4.kib(),
+                    contiguous: false,
+                    flags,
+                    fill: FillOption::Data(&segment_data[..segment_len]),
+                    kind,
+                },
             );
 
             segment_offset = segment_load_base.add(region_size);
@@ -242,12 +244,14 @@ impl Task {
 
             memory_manager.alloc_region(
                 Some(tls_base),
-                PageSize::Kilopage,
-                n_pages_needed,
-                false,
-                USER | READ | WRITE | VALID,
-                FillOption::Data(&segment_data[..segment_len]),
-                AddressRegionKind::Tls,
+                RegionDescription {
+                    size: PageSize::Kilopage,
+                    len: n_pages_needed,
+                    contiguous: false,
+                    flags: USER | READ | WRITE | VALID,
+                    fill: FillOption::Data(&segment_data[..segment_len]),
+                    kind: AddressRegionKind::Tls,
+                },
             );
 
             tls_base.add(segment_load_offset).as_usize()
@@ -256,14 +260,14 @@ impl Task {
         // We guard the stack on both ends, though a stack underflow is
         // unlikely, but better to be safe than sorry!
         let sp = memory_manager
-            .alloc_guarded_region(
-                PageSize::Kilopage,
-                4,
-                false,
-                USER | READ | WRITE | VALID,
-                FillOption::Unitialized,
-                AddressRegionKind::Stack,
-            )
+            .alloc_guarded_region(RegionDescription {
+                size: PageSize::Kilopage,
+                len: 4,
+                contiguous: false,
+                flags: USER | READ | WRITE | VALID,
+                fill: FillOption::Unitialized,
+                kind: AddressRegionKind::Stack,
+            })
             .add(16.kib());
 
         let fdt_ptr = FDT.load(core::sync::atomic::Ordering::Acquire);
@@ -272,12 +276,14 @@ impl Task {
             let slice = unsafe { core::slice::from_raw_parts(fdt_ptr, fdt.total_size()) };
             memory_manager.alloc_region(
                 None,
-                PageSize::Kilopage,
-                round_up_to_next(fdt.total_size(), 4.kib()) / 4.kib(),
-                false,
-                USER | READ | VALID,
-                FillOption::Data(slice),
-                AddressRegionKind::Data,
+                RegionDescription {
+                    size: PageSize::Kilopage,
+                    len: round_up_to_next(fdt.total_size(), 4.kib()) / 4.kib(),
+                    contiguous: false,
+                    flags: USER | READ | VALID,
+                    fill: FillOption::Data(slice),
+                    kind: AddressRegionKind::Data,
+                },
             )
         };
 
@@ -287,28 +293,28 @@ impl Task {
             n => {
                 let total_size = args.clone().fold(0, |total, s| total + s.len());
                 let concatenated = args.clone().flat_map(|s| s.bytes()).collect::<Vec<_>>();
-                let storage = memory_manager.alloc_guarded_region(
-                    PageSize::Kilopage,
-                    round_up_to_next(total_size, 4.kib()) / 4.kib(),
-                    false,
-                    USER | READ | VALID,
-                    FillOption::Data(&concatenated),
-                    AddressRegionKind::ReadOnly,
-                );
+                let storage = memory_manager.alloc_guarded_region(RegionDescription {
+                    size: PageSize::Kilopage,
+                    len: round_up_to_next(total_size, 4.kib()) / 4.kib(),
+                    contiguous: false,
+                    flags: USER | READ | VALID,
+                    fill: FillOption::Data(&concatenated),
+                    kind: AddressRegionKind::ReadOnly,
+                });
                 let (_, ptr_list) = args.fold((storage, Vec::new()), |(ptr, mut v), s| {
                     v.extend_from_slice(&ptr.as_usize().to_ne_bytes());
                     v.extend_from_slice(&s.len().to_ne_bytes());
 
                     (ptr.add(s.len()), v)
                 });
-                let ptrs = memory_manager.alloc_guarded_region(
-                    PageSize::Kilopage,
-                    round_up_to_next(n * 16, 4.kib()) / 4.kib(),
-                    false,
-                    USER | READ | VALID,
-                    FillOption::Data(&ptr_list),
-                    AddressRegionKind::ReadOnly,
-                );
+                let ptrs = memory_manager.alloc_guarded_region(RegionDescription {
+                    size: PageSize::Kilopage,
+                    len: round_up_to_next(n * 16, 4.kib()) / 4.kib(),
+                    contiguous: false,
+                    flags: USER | READ | VALID,
+                    fill: FillOption::Data(&ptr_list),
+                    kind: AddressRegionKind::ReadOnly,
+                });
 
                 (n, ptrs.as_usize())
             }
