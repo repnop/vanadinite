@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+#![feature(asm, lang_items)]
+
 fn main() {
     let args = std::env::args();
     let ptr = usize::from_str_radix(args[0], 16).unwrap() as *const u8;

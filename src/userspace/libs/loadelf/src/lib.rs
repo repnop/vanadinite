@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2021 The vanadinite developers
+//
+// This Source Code Form is subject to the terms of the Mozilla Public License,
+// v. 2.0. If a copy of the MPL was not distributed with this file, You can
+// obtain one at https://mozilla.org/MPL/2.0/.
+
 pub use elf64::Elf;
 use elf64::{ProgramSegmentType, Relocation};
 use std::{
@@ -8,7 +15,7 @@ use std::{
 const PAGE_SIZE: usize = 4096;
 
 #[allow(clippy::result_unit_err)]
-pub fn load_elf(elf: &Elf) -> Result<Tid, ()> {
+pub fn load_elf(elf: &Elf) -> Result<(Vmspace, VmspaceSpawnEnv), ()> {
     let relocations = elf
         .relocations()
         .map(|reloc| match reloc {
@@ -139,7 +146,7 @@ pub fn load_elf(elf: &Elf) -> Result<Tid, ()> {
         .unwrap();
     let sp = sp.vmspace_address() as usize + 16 * PAGE_SIZE;
 
-    Ok(vmspace.spawn(VmspaceSpawnEnv { pc, a0: 0, a1: 0, a2: 0, tp: tls.unwrap_or(0), sp }).unwrap())
+    Ok((vmspace, VmspaceSpawnEnv { pc, a0: 0, a1: 0, a2: 0, tp: tls.unwrap_or(0), sp }))
 }
 
 pub fn round_up_to_next(n: usize, size: usize) -> usize {

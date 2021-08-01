@@ -111,20 +111,20 @@ pub fn run(options: RunOptions) -> Result<()> {
                     -m {ram}M
                     -append {kernel_args}
                     {enable_virtio_block_device...}
-                    -bios opensbi-riscv64-generic-fw_jump.bin 
+                    -bios build/opensbi-riscv64-generic-fw_jump.bin 
                     -kernel src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite
                     {debug_log...}
             ").run()?;
         }
         Simulator::Spike => {
             cmd!("
-                ./spike
+                ./build/spike
                     -p{cpu_count}
                     -m{ram}
                     -d
                     --isa=rv64gc
                     --bootargs={kernel_args}
-                    opensbi-riscv64-generic-fw_payload.elf 
+                    build/opensbi-riscv64-generic-fw_payload.elf 
             ").run()?;
         }
     };

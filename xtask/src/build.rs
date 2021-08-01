@@ -6,10 +6,11 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{Result, VanadiniteBuildOptions};
+use anyhow::Context;
 use clap::Clap;
 use std::fs;
 use tar::{Builder, Header};
-use xshell::{cmd, cp, pushd, pushenv, rm_rf};
+use xshell::{cmd, cp, mkdir_p, pushd, pushenv, rm_rf};
 
 #[derive(Clap, Clone, Copy)]
 #[clap(rename_all = "snake_case")]
@@ -67,6 +68,8 @@ impl BuildTarget {
 }
 
 pub fn build(target: BuildTarget) -> Result<()> {
+    mkdir_p("build/").context("failed to make build directory")?;
+
     for dependency in target.dependencies() {
         build(dependency)?;
     }
@@ -75,7 +78,7 @@ pub fn build(target: BuildTarget) -> Result<()> {
 
     match target {
         BuildTarget::Userspace => {
-            let init_tar = std::env::current_dir()?.join("initfs.tar");
+            let init_tar = std::env::current_dir()?.join("build/initfs.tar");
 
             rm_rf(&init_tar)?;
 
@@ -111,7 +114,7 @@ pub fn build(target: BuildTarget) -> Result<()> {
 
             let _dir = pushd("init/");
             cmd!("cargo build --release").run()?;
-            cp("target/riscv64gc-unknown-none-elf/release/init", "../../../init")?;
+            cp("target/riscv64gc-unknown-none-elf/release/init", "../../../build/init")?;
         }
         BuildTarget::Vanadinite(build_opts) => {
             let features = format!("platform.{} {}", build_opts.platform, build_opts.kernel_features);
@@ -141,10 +144,10 @@ pub fn build(target: BuildTarget) -> Result<()> {
 
             cmd!("make PLATFORM=generic FW_PIC=no FW_PAYLOAD_PATH=../../src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite.bin").run()?;
 
-            cp("build/platform/generic/firmware/fw_jump.bin", "../../opensbi-riscv64-generic-fw_jump.bin")?;
-            cp("build/platform/generic/firmware/fw_jump.elf", "../../opensbi-riscv64-generic-fw_jump.elf")?;
-            cp("build/platform/generic/firmware/fw_payload.bin", "../../opensbi-riscv64-generic-fw_payload.bin")?;
-            cp("build/platform/generic/firmware/fw_payload.elf", "../../opensbi-riscv64-generic-fw_payload.elf")?;
+            cp("build/platform/generic/firmware/fw_jump.bin", "../../build/opensbi-riscv64-generic-fw_jump.bin")?;
+            cp("build/platform/generic/firmware/fw_jump.elf", "../../build/opensbi-riscv64-generic-fw_jump.elf")?;
+            cp("build/platform/generic/firmware/fw_payload.bin", "../../build/opensbi-riscv64-generic-fw_payload.bin")?;
+            cp("build/platform/generic/firmware/fw_payload.elf", "../../build/opensbi-riscv64-generic-fw_payload.elf")?;
         }
         BuildTarget::Spike => {
             cmd!("git submodule init submodules/riscv-isa-sim").run()?;
@@ -157,7 +160,7 @@ pub fn build(target: BuildTarget) -> Result<()> {
             cmd!("../configure").run()?;
             cmd!("make").run()?;
 
-            cp("spike", "../../../spike")?;
+            cp("spike", "../../../build/spike")?;
         }
     }
 

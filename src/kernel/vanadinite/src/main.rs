@@ -79,7 +79,7 @@ pub use vanadinite_macros::{debug, error, info, trace, warn};
 
 static N_CPUS: AtomicUsize = AtomicUsize::new(1);
 static TIMER_FREQ: AtomicU64 = AtomicU64::new(0);
-static INIT: &[u8] = include_bytes!("../../../../init");
+static INIT: &[u8] = include_bytes!("../../../../build/init");
 
 cpu_local! {
     static HART_ID: core::cell::Cell<usize> = core::cell::Cell::new(0);

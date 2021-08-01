@@ -12,3 +12,4 @@ initfs.tar
 spike
 todo.txt
 *.bin
+build/

@@ -14,48 +14,73 @@ use std::{
     librust::{
         self,
         message::KernelNotification,
-        syscalls::{channel, ReadMessage},
+        syscalls::{allocation::MemoryPermissions, channel, ReadMessage},
     },
 };
 
 const HELLO_FRIEND: &str = "Hello, friend!";
 static mut FDT: *const u8 = core::ptr::null();
-static SERVERS: &[u8] = include_bytes!("../../../../initfs.tar");
+static SERVERS: &[u8] = include_bytes!("../../../../build/initfs.tar");
 
 fn main() {
-    let fdt = unsafe { fdt::Fdt::from_ptr(FDT) };
+    let fdt = unsafe { fdt::Fdt::from_ptr(FDT).unwrap() };
+    let fdt_size = fdt.total_size();
     let tar = tar::Archive::new(SERVERS).unwrap();
 
     println!("[INIT] args: {:?}", std::env::args());
     println!("[INIT] FDT @ {:#p}", unsafe { FDT });
+
+    let devicemgr = tar.file("devicemgr").unwrap();
+    let (space, mut env) = loadelf::load_elf(&loadelf::Elf::new(devicemgr.contents).unwrap()).unwrap();
+
+    let mut fdt_obj = space.create_object(core::ptr::null(), fdt_size, MemoryPermissions::READ).unwrap();
+    fdt_obj.as_slice()[..fdt_size].copy_from_slice(unsafe { core::slice::from_raw_parts(FDT, fdt_size) });
+
+    let mut args = space.create_object(core::ptr::null(), 4096, MemoryPermissions::READ).unwrap();
+
+    // This makes me sad, but seems to be the easiest approach..
+    let ptr_str = format!("{:x}", fdt_obj.vmspace_address() as usize);
+    let ptr_str_addr = args.vmspace_address() as usize + 16;
+    args.as_slice()[..8].copy_from_slice(&ptr_str_addr.to_ne_bytes()[..]);
+    args.as_slice()[8..16].copy_from_slice(&ptr_str.len().to_ne_bytes()[..]);
+    args.as_slice()[16..][..ptr_str.len()].copy_from_slice(ptr_str.as_bytes());
+
+    env.a0 = 1;
+    env.a1 = args.vmspace_address() as usize;
+    env.a2 = fdt_obj.vmspace_address() as usize;
+
+    println!("[INIT] Spawning devicemgr");
+
+    space.spawn(env).unwrap();
+
     println!("[INIT] Spawning shell");
 
     let shell = tar.file("shell").unwrap();
-    let tid = loadelf::load_elf(&loadelf::Elf::new(shell.contents).unwrap()).unwrap();
+    let (space, env) = loadelf::load_elf(&loadelf::Elf::new(shell.contents).unwrap()).unwrap();
 
-    //let mut channels = Vec::new();
-    //loop {
-    //    let msg = librust::syscalls::receive_message();
-    //
-    //    if let Some(ReadMessage::Kernel(KernelNotification::ChannelRequest(tid))) = msg {
-    //        let channel_id = channel::create_channel(tid).unwrap();
-    //        let mut channel = ipc::IpcChannel::new(channel_id);
-    //
-    //        let mut msg = channel.new_message(HELLO_FRIEND.len()).unwrap();
-    //        msg.write(HELLO_FRIEND.as_bytes());
-    //        msg.send().unwrap();
-    //
-    //        channels.push(channel);
-    //    }
-    //
-    //    for channel in &channels {
-    //        match channel.read() {
-    //            Ok(Some(_)) => {} //println!("[INIT] Someone sent a message on {:?}", channel_id),
-    //            Ok(None) => {}
-    //            Err(_) => {} //println!("Error reading message from channel: {:?}", e),
-    //        }
-    //    }
-    //}
+    space.spawn(env).unwrap();
 
-    loop {}
+    let mut channels = Vec::new();
+    loop {
+        let msg = librust::syscalls::receive_message();
+
+        if let Some(ReadMessage::Kernel(KernelNotification::ChannelRequest(tid))) = msg {
+            let channel_id = channel::create_channel(tid).unwrap();
+            let mut channel = ipc::IpcChannel::new(channel_id);
+
+            let mut msg = channel.new_message(HELLO_FRIEND.len()).unwrap();
+            msg.write(HELLO_FRIEND.as_bytes());
+            msg.send().unwrap();
+
+            channels.push(channel);
+        }
+
+        for channel in &channels {
+            match channel.read() {
+                Ok(Some(_)) => {} //println!("[INIT] Someone sent a message on {:?}", channel_id),
+                Ok(None) => {}
+                Err(_) => {} //println!("Error reading message from channel: {:?}", e),
+            }
+        }
+    }
 }

@@ -11,24 +11,15 @@ extern crate alloc;
 
 use core::num::NonZeroUsize;
 use std::ipc;
-use std::librust::message::{KernelNotification, SyscallResult};
-use std::librust::syscalls::{channel::ChannelId, *};
+use std::librust::message::SyscallResult;
+use std::librust::syscalls::*;
 use std::librust::{
     message::Message,
-    syscalls::{
-        allocation::{alloc_virtual_memory, AllocationOptions, MemoryPermissions},
-        channel,
-    },
+    syscalls::allocation::{alloc_virtual_memory, AllocationOptions, MemoryPermissions},
     task::Tid,
 };
 
 fn main() {
-    print!("Our args are: ");
-    for arg in std::env::args() {
-        print!("{} ", arg);
-    }
-    println!();
-
     let mut history: VecDeque<String> = VecDeque::new();
     let mut history_index = None;
     let mut curr_history: Option<&str> = None;
