@@ -14,7 +14,7 @@ pub use console::*;
 use core::fmt::Write;
 use crossbeam_queue::ArrayQueue;
 
-pub static INPUT_QUEUE: crate::sync::Lazy<ArrayQueue<u8>> = crate::sync::Lazy::new(|| ArrayQueue::new(4096));
+pub static INPUT_QUEUE: sync::Lazy<ArrayQueue<u8>> = sync::Lazy::new(|| ArrayQueue::new(4096));
 
 #[macro_export]
 macro_rules! print {

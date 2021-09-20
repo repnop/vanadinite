@@ -35,7 +35,8 @@ impl<T: Send> SpinMutex<T> {
 
     fn acquire_lock(&self) {
         while self.lock.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
-            crate::asm::pause();
+            // TODO: maybe add ability to specify instruction for stalling?
+            // crate::asm::pause();
         }
     }
 

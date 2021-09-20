@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    capabilities::CapabilitySpace,
     mem::{
         manager::{AddressRegionKind, FillOption, MemoryManager, RegionDescription},
         paging::{flags, PageSize, VirtualAddress},
@@ -159,7 +160,7 @@ pub fn spawn_vmspace(
         channels: Default::default(),
         vmspace_next_id: 0,
         vmspace_objects: Default::default(),
-        capabilities: Default::default(),
+        cspace: CapabilitySpace::new(),
     };
 
     for region in object.inprocess_mappings {

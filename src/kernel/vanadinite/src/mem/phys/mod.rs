@@ -7,8 +7,9 @@
 
 pub mod bitmap;
 
-use crate::{mem::paging::PhysicalAddress, sync::SpinMutex};
+use crate::mem::paging::PhysicalAddress;
 use bitmap::BitmapAllocator;
+use sync::SpinMutex;
 
 use super::paging::PageSize;
 

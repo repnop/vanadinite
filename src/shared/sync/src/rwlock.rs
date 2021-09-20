@@ -33,7 +33,8 @@ impl<T: Send> SpinRwLock<T> {
 
     fn lock_shared(&self) {
         while !self.try_lock_shared() {
-            crate::asm::pause();
+            // TODO: maybe add ability to specify instruction for stalling?
+            // crate::asm::pause();
         }
     }
 
@@ -65,7 +66,8 @@ impl<T: Send> SpinRwLock<T> {
 
     fn lock_exclusive(&self) {
         while !self.try_lock_exclusive() {
-            crate::asm::pause();
+            // TODO: maybe add ability to specify instruction for stalling?
+            // crate::asm::pause();
         }
     }
 

@@ -33,13 +33,6 @@ SECTIONS {
     .data : AT(ADDR(.data) - __offset) {
         PROVIDE(__data_start = .);
         *(.data .data.* .rodata .rodata.*)
-        . = ALIGN(8);
-        PROVIDE(__tmp_stack_bottom = .);
-        . += 1024 * 1024 * 8;
-        PROVIDE(__tmp_stack_top = .);
-        . += 4096;
-        PROVIDE(__scratch_stack = .);
-        . = ALIGN(8);
     }
 
     . = ALIGN(8);
@@ -65,9 +58,19 @@ SECTIONS {
     .tdata : AT(ADDR(.tdata) - __offset) {
         . = ALIGN(4K);
         PROVIDE(__tdata_start = .);
+        
         *(.tdata .tdata.*)
+
         . = ALIGN(4K);
         PROVIDE(__tdata_end = .);
+    }
+
+    .tmp_stack : AT(ADDR(.tmp_stack) - __offset) {
+        PROVIDE(__tmp_stack_bottom = .);
+        . = ALIGN(4K);
+        . += 1024 * 1024 * 4;
+        . = ALIGN(4K);
+        PROVIDE(__tmp_stack_top = .);
     }
 
     . = ALIGN(2M);

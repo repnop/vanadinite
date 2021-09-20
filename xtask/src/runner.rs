@@ -7,7 +7,7 @@
 
 use crate::{
     build::{self, BuildTarget, Platform},
-    Result, Simulator, VanadiniteBuildOptions,
+    Result, SbiImpl, Simulator, VanadiniteBuildOptions,
 };
 use clap::{ArgSettings, Clap};
 use std::path::PathBuf;
@@ -46,6 +46,10 @@ pub struct RunOptions {
     /// Which simulator to run with
     #[clap(arg_enum, long, default_value = "qemu")]
     with: Simulator,
+
+    /// Which SBI implementation to run with
+    #[clap(arg_enum, long, default_value = "opensbi")]
+    sbi: SbiImpl,
 }
 
 impl Default for RunOptions {
@@ -63,13 +67,17 @@ impl Default for RunOptions {
                 test: false,
             },
             with: Simulator::Qemu,
+            sbi: SbiImpl::OpenSbi,
         }
     }
 }
 
 pub fn run(options: RunOptions) -> Result<()> {
     if !options.no_build {
-        build::build(BuildTarget::OpenSBI(options.vanadinite_options.clone()))?;
+        build::build(match options.sbi {
+            SbiImpl::OpenSbi => BuildTarget::OpenSBI(options.vanadinite_options.clone()),
+            SbiImpl::Vanadium => BuildTarget::Vanadium(options.vanadinite_options.clone()),
+        })?;
     }
 
     let platform = options.vanadinite_options.platform.to_string();
@@ -87,6 +95,12 @@ pub fn run(options: RunOptions) -> Result<()> {
             String::from("virtio-blk-device,drive=hd"),
         ],
         _ => vec![],
+    };
+
+    let sbi_firmware = match (options.sbi, options.with) {
+        (SbiImpl::OpenSbi, Simulator::Qemu) => "build/opensbi-riscv64-generic-fw_jump.bin",
+        (SbiImpl::OpenSbi, Simulator::Spike) => "build/opensbi-riscv64-generic-fw_payload.bin",
+        (SbiImpl::Vanadium, _) => "build/vanadium.bin",
     };
 
     #[rustfmt::skip]
@@ -111,7 +125,7 @@ pub fn run(options: RunOptions) -> Result<()> {
                     -m {ram}M
                     -append {kernel_args}
                     {enable_virtio_block_device...}
-                    -bios build/opensbi-riscv64-generic-fw_jump.bin 
+                    -bios {sbi_firmware}
                     -kernel src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite
                     {debug_log...}
             ").run()?;
@@ -124,7 +138,7 @@ pub fn run(options: RunOptions) -> Result<()> {
                     -d
                     --isa=rv64gc
                     --bootargs={kernel_args}
-                    build/opensbi-riscv64-generic-fw_payload.elf 
+                    {sbi_firmware}
             ").run()?;
         }
     };

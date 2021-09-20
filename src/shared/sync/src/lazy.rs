@@ -46,7 +46,8 @@ impl<T, F: Fn() -> T> Lazy<T, F> {
 
     fn wait_for_init(&self) {
         while self.init_state.load(Ordering::Acquire) != 0b10 {
-            crate::asm::pause();
+            // TODO: maybe add ability to specify instruction for stalling?
+            // crate::asm::pause();
         }
     }
 

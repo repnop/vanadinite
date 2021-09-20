@@ -10,6 +10,7 @@
 /// I'm the kernel, rustc
 #[naked]
 #[no_mangle]
+#[allow(named_asm_labels)]
 #[link_section = ".init.boot"]
 pub unsafe extern "C" fn _boot() -> ! {
     #[rustfmt::skip]

@@ -9,7 +9,6 @@ pub mod round_robin;
 
 use crate::{
     cpu_local, csr,
-    sync::{SpinMutex, SpinRwLock},
     task::{Context, Task},
     utils::ticks_per_us,
 };
@@ -20,6 +19,7 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 use librust::task::Tid;
+use sync::{SpinMutex, SpinRwLock};
 
 pub static SCHEDULER: round_robin::RoundRobinScheduler = round_robin::RoundRobinScheduler::new();
 pub static TASKS: TaskList = TaskList::new();

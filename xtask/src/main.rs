@@ -37,6 +37,7 @@ enum CleanTarget {
     Spike,
     Userspace,
     Vanadinite,
+    Vanadium,
 }
 
 #[derive(Clap, Clone)]
@@ -62,6 +63,16 @@ pub enum Simulator {
     Qemu,
 }
 
+#[derive(Clap, Clone, Copy)]
+#[clap(rename_all = "snake_case")]
+pub enum SbiImpl {
+    /// The RISC-V reference SBI implementation
+    #[clap(name = "opensbi")]
+    OpenSbi,
+    /// In house custom SBI for `vanadinite`
+    Vanadium,
+}
+
 fn main() -> Result<()> {
     let args = Arguments::parse();
 
@@ -85,6 +96,7 @@ fn clean(target: CleanTarget) -> Result<()> {
             clean(CleanTarget::Spike)?;
             clean(CleanTarget::Userspace)?;
             clean(CleanTarget::Vanadinite)?;
+            clean(CleanTarget::Vanadium)?;
         }
         CleanTarget::OpenSBI => {
             let _dir = pushd("./submodules/opensbi")?;
@@ -105,6 +117,11 @@ fn clean(target: CleanTarget) -> Result<()> {
             let _dir = pushd("./src/kernel")?;
             rm_rf("./target")?;
             println!("Cleaned vanadinite");
+        }
+        CleanTarget::Vanadium => {
+            let _dir = pushd("./src/vanadium")?;
+            rm_rf("./target")?;
+            println!("Cleaned vanadium");
         }
     }
 

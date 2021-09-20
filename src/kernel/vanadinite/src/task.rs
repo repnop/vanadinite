@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    capabilities::CapabilitySpace,
     mem::{
         manager::{AddressRegionKind, FillOption, MemoryManager, RegionDescription},
         paging::{
@@ -26,7 +27,6 @@ use alloc::{
 use elf64::{Elf, ProgramSegmentType, Relocation};
 use fdt::Fdt;
 use librust::{
-    capabilities::Capability,
     message::{Message, Sender},
     syscalls::{channel::ChannelId, vmspace::VmspaceObjectId},
     task::Tid,
@@ -85,7 +85,7 @@ pub struct Task {
     pub channels: BTreeMap<ChannelId, UserspaceChannel>,
     pub vmspace_objects: BTreeMap<VmspaceObjectId, VmspaceObject>,
     pub vmspace_next_id: usize,
-    pub capabilities: [Capability; 32],
+    pub cspace: CapabilitySpace,
 }
 
 impl Task {
@@ -95,7 +95,7 @@ impl Task {
     {
         let mut memory_manager = MemoryManager::new();
 
-        let capabilities = Default::default();
+        let cspace = CapabilitySpace::new();
 
         let relocations = elf
             .relocations()
@@ -344,7 +344,7 @@ impl Task {
             message_queue: VecDeque::new(),
             vmspace_objects: BTreeMap::new(),
             vmspace_next_id: 0,
-            capabilities,
+            cspace,
         }
     }
 }

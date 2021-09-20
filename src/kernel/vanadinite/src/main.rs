@@ -15,7 +15,6 @@
     const_btree_new,
     const_fn_fn_ptr_basics,
     const_fn_trait_bound,
-    const_generics,
     custom_test_frameworks,
     destructuring_assignment,
     extern_types,
@@ -40,6 +39,7 @@ extern crate vanadinite_macros;
 
 pub mod asm;
 pub mod boot;
+pub mod capabilities;
 pub mod cpu_local;
 pub mod csr;
 pub mod drivers;
@@ -48,7 +48,6 @@ pub mod io;
 pub mod mem;
 pub mod platform;
 pub mod scheduler;
-pub mod sync;
 pub mod syscall;
 pub mod task;
 #[cfg(debug_assertions)]
@@ -392,9 +391,11 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     // this is pretty awful but it seems to work well enough for the moment...
     // debugging the early paging code is not fun when you don't know where you
     // die at :)
-    #[cfg(feature = "platform.virt")]
     if let csr::satp::SatpMode::Bare = csr::satp::read().mode {
+        #[cfg(feature = "platform.virt")]
         let uart = 0x1000_0000 as *mut u8;
+        #[cfg(feature = "platform.sifive_u")]
+        let uart = 0x1001_0000 as *mut u8;
         let location = info.location().unwrap();
         let msg = "EARLY PANIC AT ".as_bytes().iter();
         let file = unsafe {

@@ -11,10 +11,10 @@ use crate::{
         phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
         phys2virt,
     },
-    sync::SpinMutex,
     utils::{round_up_to_next, Units},
 };
 use core::ptr::NonNull;
+use sync::SpinMutex;
 
 pub struct FreeListAllocator {
     inner: SpinMutex<FreeList>,

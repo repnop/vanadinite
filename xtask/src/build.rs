@@ -36,6 +36,8 @@ pub enum BuildTarget {
     /// The OpenSBI firmware image (builds `vanadinite`)
     #[clap(name = "opensbi")]
     OpenSBI(VanadiniteBuildOptions),
+    /// The `vanadium` firmware image (builds `vanadinite`)
+    Vanadium(VanadiniteBuildOptions),
     /// The RISC-V ISA simulator
     Spike,
     /// Userspace applications for the `vanadinite` kernel to use on boot
@@ -46,7 +48,7 @@ impl BuildTarget {
     fn dependencies(&self) -> Vec<Self> {
         match self {
             BuildTarget::Vanadinite(_) => vec![BuildTarget::Userspace],
-            BuildTarget::OpenSBI(args) => vec![BuildTarget::Vanadinite(args.clone())],
+            BuildTarget::OpenSBI(args) /* | BuildTarget::Vanadium(args) */ => vec![BuildTarget::Vanadinite(args.clone())],
             _ => vec![],
         }
     }
@@ -60,6 +62,9 @@ impl BuildTarget {
                 "RUSTFLAGS",
                 format!("-C code-model=medium -C link-arg=-Tvanadinite/lds/{}.lds", opts.platform),
             )],
+            BuildTarget::Vanadium(opts) => {
+                vec![pushenv("RUSTFLAGS", format!("-C code-model=medium -C link-arg=-Tlds/{}.lds", opts.platform))]
+            }
             BuildTarget::OpenSBI(_) | BuildTarget::Spike => {
                 vec![pushenv("CROSS_COMPILE", "riscv64-unknown-elf-"), pushenv("PLATFORM_RISCV_XLEN", "64")]
             }
@@ -134,6 +139,22 @@ pub fn build(target: BuildTarget) -> Result<()> {
                     --features {features}
                     {test...}
             ").run()?;
+        }
+        BuildTarget::Vanadium(build_opts) => {
+            let features = format!("platform.{}", build_opts.platform);
+
+            let _dir = pushd("./src/vanadium");
+            #[rustfmt::skip]
+            cmd!("
+                cargo build
+                    --release
+                    --target riscv64gc-unknown-none-elf
+                    --no-default-features
+                    --features {features}
+            ").run()?;
+
+            cmd!("riscv64-unknown-elf-objcopy -O binary target/riscv64gc-unknown-none-elf/release/vanadium target/riscv64gc-unknown-none-elf/release/vanadium.bin --set-start 0x80000000").run()?;
+            cp("target/riscv64gc-unknown-none-elf/release/vanadium.bin", "../../build/vanadium.bin")?;
         }
         BuildTarget::OpenSBI(_) => {
             cmd!("riscv64-unknown-elf-objcopy -O binary src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite.bin --set-start 0x80200000").run()?;

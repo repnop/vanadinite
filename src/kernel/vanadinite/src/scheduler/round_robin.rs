@@ -11,11 +11,11 @@ use super::{Scheduler, Task, Tid, CURRENT_TASK, TASKS};
 use crate::{
     csr::{self, satp::Satp},
     mem::{self, paging::SATP_MODE},
-    sync::{Lazy, SpinMutex},
     task::TaskState,
     utils::ticks_per_us,
 };
 use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
+use sync::{Lazy, SpinMutex};
 
 struct QueuedTask {
     tid: Tid,
