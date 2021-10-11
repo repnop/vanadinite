@@ -9,18 +9,19 @@ pub mod channel;
 pub mod vmspace;
 
 use crate::{
-    io::{ConsoleDevice, INPUT_QUEUE},
+    io::{ConsoleDevice, CLAIMED_DEVICES, INPUT_QUEUE},
     mem::{
         manager::{AddressRegionKind, FillOption, RegionDescription},
-        paging::{flags, PageSize, VirtualAddress},
+        paging::{flags, PageSize, PhysicalAddress, VirtualAddress},
         user::RawUserSlice,
     },
+    platform::FDT,
     scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
     task::TaskState,
     trap::TrapFrame,
     utils,
 };
-use core::{convert::TryInto, num::NonZeroUsize};
+use core::{convert::TryInto, num::NonZeroUsize, sync::atomic::Ordering};
 use librust::{
     error::{AccessError, KError},
     message::{Message, Recipient, Sender, SyscallRequest, SyscallResult},
@@ -270,6 +271,59 @@ fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
             syscall_req.arguments[5],
             syscall_req.arguments[6],
         )?),
+        Syscall::ClaimDevice => {
+            let start = VirtualAddress::new(syscall_req.arguments[0]);
+            let len = syscall_req.arguments[1];
+            let user_slice = RawUserSlice::readable(start, len);
+            let user_slice = match unsafe { user_slice.validate(&task.memory_manager) } {
+                Ok(slice) => slice,
+                Err((addr, e)) => {
+                    log::error!("Bad memory from process: {:?}", e);
+                    return SyscallResult::Err(KError::InvalidAccess(AccessError::Read(addr.as_ptr())));
+                }
+            };
+
+            let slice = user_slice.guarded();
+            let node_path = match core::str::from_utf8(&slice) {
+                Ok(s) => s,
+                Err(_) => {
+                    log::error!("Invalid UTF-8 in FDT node name from process");
+                    return SyscallResult::Err(KError::InvalidArgument(0));
+                }
+            };
+
+            // FIXME: make better errors
+            let claimed = CLAIMED_DEVICES.read();
+            if claimed.get(node_path).is_some() {
+                return SyscallResult::Err(KError::InvalidArgument(0));
+            }
+
+            let fdt = unsafe { fdt::Fdt::from_ptr(FDT.load(Ordering::Acquire)) }.unwrap();
+
+            // FIXME: probably should add some sanity checks for what we're
+            // mapping
+            match fdt.find_node(node_path) {
+                Some(node) => {
+                    // FIXME: what about multiple regions?
+                    match node.reg().into_iter().flatten().next() {
+                        Some(fdt::standard_nodes::MemoryRegion { size: Some(len), starting_address }) => {
+                            claimed.upgrade().insert(node_path.into(), CURRENT_TASK.get().unwrap());
+                            let map_to = unsafe {
+                                task.memory_manager.map_mmio_device(
+                                    PhysicalAddress::from_ptr(starting_address),
+                                    None,
+                                    len,
+                                )
+                            };
+
+                            Message::from((map_to.start.as_usize(), len))
+                        }
+                        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
+                    }
+                }
+                None => return SyscallResult::Err(KError::InvalidArgument(0)),
+            }
+        }
     };
 
     SyscallResult::Ok((sender, msg))

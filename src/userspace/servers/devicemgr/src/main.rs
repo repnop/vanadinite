@@ -14,17 +14,29 @@ fn main() {
 
     let fdt = unsafe { fdt::Fdt::from_ptr(ptr) }.unwrap();
 
-    for node in fdt.all_nodes() {
-        println!("{}: ", node.name);
-        for prop in node.properties() {
-            match &prop.value[..prop.value.len().max(1) - 1] {
-                s if s.iter().all(|b| b.is_ascii_graphic()) && !s.is_empty() => {
-                    println!("    {}={}", prop.name, core::str::from_utf8(s).unwrap())
+    if args.contains(&"debug") {
+        for node in fdt.all_nodes() {
+            println!("{}: ", node.name);
+            for prop in node.properties() {
+                match &prop.value[..prop.value.len().max(1) - 1] {
+                    s if s.iter().all(|b| b.is_ascii_graphic()) && !s.is_empty() => {
+                        println!("    {}={}", prop.name, core::str::from_utf8(s).unwrap())
+                    }
+                    _ => println!("    {}={:?}", prop.name, prop.value),
                 }
-                _ => println!("    {}={:?}", prop.name, prop.value),
             }
         }
     }
+
+    let (addr, _) = std::librust::syscalls::claim_device("/soc/uart").unwrap();
+
+    println!("Claimed UART @ {:#p}!", addr);
+
+    for i in 0..9 {
+        unsafe { addr.write_volatile(i + b'0') };
+    }
+
+    unsafe { addr.write_volatile(b'\n') };
 
     #[allow(clippy::empty_loop)]
     loop {}

@@ -53,12 +53,12 @@ fn main() {
 
     space.spawn(env).unwrap();
 
-    println!("[INIT] Spawning shell");
-
-    let shell = tar.file("shell").unwrap();
-    let (space, env) = loadelf::load_elf(&loadelf::Elf::new(shell.contents).unwrap()).unwrap();
-
-    space.spawn(env).unwrap();
+    // println!("[INIT] Spawning shell");
+    //
+    // let shell = tar.file("shell").unwrap();
+    // let (space, env) = loadelf::load_elf(&loadelf::Elf::new(shell.contents).unwrap()).unwrap();
+    //
+    // space.spawn(env).unwrap();
 
     let mut channels = Vec::new();
     loop {

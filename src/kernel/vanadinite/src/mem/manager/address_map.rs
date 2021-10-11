@@ -43,6 +43,7 @@ pub enum AddressRegionKind {
     Unoccupied,
     UserAllocated,
     Dma,
+    Mmio,
 }
 
 /// Represents the userspace address space and allows for allocating and

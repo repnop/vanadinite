@@ -35,6 +35,7 @@ pub enum Syscall {
     CreateVmspace = 13,
     AllocVmspaceObject = 14,
     SpawnVmspace = 15,
+    ClaimDevice = 16,
 }
 
 impl Syscall {
@@ -56,6 +57,7 @@ impl Syscall {
             13 => Some(Self::CreateVmspace),
             14 => Some(Self::AllocVmspaceObject),
             15 => Some(Self::SpawnVmspace),
+            16 => Some(Self::ClaimDevice),
             _ => None,
         }
     }
@@ -188,4 +190,17 @@ pub fn current_tid() -> Tid {
         )
         .unwrap(),
     )
+}
+
+#[inline]
+pub fn claim_device(node: &str) -> SyscallResult<(*mut u8, usize), KError> {
+    syscall(
+        Recipient::kernel(),
+        SyscallRequest {
+            syscall: Syscall::ClaimDevice,
+            arguments: [node.as_ptr() as usize, node.len(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        },
+    )
+    .1
+    .map(|(addr, len)| (addr as *mut _, len))
 }

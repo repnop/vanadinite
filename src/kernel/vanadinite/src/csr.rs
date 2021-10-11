@@ -48,18 +48,23 @@ pub mod sstatus {
         unsafe { asm!("csrci sstatus, 2") };
     }
 
-    pub struct TemporaryUserMemoryAccess(());
+    pub struct TemporaryUserMemoryAccess(bool);
 
     impl TemporaryUserMemoryAccess {
         pub fn new() -> Self {
+            let disable_on_drop: usize;
+            unsafe { asm!("csrr {}, sstatus", out(reg) disable_on_drop) };
             unsafe { asm!("csrs sstatus, {}", inout(reg) 1 << 18 => _) };
-            Self(())
+
+            Self((disable_on_drop >> 18) & 1 == 0)
         }
     }
 
     impl Drop for TemporaryUserMemoryAccess {
         fn drop(&mut self) {
-            unsafe { asm!("csrc sstatus, {}", inout(reg) 1 << 18 => _) };
+            if self.0 {
+                unsafe { asm!("csrc sstatus, {}", inout(reg) 1 << 18 => _) };
+            }
         }
     }
 

@@ -152,6 +152,53 @@ impl MemoryManager {
         (range, shared)
     }
 
+    /// # Safety
+    /// This function is meant to map MMIO devices into userspace processes, and
+    /// will allow aliasing physical memory if used incorrectly.
+    ///
+    /// Memory regions will be mapped using kilopages (TODO: is larger
+    /// granularity necessary?)
+    pub unsafe fn map_mmio_device(
+        &mut self,
+        from: PhysicalAddress,
+        to: Option<VirtualAddress>,
+        len: usize,
+    ) -> Range<VirtualAddress> {
+        let n_pages = crate::utils::round_up_to_next(4.kib(), len) / 4.kib();
+        let at = to.unwrap_or_else(|| self.find_free_region(PageSize::Kilopage, n_pages));
+
+        log::debug!(
+            "Mapping MMIO region at {:#p}: phys={:#p} size={:?} n_pages={}",
+            at,
+            from,
+            PageSize::Kilopage,
+            n_pages
+        );
+
+        let backing = UniquePhysicalRegion::mmio(from, PageSize::Kilopage, n_pages);
+
+        let iter = backing
+            .physical_addresses()
+            .enumerate()
+            .map(|(i, phys)| (phys, at.add(i * PageSize::Kilopage.to_byte_size())));
+        for (phys_addr, virt_addr) in iter {
+            log::trace!("Mapping {:#p} -> {:#p}", phys_addr, virt_addr);
+            self.table.map(
+                phys_addr,
+                virt_addr,
+                flags::READ | flags::WRITE | flags::USER | flags::VALID,
+                PageSize::Kilopage,
+            );
+        }
+
+        let range = at..at.add(PageSize::Kilopage.to_byte_size() * len);
+        self.address_map
+            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), AddressRegionKind::Mmio)
+            .expect("bad address mapping");
+
+        range
+    }
+
     pub fn apply_shared_region(
         &mut self,
         at: Option<VirtualAddress>,
