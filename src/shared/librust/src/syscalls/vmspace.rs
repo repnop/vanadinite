@@ -9,6 +9,7 @@ use core::num::NonZeroUsize;
 
 use super::{allocation::MemoryPermissions, Syscall};
 use crate::{
+    capabilities::CapabilityPtr,
     error::KError,
     message::{Recipient, SyscallRequest, SyscallResult},
     task::Tid,
@@ -80,7 +81,7 @@ pub struct VmspaceSpawnEnv {
     pub tp: usize,
 }
 
-pub fn spawn_vmspace(id: VmspaceObjectId, env: VmspaceSpawnEnv) -> SyscallResult<Tid, KError> {
+pub fn spawn_vmspace(id: VmspaceObjectId, env: VmspaceSpawnEnv) -> SyscallResult<(Tid, CapabilityPtr), KError> {
     crate::syscalls::syscall(
         Recipient::kernel(),
         SyscallRequest {
@@ -89,5 +90,5 @@ pub fn spawn_vmspace(id: VmspaceObjectId, env: VmspaceSpawnEnv) -> SyscallResult
         },
     )
     .1
-    .map(|n| Tid::new(NonZeroUsize::new(n).unwrap()))
+    .map(|(n, cptr)| (Tid::new(NonZeroUsize::new(n).unwrap()), CapabilityPtr::new(cptr)))
 }

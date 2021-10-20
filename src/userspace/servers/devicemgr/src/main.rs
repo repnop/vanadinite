@@ -7,6 +7,8 @@
 
 #![feature(asm, lang_items)]
 
+use std::{ipc::IpcChannel, librust::capabilities::CapabilityPtr};
+
 fn main() {
     let args = std::env::args();
     let ptr = usize::from_str_radix(args[0], 16).unwrap() as *const u8;
@@ -37,6 +39,9 @@ fn main() {
     }
 
     unsafe { addr.write_volatile(b'\n') };
+
+    let parent_channel = IpcChannel::new(CapabilityPtr::new(0));
+    println!("{:?}", parent_channel.read());
 
     #[allow(clippy::empty_loop)]
     loop {}

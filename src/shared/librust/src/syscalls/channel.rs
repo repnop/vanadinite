@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    capabilities::CapabilityPtr,
     error::KError,
     message::{Recipient, SyscallRequest, SyscallResult},
     syscalls::{syscall, Syscall},
@@ -56,42 +57,42 @@ pub fn request_channel(with: Tid) -> SyscallResult<(), KError> {
     .1
 }
 
-pub fn create_channel(with: Tid) -> SyscallResult<ChannelId, KError> {
+pub fn create_channel(with: Tid) -> SyscallResult<CapabilityPtr, KError> {
     syscall(
         Recipient::kernel(),
         SyscallRequest { syscall: Syscall::CreateChannel, arguments: [with.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
     )
     .1
-    .map(ChannelId)
+    .map(CapabilityPtr::new)
 }
 
-pub fn create_message(channel: ChannelId, size: usize) -> SyscallResult<ChannelMessage, KError> {
+pub fn create_message(cptr: CapabilityPtr, size: usize) -> SyscallResult<ChannelMessage, KError> {
     syscall(
         Recipient::kernel(),
         SyscallRequest {
             syscall: Syscall::CreateChannelMessage,
-            arguments: [channel.value(), size, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            arguments: [cptr.value(), size, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         },
     )
     .1
     .map(|(id, ptr, len)| ChannelMessage { id: MessageId::new(id), ptr: ptr as *mut u8, len })
 }
 
-pub fn send_message(channel: ChannelId, message: MessageId, message_len: usize) -> SyscallResult<(), KError> {
+pub fn send_message(cptr: CapabilityPtr, message: MessageId, message_len: usize) -> SyscallResult<(), KError> {
     syscall(
         Recipient::kernel(),
         SyscallRequest {
             syscall: Syscall::SendChannelMessage,
-            arguments: [channel.value(), message.value(), message_len, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            arguments: [cptr.value(), message.value(), message_len, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         },
     )
     .1
 }
 
-pub fn read_message(channel: ChannelId) -> SyscallResult<Option<ChannelMessage>, KError> {
+pub fn read_message(cptr: CapabilityPtr) -> SyscallResult<Option<ChannelMessage>, KError> {
     syscall(
         Recipient::kernel(),
-        SyscallRequest { syscall: Syscall::ReadChannel, arguments: [channel.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+        SyscallRequest { syscall: Syscall::ReadChannel, arguments: [cptr.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
     )
     .1
     .map(|res| match res {
@@ -100,12 +101,12 @@ pub fn read_message(channel: ChannelId) -> SyscallResult<Option<ChannelMessage>,
     })
 }
 
-pub fn retire_message(channel: ChannelId, message: MessageId) -> SyscallResult<(), KError> {
+pub fn retire_message(cptr: CapabilityPtr, message: MessageId) -> SyscallResult<(), KError> {
     syscall(
         Recipient::kernel(),
         SyscallRequest {
             syscall: Syscall::RetireChannelMessage,
-            arguments: [channel.value(), message.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            arguments: [cptr.value(), message.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         },
     )
     .1

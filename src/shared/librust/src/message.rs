@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    capabilities::CapabilityPtr,
     error::{self, AccessError, KError},
     syscalls::{channel::ChannelId, Syscall},
     task::Tid,
@@ -364,10 +365,10 @@ impl Recipient {
 #[repr(C, usize)]
 pub enum KernelNotification {
     ChannelRequest(Tid),
-    ChannelOpened(ChannelId),
+    ChannelOpened(CapabilityPtr),
     ChannelRequestDenied,
     InterruptOccurred(usize),
-    NewChannelMessage(ChannelId),
+    NewChannelMessage(CapabilityPtr),
 }
 
 pub const NOTIFICATION_CHANNEL_REQUEST: usize = 0;
@@ -382,11 +383,11 @@ impl From<Message> for KernelNotification {
             NOTIFICATION_CHANNEL_REQUEST => {
                 KernelNotification::ChannelRequest(Tid::new(message.contents[1].try_into().unwrap()))
             }
-            NOTIFICATION_CHANNEL_OPENED => KernelNotification::ChannelOpened(ChannelId::new(message.contents[1])),
+            NOTIFICATION_CHANNEL_OPENED => KernelNotification::ChannelOpened(CapabilityPtr::new(message.contents[1])),
             NOTIFICATION_CHANNEL_REQUEST_DENIED => KernelNotification::ChannelRequestDenied,
             NOTIFICATION_INTERRUPT_OCCURRED => KernelNotification::InterruptOccurred(message.contents[1]),
             NOTIFICATION_NEW_CHANNEL_MESSAGE => {
-                KernelNotification::NewChannelMessage(ChannelId::new(message.contents[1]))
+                KernelNotification::NewChannelMessage(CapabilityPtr::new(message.contents[1]))
             }
             _ => unreachable!("bad KernelNotification or used this impl one something that wasn't "),
         }

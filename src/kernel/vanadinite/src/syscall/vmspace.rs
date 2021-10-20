@@ -5,32 +5,44 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use core::sync::atomic::AtomicUsize;
+
 use crate::{
-    capabilities::CapabilitySpace,
+    capabilities::{Capability, CapabilityResource, CapabilityRights, CapabilitySpace},
     mem::{
         manager::{AddressRegionKind, FillOption, MemoryManager, RegionDescription},
         paging::{flags, PageSize, VirtualAddress},
+        user::RawUserSlice,
     },
-    scheduler::{Scheduler, CURRENT_TASK, SCHEDULER},
+    scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
+    syscall::channel::UserspaceChannel,
     task::{Context, Task},
     trap::GeneralRegisters,
     utils::{self, Units},
 };
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use librust::{
+    capabilities::CapabilityPtr,
     error::KError,
-    message::SyscallResult,
-    syscalls::{allocation::MemoryPermissions, vmspace::VmspaceObjectId},
+    message::{KernelNotification, Message, Sender, SyscallResult},
+    syscalls::{allocation::MemoryPermissions, channel::ChannelId, vmspace::VmspaceObjectId},
 };
 
 pub struct VmspaceObject {
     pub memory_manager: MemoryManager,
     pub inprocess_mappings: Vec<VirtualAddress>,
+    pub cspace: CapabilitySpace,
+    pub service_name_to_cptr: BTreeMap<alloc::string::String, (CapabilityPtr, CapabilityRights)>,
 }
 
 impl VmspaceObject {
     pub fn new() -> Self {
-        Self { memory_manager: MemoryManager::new(), inprocess_mappings: Vec::new() }
+        Self {
+            memory_manager: MemoryManager::new(),
+            inprocess_mappings: Vec::new(),
+            cspace: CapabilitySpace::new(),
+            service_name_to_cptr: BTreeMap::new(),
+        }
     }
 }
 
@@ -128,7 +140,7 @@ pub fn spawn_vmspace(
     a2: usize,
     sp: usize,
     tp: usize,
-) -> SyscallResult<usize, KError> {
+) -> SyscallResult<(usize, usize), KError> {
     let object = match task.vmspace_objects.remove(&VmspaceObjectId::new(id)) {
         Some(map) => map,
         None => return SyscallResult::Err(KError::InvalidArgument(0)),
@@ -145,7 +157,7 @@ pub fn spawn_vmspace(
     );
     log::debug!("Memory map:\n{:#?}", object.memory_manager.address_map_debug());
 
-    let new_task = Task {
+    let mut new_task = Task {
         name: alloc::format!("userspace allocated task by {:?}", CURRENT_TASK.get().unwrap()).into_boxed_str(),
         context: Context {
             pc,
@@ -163,11 +175,137 @@ pub fn spawn_vmspace(
         cspace: CapabilitySpace::new(),
     };
 
+    let this_new_channel_id = ChannelId::new(task.channels.last_key_value().map(|(id, _)| id.value() + 1).unwrap_or(0));
+    let msg_counter = Arc::new(AtomicUsize::new(0));
+    new_task.channels.insert(
+        ChannelId::new(0),
+        UserspaceChannel::new(CURRENT_TASK.get().unwrap(), this_new_channel_id, Arc::clone(&msg_counter)),
+    );
+    new_task.cspace.mint(Capability {
+        resource: CapabilityResource::Channel(ChannelId::new(0)),
+        rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
+    });
+
     for region in object.inprocess_mappings {
         task.memory_manager.dealloc_region(region);
     }
 
     let tid = SCHEDULER.enqueue(new_task);
 
-    SyscallResult::Ok(tid.value())
+    let channel = UserspaceChannel::new(tid, ChannelId::new(0), msg_counter);
+    task.channels.insert(this_new_channel_id, channel);
+    let cptr = task.cspace.mint(Capability {
+        resource: CapabilityResource::Channel(this_new_channel_id),
+        rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
+    });
+
+    // FIXME: this is gross, should have a way to reserve a TID (or ideally not
+    // need it at all) so we don't have to lock the task after insertion
+
+    let new_task = TASKS.get(tid).unwrap();
+    let mut new_task = new_task.lock();
+
+    for (name, (cptr, rights)) in object.service_name_to_cptr {
+        let cap = match task.cspace.resolve(cptr) {
+            Some(cap) => cap,
+            None => return SyscallResult::Err(KError::InvalidArgument(1)),
+        };
+
+        match &cap.resource {
+            CapabilityResource::Channel(channel_id) => {
+                // FIXME: can this unwrap fail..?
+                let channel = task.channels.get(channel_id).unwrap();
+                let other_task = match TASKS.get(channel.other_task) {
+                    Some(task) => task,
+                    None => panic!("wut"),
+                };
+
+                let mut other_task = other_task.lock();
+                if other_task.state.is_dead() {
+                    // FIXME: report error or?
+                    continue;
+                }
+
+                let other_rights = other_task
+                    .cspace
+                    .all()
+                    .find_map(|(_, cap)| match cap {
+                        Capability { resource: CapabilityResource::Channel(id), rights } => {
+                            match other_task.channels.get(id).unwrap().other_channel_id == *channel_id {
+                                true => Some(*rights),
+                                false => None,
+                            }
+                        }
+                    })
+                    .unwrap();
+
+                let new_task_channel_id =
+                    ChannelId::new(new_task.channels.last_key_value().map(|(id, _)| id.value() + 1).unwrap_or(0));
+                let other_task_channel_id =
+                    ChannelId::new(other_task.channels.last_key_value().map(|(id, _)| id.value() + 1).unwrap_or(0));
+                let msg_counter = Arc::new(AtomicUsize::new(0));
+
+                new_task.channels.insert(
+                    new_task_channel_id,
+                    UserspaceChannel::new(channel.other_task, other_task_channel_id, Arc::clone(&msg_counter)),
+                );
+                other_task
+                    .channels
+                    .insert(other_task_channel_id, UserspaceChannel::new(tid, new_task_channel_id, msg_counter));
+
+                let cptr = new_task
+                    .cspace
+                    .mint(Capability { resource: CapabilityResource::Channel(new_task_channel_id), rights });
+                let cptr = other_task.cspace.mint(Capability {
+                    resource: CapabilityResource::Channel(other_task_channel_id),
+                    rights: other_rights,
+                });
+
+                new_task
+                    .message_queue
+                    .push_back((Sender::kernel(), Message::from(KernelNotification::ChannelOpened(cptr))));
+            }
+        }
+    }
+
+    SyscallResult::Ok((tid.value(), cptr.value()))
+}
+
+pub fn grant_capability(
+    task: &mut Task,
+    id: usize,
+    cptr: CapabilityPtr,
+    name: *const u8,
+    len: usize,
+    rights: CapabilityRights,
+) -> SyscallResult<()> {
+    let vmspace = match task.vmspace_objects.get_mut(&VmspaceObjectId::new(id)) {
+        Some(vmspace) => vmspace,
+        None => return SyscallResult::Err(KError::InvalidArgument(0)),
+    };
+
+    let cap = match task.cspace.resolve(cptr) {
+        Some(cap) => cap,
+        None => return SyscallResult::Err(KError::InvalidArgument(1)),
+    };
+
+    if !cap.rights.is_superset(rights) {
+        return SyscallResult::Err(KError::InvalidArgument(4));
+    }
+
+    let name =
+        match unsafe { RawUserSlice::readable(VirtualAddress::from_ptr(name), len).validate(&task.memory_manager) } {
+            Ok(slice) => slice,
+            Err(_) => return SyscallResult::Err(KError::InvalidArgument(2)),
+        };
+
+    let name = name.guarded();
+    let name = match core::str::from_utf8(&name) {
+        Ok(name) => name,
+        Err(_) => return SyscallResult::Err(KError::InvalidArgument(2)),
+    };
+
+    vmspace.service_name_to_cptr.insert(name.into(), (cptr, rights));
+
+    SyscallResult::Ok(())
 }

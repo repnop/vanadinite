@@ -6,6 +6,8 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use librust::{
+    capabilities::CapabilityPtr,
+    error::KError,
     message::{KernelNotification, SyscallResult},
     syscalls::{
         self,
@@ -17,12 +19,12 @@ use librust::{
 
 #[derive(Debug)]
 pub struct IpcChannel {
-    id: ChannelId,
+    cptr: CapabilityPtr,
 }
 
 impl IpcChannel {
-    pub fn new(id: ChannelId) -> Self {
-        Self { id }
+    pub fn new(cptr: CapabilityPtr) -> Self {
+        Self { cptr }
     }
 
     pub fn open(with: Tid) -> Result<Self, OpenChannelError> {
@@ -32,7 +34,7 @@ impl IpcChannel {
 
         match syscalls::receive_message() {
             Some(ReadMessage::Kernel(KernelNotification::ChannelRequestDenied)) => Err(OpenChannelError::Rejected),
-            Some(ReadMessage::Kernel(KernelNotification::ChannelOpened(id))) => Ok(Self { id }),
+            Some(ReadMessage::Kernel(KernelNotification::ChannelOpened(cptr))) => Ok(Self { cptr }),
             t => unreachable!("{:?}", t),
         }
     }
@@ -40,7 +42,7 @@ impl IpcChannel {
     // FIXME: use a real error
     #[allow(clippy::result_unit_err)]
     pub fn new_message(&mut self, size: usize) -> Result<NewMessage<'_>, ()> {
-        let message = match channel::create_message(self.id, size) {
+        let message = match channel::create_message(self.cptr, size) {
             SyscallResult::Ok(msg) => msg,
             SyscallResult::Err(_) => return Err(()),
         };
@@ -50,25 +52,31 @@ impl IpcChannel {
 
     // FIXME: use a real error
     #[allow(clippy::result_unit_err)]
-    pub fn read(&self) -> Result<Option<Message>, ()> {
-        match channel::read_message(self.id) {
-            SyscallResult::Ok(maybe_msg) => Ok(maybe_msg.map(|m| Message(self.id, m))),
-            SyscallResult::Err(_) => Err(()),
+    pub fn read(&self) -> Result<Option<Message>, KError> {
+        match channel::read_message(self.cptr) {
+            SyscallResult::Ok(maybe_msg) => Ok(maybe_msg.map(|m| Message(self.cptr, m))),
+            SyscallResult::Err(e) => Err(e),
         }
     }
 
     fn send(&mut self, msg: ChannelMessage, written_len: usize) -> Result<(), SendMessageError> {
-        let _ = channel::send_message(self.id, msg.id, written_len);
+        let _ = channel::send_message(self.cptr, msg.id, written_len);
         // FIXME: check for failure
         Ok(())
     }
 }
 
-pub struct Message(ChannelId, ChannelMessage);
+pub struct Message(CapabilityPtr, ChannelMessage);
 
 impl Message {
     pub fn as_bytes(&self) -> &[u8] {
         unsafe { core::slice::from_raw_parts(self.1.ptr, self.1.len) }
+    }
+}
+
+impl core::fmt::Debug for Message {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Message").field("data", &self.as_bytes()).finish()
     }
 }
 

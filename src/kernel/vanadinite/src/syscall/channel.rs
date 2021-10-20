@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    capabilities::{Capability, CapabilityResource, CapabilityRights},
     mem::{
         manager::{AddressRegionKind, FillOption, RegionDescription},
         paging::{flags, PageSize, VirtualAddress},
@@ -21,6 +22,7 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 use librust::{
+    capabilities::CapabilityPtr,
     error::KError,
     message::{KernelNotification, Message, Sender, SyscallResult},
     syscalls::channel::{ChannelId, MessageId},
@@ -30,14 +32,24 @@ use librust::{
 pub const MAX_CHANNEL_BYTES: usize = 4096;
 
 pub struct UserspaceChannel {
-    other_task: Tid,
-    other_channel_id: ChannelId,
+    pub other_task: Tid,
+    pub other_channel_id: ChannelId,
     message_id_counter: Arc<AtomicUsize>,
     write_regions: BTreeMap<MessageId, Range<VirtualAddress>>,
     read_regions: BTreeMap<MessageId, (Range<VirtualAddress>, usize)>,
 }
 
 impl UserspaceChannel {
+    pub fn new(other_task: Tid, other_channel_id: ChannelId, message_id_counter: Arc<AtomicUsize>) -> Self {
+        Self {
+            other_task,
+            other_channel_id,
+            message_id_counter,
+            write_regions: BTreeMap::new(),
+            read_regions: BTreeMap::new(),
+        }
+    }
+
     fn next_message_id(&self) -> usize {
         self.message_id_counter.fetch_add(1, Ordering::AcqRel)
     }
@@ -75,6 +87,8 @@ pub fn request_channel(from: &mut Task, to: Tid) -> SyscallResult<Message, KErro
 }
 
 pub fn create_channel(from: &mut Task, to: Tid) -> SyscallResult<usize, KError> {
+    return SyscallResult::Err(KError::InvalidSyscall(0));
+
     let current_tid = CURRENT_TASK.get().unwrap();
 
     // Doesn't make sense to make a shared memory channel with itself and we'd
@@ -123,19 +137,23 @@ pub fn create_channel(from: &mut Task, to: Tid) -> SyscallResult<usize, KError> 
     from.channels.insert(from_channel_id, from_channel);
     to_task.channels.insert(to_channel_id, to_channel);
 
-    to_task.message_queue.push_front((Sender::kernel(), KernelNotification::ChannelOpened(to_channel_id).into()));
+    //to_task.message_queue.push_front((Sender::kernel(), KernelNotification::ChannelOpened(to_channel_id).into()));
 
     SyscallResult::Ok(from_channel_id.value())
 }
 
 // FIXME: Definitely should be a way to return tuple values that can be
 // converted into `usize` so its a lot more clear what's what
-pub fn create_message(task: &mut Task, channel_id: usize, size: usize) -> SyscallResult<(usize, usize, usize), KError> {
-    let channel_id = ChannelId::new(channel_id);
-    let channel = match task.channels.get_mut(&channel_id) {
-        Some(channel) => channel,
-        None => return SyscallResult::Err(KError::InvalidArgument(0)),
+pub fn create_message(task: &mut Task, cptr: usize, size: usize) -> SyscallResult<(usize, usize, usize), KError> {
+    let channel_id = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+        Some(Capability { resource: CapabilityResource::Channel(channel), rights })
+            if *rights & CapabilityRights::WRITE =>
+        {
+            channel
+        }
+        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
     };
+    let channel = task.channels.get_mut(channel_id).unwrap();
 
     let n_pages = utils::round_up_to_next(size, 4.kib()) / 4.kib();
 
@@ -159,12 +177,16 @@ pub fn create_message(task: &mut Task, channel_id: usize, size: usize) -> Syscal
     SyscallResult::Ok((message_id, region.start.as_usize(), size))
 }
 
-pub fn send_message(task: &mut Task, channel_id: usize, message_id: usize, len: usize) -> SyscallResult<(), KError> {
-    let channel_id = ChannelId::new(channel_id);
-    let channel = match task.channels.get_mut(&channel_id) {
-        Some(channel) => channel,
-        None => return SyscallResult::Err(KError::InvalidArgument(0)),
+pub fn send_message(task: &mut Task, cptr: usize, message_id: usize, len: usize) -> SyscallResult<(), KError> {
+    let channel_id = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+        Some(Capability { resource: CapabilityResource::Channel(channel), rights })
+            if *rights & CapabilityRights::WRITE =>
+        {
+            channel
+        }
+        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
     };
+    let channel = task.channels.get_mut(channel_id).unwrap();
 
     let range = match channel.write_regions.remove(&MessageId::new(message_id)) {
         Some(range) => range,
@@ -196,12 +218,16 @@ pub fn send_message(task: &mut Task, channel_id: usize, message_id: usize, len: 
     SyscallResult::Ok(())
 }
 
-pub fn read_message(task: &mut Task, channel_id: usize) -> SyscallResult<(usize, usize, usize), KError> {
-    let id = ChannelId::new(channel_id);
-    let channel = match task.channels.get_mut(&id) {
-        Some(channel) => channel,
-        None => return SyscallResult::Err(KError::InvalidArgument(0)),
+pub fn read_message(task: &mut Task, cptr: usize) -> SyscallResult<(usize, usize, usize), KError> {
+    let channel_id = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+        Some(Capability { resource: CapabilityResource::Channel(channel), rights })
+            if *rights & CapabilityRights::READ =>
+        {
+            channel
+        }
+        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
     };
+    let channel = task.channels.get_mut(channel_id).unwrap();
 
     // TODO: need to be able to return more than just the first one
     match channel.read_regions.iter().next() {
@@ -210,12 +236,16 @@ pub fn read_message(task: &mut Task, channel_id: usize) -> SyscallResult<(usize,
     }
 }
 
-pub fn retire_message(task: &mut Task, channel_id: usize, message_id: usize) -> SyscallResult<(), KError> {
-    let id = ChannelId::new(channel_id);
-    let channel = match task.channels.get_mut(&id) {
-        Some(channel) => channel,
-        None => return SyscallResult::Err(KError::InvalidArgument(0)),
+pub fn retire_message(task: &mut Task, cptr: usize, message_id: usize) -> SyscallResult<(), KError> {
+    let channel_id = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+        Some(Capability { resource: CapabilityResource::Channel(channel), rights })
+            if *rights & CapabilityRights::WRITE =>
+        {
+            channel
+        }
+        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
     };
+    let channel = task.channels.get_mut(channel_id).unwrap();
 
     match channel.read_regions.remove(&MessageId::new(message_id)) {
         Some(region) => {

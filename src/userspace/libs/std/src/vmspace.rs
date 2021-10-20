@@ -8,6 +8,7 @@
 use core::marker::PhantomData;
 
 use librust::{
+    capabilities::CapabilityPtr,
     error::KError,
     message::SyscallResult,
     syscalls::{
@@ -45,9 +46,9 @@ impl Vmspace {
         }
     }
 
-    pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<Tid, KError> {
+    pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<(Tid, CapabilityPtr), KError> {
         match vmspace::spawn_vmspace(self.id, env) {
-            SyscallResult::Ok(tid) => Ok(tid),
+            SyscallResult::Ok((tid, cptr)) => Ok((tid, cptr)),
             SyscallResult::Err(e) => Err(e),
         }
     }

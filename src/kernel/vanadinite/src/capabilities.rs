@@ -18,8 +18,9 @@ impl CapabilitySpace {
     }
 
     pub fn mint(&mut self, capability: Capability) -> CapabilityPtr {
-        let time = crate::csr::time::read() as usize;
-        let cptr = CapabilityPtr::new(time);
+        // FIXME: Uncomment & improve
+        // let time = crate::csr::time::read() as usize;
+        let cptr = CapabilityPtr::new(self.inner.keys().max().map(|c| c.value()).unwrap_or(0));
 
         // This should go away when there's a better RNG method or whathaveyou
         assert!(self.inner.insert(cptr, capability).is_none());
@@ -34,6 +35,10 @@ impl CapabilitySpace {
     pub fn resolve_mut(&mut self, cptr: CapabilityPtr) -> Option<&mut Capability> {
         self.inner.get_mut(&cptr)
     }
+
+    pub fn all(&self) -> impl Iterator<Item = (&CapabilityPtr, &Capability)> {
+        self.inner.iter()
+    }
 }
 
 pub struct Capability {
@@ -43,11 +48,9 @@ pub struct Capability {
 
 pub enum CapabilityResource {
     Channel(ChannelId),
-    Grant,
-    Mint,
-    Revoke,
 }
 
+#[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
 pub struct CapabilityRights(u8);
 
@@ -56,6 +59,12 @@ impl CapabilityRights {
     pub const WRITE: Self = Self(2);
     pub const EXECUTE: Self = Self(4);
     pub const GRANT: Self = Self(8);
+}
+
+impl CapabilityRights {
+    pub fn is_superset(self, other: Self) -> bool {
+        (self.0 | !other.0) == u8::MAX
+    }
 }
 
 impl core::ops::BitOr for CapabilityRights {

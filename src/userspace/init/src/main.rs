@@ -51,7 +51,11 @@ fn main() {
 
     println!("[INIT] Spawning devicemgr");
 
-    space.spawn(env).unwrap();
+    let (_, cptr) = space.spawn(env).unwrap();
+
+    let message = librust::syscalls::channel::create_message(cptr, 12).unwrap();
+    unsafe { core::slice::from_raw_parts_mut(message.ptr, message.len)[..12].copy_from_slice(&[b'A'; 12][..]) };
+    librust::syscalls::channel::send_message(cptr, message.id, 12).unwrap();
 
     // println!("[INIT] Spawning shell");
     //
