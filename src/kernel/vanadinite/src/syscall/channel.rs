@@ -16,38 +16,64 @@ use crate::{
     task::{Task, TaskState},
     utils::{self, Units},
 };
-use alloc::{collections::BTreeMap, sync::Arc};
+use alloc::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+};
 use core::{
     ops::Range,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use librust::{
     capabilities::CapabilityPtr,
     error::KError,
-    message::{KernelNotification, Message, Sender, SyscallResult},
+    message::{KernelNotification, SyscallResult},
     syscalls::channel::{ChannelId, MessageId},
     task::Tid,
 };
+use sync::SpinRwLock;
 
 pub const MAX_CHANNEL_BYTES: usize = 4096;
 
 pub struct UserspaceChannel {
-    pub other_task: Tid,
-    pub other_channel_id: ChannelId,
+    sender: Sender,
+    receiver: Receiver,
     message_id_counter: Arc<AtomicUsize>,
-    write_regions: BTreeMap<MessageId, Range<VirtualAddress>>,
-    read_regions: BTreeMap<MessageId, (Range<VirtualAddress>, usize)>,
+    mapped_regions: BTreeMap<MessageId, MappedChannelMessage>,
 }
 
 impl UserspaceChannel {
-    pub fn new(other_task: Tid, other_channel_id: ChannelId, message_id_counter: Arc<AtomicUsize>) -> Self {
-        Self {
-            other_task,
-            other_channel_id,
-            message_id_counter,
-            write_regions: BTreeMap::new(),
-            read_regions: BTreeMap::new(),
-        }
+    pub fn new() -> (Self, Self) {
+        let message_id_counter = Arc::new(AtomicUsize::new(0));
+        let (sender1, receiver1) = {
+            let message_queue = Arc::new(SpinRwLock::new(VecDeque::new()));
+            let alive = Arc::new(AtomicBool::new(true));
+
+            let sender = Sender { inner: Arc::clone(&message_queue), alive: Arc::clone(&alive) };
+            let receiver = Receiver { inner: message_queue, alive };
+
+            (sender, receiver)
+        };
+
+        let (sender2, receiver2) = {
+            let message_queue = Arc::new(SpinRwLock::new(VecDeque::new()));
+            let alive = Arc::new(AtomicBool::new(true));
+
+            let sender = Sender { inner: Arc::clone(&message_queue), alive: Arc::clone(&alive) };
+            let receiver = Receiver { inner: message_queue, alive };
+
+            (sender, receiver)
+        };
+
+        let first = Self {
+            sender: sender1,
+            receiver: receiver2,
+            message_id_counter: Arc::clone(&message_id_counter),
+            mapped_regions: BTreeMap::new(),
+        };
+        let second = Self { sender: sender2, receiver: receiver1, message_id_counter, mapped_regions: BTreeMap::new() };
+
+        (first, second)
     }
 
     fn next_message_id(&self) -> usize {
@@ -55,91 +81,66 @@ impl UserspaceChannel {
     }
 }
 
-pub fn request_channel(from: &mut Task, to: Tid) -> SyscallResult<Message, KError> {
-    let current_tid = CURRENT_TASK.get().unwrap();
-
-    // Doesn't make sense to make a shared memory channel with itself and we'd
-    // also end up deadlocking ourselves
-    if current_tid == to {
-        return SyscallResult::Err(KError::InvalidArgument(0));
-    }
-
-    let to_task = match TASKS.get(to) {
-        Some(task) => task,
-        None => return SyscallResult::Err(KError::InvalidRecipient),
-    };
-
-    let mut to_task = to_task.lock();
-
-    if to_task.state.is_dead() {
-        return SyscallResult::Err(KError::InvalidRecipient);
-    } else if !to_task.promiscuous {
-        return SyscallResult::Ok(KernelNotification::ChannelRequestDenied.into());
-    }
-
-    to_task.incoming_channel_request.insert(current_tid);
-    to_task.message_queue.push_back((Sender::kernel(), KernelNotification::ChannelRequest(current_tid).into()));
-
-    log::info!("blocking {:?}", current_tid);
-    from.state = TaskState::Blocked;
-
-    SyscallResult::Ok(Message::default())
+enum MappedChannelMessage {
+    Synthesized(Range<VirtualAddress>),
+    Received { region: Range<VirtualAddress>, len: usize },
 }
 
-pub fn create_channel(from: &mut Task, to: Tid) -> SyscallResult<usize, KError> {
-    return SyscallResult::Err(KError::InvalidSyscall(0));
+#[derive(Debug)]
+enum ChannelMessage {
+    Data(MessageId, PhysicalRegion, usize),
+    Capability(CapabilityResource, CapabilityRights),
+}
 
-    let current_tid = CURRENT_TASK.get().unwrap();
+#[derive(Debug, Clone)]
+struct Receiver {
+    // FIXME: Replace these with something like a lockfree ring buffer
+    inner: Arc<SpinRwLock<VecDeque<ChannelMessage>>>,
+    alive: Arc<AtomicBool>,
+}
 
-    // Doesn't make sense to make a shared memory channel with itself and we'd
-    // also end up deadlocking ourselves
-    if current_tid == to {
-        return SyscallResult::Err(KError::InvalidArgument(0));
+impl Receiver {
+    fn try_receive(&self) -> Result<Option<ChannelMessage>, ()> {
+        // TODO: is it worth trying to `.read()` then `.upgrade()` if not empty?
+        match self.inner.write().pop_front() {
+            Some(message) => Ok(Some(message)),
+            None => match self.alive.load(Ordering::Acquire) {
+                true => Ok(None),
+                false => Err(()),
+            },
+        }
     }
+}
 
-    let to_task = match TASKS.get(to) {
-        Some(task) => task,
-        None => return SyscallResult::Err(KError::InvalidRecipient),
-    };
-
-    let mut to_task = to_task.lock();
-
-    if to_task.state.is_dead() {
-        return SyscallResult::Err(KError::InvalidRecipient);
+impl Drop for Receiver {
+    fn drop(&mut self) {
+        self.alive.store(false, Ordering::Release);
     }
+}
 
-    let counter = Arc::new(AtomicUsize::new(0));
+#[derive(Debug, Clone)]
+struct Sender {
+    // FIXME: Replace these with something like a lockfree ring buffer
+    inner: Arc<SpinRwLock<VecDeque<ChannelMessage>>>,
+    alive: Arc<AtomicBool>,
+}
 
-    let from_channel_id = ChannelId::new(from.channels.last_key_value().map(|(id, _)| id.value() + 1).unwrap_or(0));
-    let to_channel_id = ChannelId::new(to_task.channels.last_key_value().map(|(id, _)| id.value() + 1).unwrap_or(0));
+impl Sender {
+    fn try_send(&self, message: ChannelMessage) -> Result<(), ChannelMessage> {
+        if !self.alive.load(Ordering::Acquire) {
+            return Err(message);
+        }
 
-    let from_channel = UserspaceChannel {
-        other_task: to,
-        other_channel_id: to_channel_id,
-        message_id_counter: counter.clone(),
-        write_regions: BTreeMap::new(),
-        read_regions: BTreeMap::new(),
-    };
-
-    let to_channel = UserspaceChannel {
-        other_task: current_tid,
-        other_channel_id: from_channel_id,
-        message_id_counter: counter,
-        write_regions: BTreeMap::new(),
-        read_regions: BTreeMap::new(),
-    };
-
-    if from.incoming_channel_request.remove(&to) {
-        log::info!("unblocking {:?}", to);
-        to_task.state = TaskState::Running;
+        // FIXME: set a buffer limit at some point
+        self.inner.write().push_back(message);
+        Ok(())
     }
+}
 
-    from.channels.insert(from_channel_id, from_channel);
-    to_task.channels.insert(to_channel_id, to_channel);
-
-    //to_task.message_queue.push_front((Sender::kernel(), KernelNotification::ChannelOpened(to_channel_id).into()));
-
-    SyscallResult::Ok(from_channel_id.value())
+impl Drop for Sender {
+    fn drop(&mut self) {
+        self.alive.store(false, Ordering::Release);
+    }
 }
 
 // FIXME: Definitely should be a way to return tuple values that can be
@@ -153,11 +154,14 @@ pub fn create_message(task: &mut Task, cptr: usize, size: usize) -> SyscallResul
         }
         _ => return SyscallResult::Err(KError::InvalidArgument(0)),
     };
-    let channel = task.channels.get_mut(channel_id).unwrap();
+    let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
     let n_pages = utils::round_up_to_next(size, 4.kib()) / 4.kib();
 
     let message_id = channel.next_message_id();
+    let size = n_pages * 4.kib();
+
+    // FIXME: does this actually need to be shared? I don't think so
     let (region, _) = task.memory_manager.alloc_shared_region(
         None,
         RegionDescription {
@@ -170,9 +174,7 @@ pub fn create_message(task: &mut Task, cptr: usize, size: usize) -> SyscallResul
         },
     );
 
-    let size = n_pages * 4.kib();
-
-    channel.write_regions.insert(MessageId::new(message_id), region.clone());
+    channel.mapped_regions.insert(MessageId::new(message_id), MappedChannelMessage::Synthesized(region.clone()));
 
     SyscallResult::Ok((message_id, region.start.as_usize(), size))
 }
@@ -186,11 +188,13 @@ pub fn send_message(task: &mut Task, cptr: usize, message_id: usize, len: usize)
         }
         _ => return SyscallResult::Err(KError::InvalidArgument(0)),
     };
-    let channel = task.channels.get_mut(channel_id).unwrap();
+    let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
-    let range = match channel.write_regions.remove(&MessageId::new(message_id)) {
-        Some(range) => range,
-        None => return SyscallResult::Err(KError::InvalidArgument(1)),
+    let range = match channel.mapped_regions.remove(&MessageId::new(message_id)) {
+        Some(MappedChannelMessage::Synthesized(range)) => range,
+        // For now we don't allow sending back received messages, but maybe that
+        // should be allowed even if its not useful?
+        _ => return SyscallResult::Err(KError::InvalidArgument(1)),
     };
 
     if range.end.as_usize() - range.start.as_usize() < len {
@@ -198,22 +202,13 @@ pub fn send_message(task: &mut Task, cptr: usize, message_id: usize, len: usize)
     }
 
     let backing = match task.memory_manager.dealloc_region(range.start) {
-        MemoryRegion::Backed(PhysicalRegion::Shared(phys_region)) => phys_region,
+        MemoryRegion::Backed(phys_region) => phys_region,
         _ => unreachable!(),
     };
 
-    let other = TASKS.get(channel.other_task).unwrap();
-    let mut other = other.lock();
-
-    let region = other.memory_manager.apply_shared_region(
-        None,
-        flags::READ | flags::WRITE | flags::USER | flags::VALID,
-        backing,
-        AddressRegionKind::Channel,
-    );
-
-    let other_channel = other.channels.get_mut(&channel.other_channel_id).unwrap();
-    other_channel.read_regions.insert(MessageId::new(message_id), (region, len));
+    // FIXME: once buffer limits exist, will need to either block or return an
+    // error and also check for broken channels
+    channel.sender.try_send(ChannelMessage::Data(MessageId::new(message_id), backing, len)).unwrap();
 
     SyscallResult::Ok(())
 }
@@ -227,12 +222,29 @@ pub fn read_message(task: &mut Task, cptr: usize) -> SyscallResult<(usize, usize
         }
         _ => return SyscallResult::Err(KError::InvalidArgument(0)),
     };
-    let channel = task.channels.get_mut(channel_id).unwrap();
+    let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
     // TODO: need to be able to return more than just the first one
-    match channel.read_regions.iter().next() {
-        Some((id, (region, len))) => SyscallResult::Ok((id.value(), region.start.as_usize(), *len)),
-        None => SyscallResult::Ok((0, 0, 0)),
+    match channel.receiver.try_receive() {
+        Ok(None) => SyscallResult::Ok((0, 0, 0)),
+        Ok(Some(ChannelMessage::Data(message_id, region, len))) => {
+            let region = match region {
+                PhysicalRegion::Shared(region) => region,
+                _ => unreachable!(),
+            };
+
+            // FIXME: make it so we can use any kind of physical region
+            let region = task.memory_manager.apply_shared_region(
+                None,
+                flags::READ | flags::WRITE | flags::USER | flags::VALID,
+                region,
+                AddressRegionKind::Channel,
+            );
+            SyscallResult::Ok((message_id.value(), region.start.as_usize(), len))
+        }
+        // Broken channel
+        // FIXME: better signify this, probably needs its own error
+        _ => SyscallResult::Err(KError::InvalidArgument(0)),
     }
 }
 
@@ -245,13 +257,13 @@ pub fn retire_message(task: &mut Task, cptr: usize, message_id: usize) -> Syscal
         }
         _ => return SyscallResult::Err(KError::InvalidArgument(0)),
     };
-    let channel = task.channels.get_mut(channel_id).unwrap();
+    let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
-    match channel.read_regions.remove(&MessageId::new(message_id)) {
-        Some(region) => {
-            task.memory_manager.dealloc_region(region.0.start);
+    match channel.mapped_regions.remove(&MessageId::new(message_id)) {
+        Some(MappedChannelMessage::Received { region, .. }) => {
+            task.memory_manager.dealloc_region(region.start);
             SyscallResult::Ok(())
         }
-        None => SyscallResult::Err(KError::InvalidArgument(1)),
+        _ => SyscallResult::Err(KError::InvalidArgument(1)),
     }
 }

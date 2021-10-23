@@ -82,7 +82,7 @@ pub struct Task {
     pub message_queue: VecDeque<(Sender, Message)>,
     pub promiscuous: bool,
     pub incoming_channel_request: BTreeSet<Tid>,
-    pub channels: BTreeMap<ChannelId, UserspaceChannel>,
+    pub channels: BTreeMap<ChannelId, (Tid, UserspaceChannel)>,
     pub vmspace_objects: BTreeMap<VmspaceObjectId, VmspaceObject>,
     pub vmspace_next_id: usize,
     pub cspace: CapabilitySpace,

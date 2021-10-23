@@ -10,7 +10,7 @@
 extern crate alloc;
 
 use core::num::NonZeroUsize;
-use std::ipc;
+use std::ipc::IpcChannel;
 use std::librust::message::SyscallResult;
 use std::librust::syscalls::*;
 use std::librust::{
@@ -23,7 +23,7 @@ fn main() {
     let mut history: VecDeque<String> = VecDeque::new();
     let mut history_index = None;
     let mut curr_history: Option<&str> = None;
-    let mut channels = Vec::new();
+    let mut channels: Vec<IpcChannel> = Vec::new();
 
     loop {
         print!("vanadinite> ");
@@ -32,7 +32,7 @@ fn main() {
             print!("{}", cmd);
         }
 
-        let input = match read_input(curr_history.as_deref()) {
+        let input = match read_input(curr_history) {
             Some(input) => input,
             None => continue,
         };
@@ -165,18 +165,6 @@ fn main() {
                 println!("Our TID is {}", current_tid().value())
             }
             "where_main" => println!("main is at: {:#p}", main as *mut u8),
-            "open_channel" => match args.trim().parse::<usize>() {
-                Ok(0) | Err(_) => {
-                    println!("Need valid TID :(")
-                }
-                Ok(tidn) => {
-                    let tid = Tid::new(NonZeroUsize::new(tidn).unwrap());
-                    match ipc::IpcChannel::open(tid) {
-                        Ok(channel) => channels.push(channel),
-                        Err(e) => println!("Error opening channel: {:?}", e),
-                    }
-                }
-            },
             "read_channels" => {
                 for channel in &channels {
                     match channel.read() {

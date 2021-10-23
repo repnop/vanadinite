@@ -8,7 +8,7 @@
 use crate::{
     capabilities::CapabilityPtr,
     error::{self, AccessError, KError},
-    syscalls::{channel::ChannelId, Syscall},
+    syscalls::Syscall,
     task::Tid,
 };
 use core::{convert::TryInto, num::NonZeroUsize};

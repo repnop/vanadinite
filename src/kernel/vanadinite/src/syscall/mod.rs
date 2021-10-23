@@ -192,14 +192,6 @@ fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
             }
         }
         Syscall::GetTid => (CURRENT_TASK.get().unwrap().value()).into(),
-        Syscall::CreateChannel => {
-            let tid = match NonZeroUsize::new(syscall_req.arguments[0]) {
-                Some(tid) => tid,
-                None => return SyscallResult::Err(KError::InvalidArgument(0)),
-            };
-
-            Message::from(channel::create_channel(task, Tid::new(tid))?)
-        }
         Syscall::CreateChannelMessage => {
             Message::from(channel::create_message(task, syscall_req.arguments[0], syscall_req.arguments[1])?)
         }
@@ -212,14 +204,6 @@ fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
         Syscall::ReadChannel => Message::from(channel::read_message(task, syscall_req.arguments[0])?),
         Syscall::RetireChannelMessage => {
             Message::from(channel::retire_message(task, syscall_req.arguments[0], syscall_req.arguments[1])?)
-        }
-        Syscall::RequestChannel => {
-            let tid = match NonZeroUsize::new(syscall_req.arguments[0]) {
-                Some(tid) => tid,
-                None => return SyscallResult::Err(KError::InvalidArgument(0)),
-            };
-
-            channel::request_channel(task, Tid::new(tid))?
         }
         Syscall::AllocDmaMemory => {
             let size = syscall_req.arguments[0];

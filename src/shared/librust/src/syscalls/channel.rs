@@ -10,7 +10,6 @@ use crate::{
     error::KError,
     message::{Recipient, SyscallRequest, SyscallResult},
     syscalls::{syscall, Syscall},
-    task::Tid,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -47,23 +46,6 @@ impl MessageId {
     pub fn value(self) -> usize {
         self.0
     }
-}
-
-pub fn request_channel(with: Tid) -> SyscallResult<(), KError> {
-    syscall(
-        Recipient::kernel(),
-        SyscallRequest { syscall: Syscall::RequestChannel, arguments: [with.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
-    )
-    .1
-}
-
-pub fn create_channel(with: Tid) -> SyscallResult<CapabilityPtr, KError> {
-    syscall(
-        Recipient::kernel(),
-        SyscallRequest { syscall: Syscall::CreateChannel, arguments: [with.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
-    )
-    .1
-    .map(CapabilityPtr::new)
 }
 
 pub fn create_message(cptr: CapabilityPtr, size: usize) -> SyscallResult<ChannelMessage, KError> {

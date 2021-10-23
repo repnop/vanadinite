@@ -46,6 +46,7 @@ pub struct Capability {
     pub rights: CapabilityRights,
 }
 
+#[derive(Debug)]
 pub enum CapabilityResource {
     Channel(ChannelId),
 }

@@ -5,8 +5,6 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use core::sync::atomic::AtomicUsize;
-
 use crate::{
     capabilities::{Capability, CapabilityResource, CapabilityRights, CapabilitySpace},
     mem::{
@@ -20,7 +18,7 @@ use crate::{
     trap::GeneralRegisters,
     utils::{self, Units},
 };
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, vec::Vec};
 use librust::{
     capabilities::CapabilityPtr,
     error::KError,
@@ -141,6 +139,8 @@ pub fn spawn_vmspace(
     sp: usize,
     tp: usize,
 ) -> SyscallResult<(usize, usize), KError> {
+    let current_tid = CURRENT_TASK.get().unwrap();
+
     let object = match task.vmspace_objects.remove(&VmspaceObjectId::new(id)) {
         Some(map) => map,
         None => return SyscallResult::Err(KError::InvalidArgument(0)),
@@ -176,11 +176,8 @@ pub fn spawn_vmspace(
     };
 
     let this_new_channel_id = ChannelId::new(task.channels.last_key_value().map(|(id, _)| id.value() + 1).unwrap_or(0));
-    let msg_counter = Arc::new(AtomicUsize::new(0));
-    new_task.channels.insert(
-        ChannelId::new(0),
-        UserspaceChannel::new(CURRENT_TASK.get().unwrap(), this_new_channel_id, Arc::clone(&msg_counter)),
-    );
+    let (channel1, channel2) = UserspaceChannel::new();
+    new_task.channels.insert(ChannelId::new(0), (current_tid, channel1));
     new_task.cspace.mint(Capability {
         resource: CapabilityResource::Channel(ChannelId::new(0)),
         rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
@@ -190,18 +187,10 @@ pub fn spawn_vmspace(
         task.memory_manager.dealloc_region(region);
     }
 
-    let tid = SCHEDULER.enqueue(new_task);
-
-    let channel = UserspaceChannel::new(tid, ChannelId::new(0), msg_counter);
-    task.channels.insert(this_new_channel_id, channel);
-    let cptr = task.cspace.mint(Capability {
-        resource: CapabilityResource::Channel(this_new_channel_id),
-        rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
-    });
-
     // FIXME: this is gross, should have a way to reserve a TID (or ideally not
     // need it at all) so we don't have to lock the task after insertion
 
+    let tid = SCHEDULER.enqueue(new_task);
     let new_task = TASKS.get(tid).unwrap();
     let mut new_task = new_task.lock();
 
@@ -214,8 +203,8 @@ pub fn spawn_vmspace(
         match &cap.resource {
             CapabilityResource::Channel(channel_id) => {
                 // FIXME: can this unwrap fail..?
-                let channel = task.channels.get(channel_id).unwrap();
-                let other_task = match TASKS.get(channel.other_task) {
+                let (other_tid, _) = task.channels.get(channel_id).unwrap();
+                let other_task = match TASKS.get(*other_tid) {
                     Some(task) => task,
                     None => panic!("wut"),
                 };
@@ -231,7 +220,7 @@ pub fn spawn_vmspace(
                     .all()
                     .find_map(|(_, cap)| match cap {
                         Capability { resource: CapabilityResource::Channel(id), rights } => {
-                            match other_task.channels.get(id).unwrap().other_channel_id == *channel_id {
+                            match other_task.channels.get(id).unwrap().0 == current_tid {
                                 true => Some(*rights),
                                 false => None,
                             }
@@ -243,15 +232,10 @@ pub fn spawn_vmspace(
                     ChannelId::new(new_task.channels.last_key_value().map(|(id, _)| id.value() + 1).unwrap_or(0));
                 let other_task_channel_id =
                     ChannelId::new(other_task.channels.last_key_value().map(|(id, _)| id.value() + 1).unwrap_or(0));
-                let msg_counter = Arc::new(AtomicUsize::new(0));
 
-                new_task.channels.insert(
-                    new_task_channel_id,
-                    UserspaceChannel::new(channel.other_task, other_task_channel_id, Arc::clone(&msg_counter)),
-                );
-                other_task
-                    .channels
-                    .insert(other_task_channel_id, UserspaceChannel::new(tid, new_task_channel_id, msg_counter));
+                let (channel1, channel2) = UserspaceChannel::new();
+                new_task.channels.insert(new_task_channel_id, (*other_tid, channel1));
+                other_task.channels.insert(other_task_channel_id, (tid, channel2));
 
                 let cptr = new_task
                     .cspace
@@ -267,6 +251,12 @@ pub fn spawn_vmspace(
             }
         }
     }
+
+    task.channels.insert(this_new_channel_id, (tid, channel2));
+    let cptr = task.cspace.mint(Capability {
+        resource: CapabilityResource::Channel(this_new_channel_id),
+        rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
+    });
 
     SyscallResult::Ok((tid.value(), cptr.value()))
 }

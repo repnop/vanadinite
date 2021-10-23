@@ -8,13 +8,8 @@
 use librust::{
     capabilities::CapabilityPtr,
     error::KError,
-    message::{KernelNotification, SyscallResult},
-    syscalls::{
-        self,
-        channel::{self, ChannelId, ChannelMessage},
-        ReadMessage,
-    },
-    task::Tid,
+    message::SyscallResult,
+    syscalls::channel::{self, ChannelMessage},
 };
 
 #[derive(Debug)]
@@ -25,18 +20,6 @@ pub struct IpcChannel {
 impl IpcChannel {
     pub fn new(cptr: CapabilityPtr) -> Self {
         Self { cptr }
-    }
-
-    pub fn open(with: Tid) -> Result<Self, OpenChannelError> {
-        if let SyscallResult::Err(_) = channel::request_channel(with) {
-            return Err(OpenChannelError::InvalidTask);
-        }
-
-        match syscalls::receive_message() {
-            Some(ReadMessage::Kernel(KernelNotification::ChannelRequestDenied)) => Err(OpenChannelError::Rejected),
-            Some(ReadMessage::Kernel(KernelNotification::ChannelOpened(cptr))) => Ok(Self { cptr }),
-            t => unreachable!("{:?}", t),
-        }
     }
 
     // FIXME: use a real error

@@ -9,16 +9,8 @@
 
 mod rt_init;
 
-use std::{
-    ipc,
-    librust::{
-        self,
-        message::KernelNotification,
-        syscalls::{allocation::MemoryPermissions, channel, ReadMessage},
-    },
-};
+use std::librust::{self, syscalls::allocation::MemoryPermissions};
 
-const HELLO_FRIEND: &str = "Hello, friend!";
 static mut FDT: *const u8 = core::ptr::null();
 static SERVERS: &[u8] = include_bytes!("../../../../build/initfs.tar");
 
@@ -57,6 +49,10 @@ fn main() {
     unsafe { core::slice::from_raw_parts_mut(message.ptr, message.len)[..12].copy_from_slice(&[b'A'; 12][..]) };
     librust::syscalls::channel::send_message(cptr, message.id, 12).unwrap();
 
+    loop {
+        unsafe { asm!("nop") };
+    }
+
     // println!("[INIT] Spawning shell");
     //
     // let shell = tar.file("shell").unwrap();
@@ -64,27 +60,27 @@ fn main() {
     //
     // space.spawn(env).unwrap();
 
-    let mut channels = Vec::new();
-    loop {
-        let msg = librust::syscalls::receive_message();
-
-        if let Some(ReadMessage::Kernel(KernelNotification::ChannelRequest(tid))) = msg {
-            let channel_id = channel::create_channel(tid).unwrap();
-            let mut channel = ipc::IpcChannel::new(channel_id);
-
-            let mut msg = channel.new_message(HELLO_FRIEND.len()).unwrap();
-            msg.write(HELLO_FRIEND.as_bytes());
-            msg.send().unwrap();
-
-            channels.push(channel);
-        }
-
-        for channel in &channels {
-            match channel.read() {
-                Ok(Some(_)) => {} //println!("[INIT] Someone sent a message on {:?}", channel_id),
-                Ok(None) => {}
-                Err(_) => {} //println!("Error reading message from channel: {:?}", e),
-            }
-        }
-    }
+    // let mut channels = Vec::new();
+    // loop {
+    //     let msg = librust::syscalls::receive_message();
+    //
+    //     if let Some(ReadMessage::Kernel(KernelNotification::ChannelRequest(tid))) = msg {
+    //         let channel_id = channel::create_channel(tid).unwrap();
+    //         let mut channel = ipc::IpcChannel::new(channel_id);
+    //
+    //         let mut msg = channel.new_message(HELLO_FRIEND.len()).unwrap();
+    //         msg.write(HELLO_FRIEND.as_bytes());
+    //         msg.send().unwrap();
+    //
+    //         channels.push(channel);
+    //     }
+    //
+    //     for channel in &channels {
+    //         match channel.read() {
+    //             Ok(Some(_)) => {} //println!("[INIT] Someone sent a message on {:?}", channel_id),
+    //             Ok(None) => {}
+    //             Err(_) => {} //println!("Error reading message from channel: {:?}", e),
+    //         }
+    //     }
+    // }
 }
