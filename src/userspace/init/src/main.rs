@@ -9,7 +9,7 @@
 
 mod rt_init;
 
-use std::librust::{self, syscalls::allocation::MemoryPermissions};
+use std::librust::{self, capabilities::CapabilityRights, syscalls::allocation::MemoryPermissions};
 
 static mut FDT: *const u8 = core::ptr::null();
 static SERVERS: &[u8] = include_bytes!("../../../../build/initfs.tar");
@@ -43,11 +43,25 @@ fn main() {
 
     println!("[INIT] Spawning devicemgr");
 
-    let (_, cptr) = space.spawn(env).unwrap();
+    let (_, devicemgr_cptr) = space.spawn(env).unwrap();
 
-    let message = librust::syscalls::channel::create_message(cptr, 12).unwrap();
+    let message = librust::syscalls::channel::create_message(devicemgr_cptr, 12).unwrap();
     unsafe { core::slice::from_raw_parts_mut(message.ptr, message.len)[..12].copy_from_slice(&[b'A'; 12][..]) };
-    librust::syscalls::channel::send_message(cptr, message.id, 12).unwrap();
+    librust::syscalls::channel::send_message(devicemgr_cptr, message.id, 12).unwrap();
+
+    let servicemgr = tar.file("servicemgr").unwrap();
+    let (space, mut env) = loadelf::load_elf(&loadelf::Elf::new(servicemgr.contents).unwrap()).unwrap();
+    env.a0 = 0;
+
+    println!("[INIT] Spawning servicemgr");
+
+    let (_, servicemgr_cptr) = space.spawn(env).unwrap();
+    librust::syscalls::channel::send_capability(
+        devicemgr_cptr,
+        servicemgr_cptr,
+        CapabilityRights::READ | CapabilityRights::WRITE | CapabilityRights::GRANT,
+    )
+    .unwrap();
 
     loop {
         unsafe { asm!("nop") };

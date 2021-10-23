@@ -12,7 +12,7 @@ use std::{ipc::IpcChannel, librust::capabilities::CapabilityPtr};
 fn main() {
     let args = std::env::args();
     let ptr = usize::from_str_radix(args[0], 16).unwrap() as *const u8;
-    println!("FDT is at: {:#p}", ptr);
+    //println!("[devicemgr] FDT is at: {:#p}", ptr);
 
     let fdt = unsafe { fdt::Fdt::from_ptr(ptr) }.unwrap();
 
@@ -30,19 +30,28 @@ fn main() {
         }
     }
 
-    let (addr, _) = std::librust::syscalls::claim_device("/soc/uart").unwrap();
-
-    println!("Claimed UART @ {:#p}!", addr);
-
-    for i in 0..9 {
-        unsafe { addr.write_volatile(i + b'0') };
-    }
-
-    unsafe { addr.write_volatile(b'\n') };
+    // let (addr, _) = std::librust::syscalls::claim_device("/soc/uart").unwrap();
+    //
+    // println!("Claimed UART @ {:#p}!", addr);
+    //
+    // for i in 0..9 {
+    //     unsafe { addr.write_volatile(i + b'0') };
+    // }
+    //
+    // unsafe { addr.write_volatile(b'\n') };
 
     let parent_channel = IpcChannel::new(CapabilityPtr::new(0));
-    println!("{:?}", parent_channel.read());
+    while parent_channel.read().unwrap().is_none() {}
 
-    #[allow(clippy::empty_loop)]
-    loop {}
+    let mut servicemgr_cap = parent_channel.receive_capability().unwrap();
+    while servicemgr_cap.is_none() {
+        servicemgr_cap = parent_channel.receive_capability().unwrap();
+    }
+
+    let servicemgr_channel = IpcChannel::new(servicemgr_cap.unwrap());
+    loop {
+        if let Ok(Some(message)) = servicemgr_channel.read() {
+            println!("[devicemgr] from servicemgr: {}", core::str::from_utf8(message.as_bytes()).unwrap());
+        }
+    }
 }

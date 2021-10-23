@@ -21,7 +21,7 @@ use crate::{
     trap::TrapFrame,
     utils,
 };
-use core::{convert::TryInto, num::NonZeroUsize, sync::atomic::Ordering};
+use core::{convert::TryInto, sync::atomic::Ordering};
 use librust::{
     error::{AccessError, KError},
     message::{Message, Recipient, Sender, SyscallRequest, SyscallResult},
@@ -202,6 +202,13 @@ fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
             syscall_req.arguments[2],
         )?),
         Syscall::ReadChannel => Message::from(channel::read_message(task, syscall_req.arguments[0])?),
+        Syscall::SendCapability => Message::from(channel::send_capability(
+            task,
+            syscall_req.arguments[0],
+            syscall_req.arguments[1],
+            syscall_req.arguments[2],
+        )?),
+        Syscall::ReceiveCapability => Message::from(channel::receive_capability(task, syscall_req.arguments[0])?),
         Syscall::RetireChannelMessage => {
             Message::from(channel::retire_message(task, syscall_req.arguments[0], syscall_req.arguments[1])?)
         }
@@ -244,6 +251,14 @@ fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
             syscall_req.arguments[1],
             syscall_req.arguments[2],
             syscall_req.arguments[3],
+        )?),
+        Syscall::GrantCapability => Message::from(vmspace::grant_capability(
+            task,
+            syscall_req.arguments[0],
+            syscall_req.arguments[1],
+            syscall_req.arguments[2] as *const _,
+            syscall_req.arguments[3],
+            syscall_req.arguments[4],
         )?),
         Syscall::SpawnVmspace => Message::from(vmspace::spawn_vmspace(
             task,

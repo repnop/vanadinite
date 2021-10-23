@@ -6,14 +6,14 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    capabilities::{Capability, CapabilityResource, CapabilityRights},
+    capabilities::{Capability, CapabilityResource},
     mem::{
         manager::{AddressRegionKind, FillOption, RegionDescription},
         paging::{flags, PageSize, VirtualAddress},
         region::{MemoryRegion, PhysicalRegion},
     },
     scheduler::{CURRENT_TASK, TASKS},
-    task::{Task, TaskState},
+    task::Task,
     utils::{self, Units},
 };
 use alloc::{
@@ -25,11 +25,10 @@ use core::{
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use librust::{
-    capabilities::CapabilityPtr,
+    capabilities::{CapabilityPtr, CapabilityRights},
     error::KError,
     message::{KernelNotification, SyscallResult},
     syscalls::channel::{ChannelId, MessageId},
-    task::Tid,
 };
 use sync::SpinRwLock;
 
@@ -89,7 +88,7 @@ enum MappedChannelMessage {
 #[derive(Debug)]
 enum ChannelMessage {
     Data(MessageId, PhysicalRegion, usize),
-    Capability(CapabilityResource, CapabilityRights),
+    Capability(CapabilityPtr),
 }
 
 #[derive(Debug, Clone)]
@@ -244,6 +243,7 @@ pub fn read_message(task: &mut Task, cptr: usize) -> SyscallResult<(usize, usize
         }
         // Broken channel
         // FIXME: better signify this, probably needs its own error
+        // FIXME: need to reinsert capability messages
         _ => SyscallResult::Err(KError::InvalidArgument(0)),
     }
 }
@@ -265,5 +265,119 @@ pub fn retire_message(task: &mut Task, cptr: usize, message_id: usize) -> Syscal
             SyscallResult::Ok(())
         }
         _ => SyscallResult::Err(KError::InvalidArgument(1)),
+    }
+}
+
+pub fn send_capability(task: &mut Task, cptr: usize, cptr_to_send: usize, rights: usize) -> SyscallResult<(), KError> {
+    let rights = CapabilityRights::new(rights as u8);
+    let current_tid = CURRENT_TASK.get().unwrap();
+    let cap = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+        Some(cap) => cap,
+        None => return SyscallResult::Err(KError::InvalidArgument(0)),
+    };
+
+    if !(cap.rights & CapabilityRights::GRANT) {
+        return SyscallResult::Err(KError::InvalidArgument(0));
+    }
+
+    let channel_id = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+        Some(Capability { resource: CapabilityResource::Channel(channel), rights })
+            if *rights & CapabilityRights::READ =>
+        {
+            channel
+        }
+        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
+    };
+    let (receiving_tid, receiving_channel) = task.channels.get(channel_id).unwrap();
+
+    let cap_to_send = match task.cspace.resolve(CapabilityPtr::new(cptr_to_send)) {
+        Some(cap) => cap,
+        None => return SyscallResult::Err(KError::InvalidArgument(1)),
+    };
+
+    if !cap_to_send.rights.is_superset(rights) {
+        return SyscallResult::Err(KError::InvalidArgument(2));
+    }
+
+    match &cap_to_send.resource {
+        CapabilityResource::Channel(cid) => {
+            let (other_tid, _) = task.channels.get(cid).unwrap();
+            let other_task = match TASKS.get(*other_tid) {
+                Some(task) => task,
+                None => panic!("wut"),
+            };
+            let receiving_task = match TASKS.get(*receiving_tid) {
+                Some(task) => task,
+                None => panic!("wut"),
+            };
+
+            let mut other_task = other_task.lock();
+            let mut receiving_task = receiving_task.lock();
+            if other_task.state.is_dead() {
+                return SyscallResult::Err(KError::InvalidArgument(1));
+            }
+
+            let other_rights = other_task
+                .cspace
+                .all()
+                .find_map(|(_, cap)| match cap {
+                    Capability { resource: CapabilityResource::Channel(id), rights } => {
+                        match other_task.channels.get(id).unwrap().0 == current_tid {
+                            true => Some(*rights),
+                            false => None,
+                        }
+                    }
+                })
+                .unwrap();
+
+            let receiving_task_channel_id =
+                ChannelId::new(receiving_task.channels.last_key_value().map(|(id, _)| id.value() + 1).unwrap_or(0));
+            let other_task_channel_id =
+                ChannelId::new(other_task.channels.last_key_value().map(|(id, _)| id.value() + 1).unwrap_or(0));
+
+            let (channel1, channel2) = UserspaceChannel::new();
+            receiving_task.channels.insert(receiving_task_channel_id, (*other_tid, channel1));
+            other_task.channels.insert(other_task_channel_id, (*receiving_tid, channel2));
+
+            let receiving_cptr = receiving_task
+                .cspace
+                .mint(Capability { resource: CapabilityResource::Channel(receiving_task_channel_id), rights });
+
+            let other_cptr = other_task.cspace.mint(Capability {
+                resource: CapabilityResource::Channel(other_task_channel_id),
+                rights: other_rights,
+            });
+
+            other_task.message_queue.push_back((
+                librust::message::Sender::kernel(),
+                librust::message::Message::from(KernelNotification::ChannelOpened(other_cptr)),
+            ));
+
+            receiving_channel.sender.try_send(ChannelMessage::Capability(receiving_cptr)).unwrap();
+        }
+    }
+
+    SyscallResult::Ok(())
+}
+
+pub fn receive_capability(task: &mut Task, cptr: usize) -> SyscallResult<usize, KError> {
+    let channel_id = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+        Some(Capability { resource: CapabilityResource::Channel(channel), rights })
+            if *rights & CapabilityRights::READ =>
+        {
+            channel
+        }
+        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
+    };
+    let (_, channel) = task.channels.get_mut(channel_id).unwrap();
+
+    // TODO: need to be able to return more than just the first one
+    match channel.receiver.try_receive() {
+        Ok(None) => SyscallResult::Ok(0),
+        Ok(Some(ChannelMessage::Capability(cptr))) => SyscallResult::Ok(cptr.value()),
+        // Broken channel
+        // FIXME: better signify this, probably needs its own error
+        // FIXME: need to reinsert data messages
+        _ => SyscallResult::Err(KError::InvalidArgument(0)),
     }
 }

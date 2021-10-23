@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    capabilities::{Capability, CapabilityResource, CapabilityRights, CapabilitySpace},
+    capabilities::{Capability, CapabilityResource, CapabilitySpace},
     mem::{
         manager::{AddressRegionKind, FillOption, MemoryManager, RegionDescription},
         paging::{flags, PageSize, VirtualAddress},
@@ -20,7 +20,7 @@ use crate::{
 };
 use alloc::{collections::BTreeMap, vec::Vec};
 use librust::{
-    capabilities::CapabilityPtr,
+    capabilities::{CapabilityPtr, CapabilityRights},
     error::KError,
     message::{KernelNotification, Message, Sender, SyscallResult},
     syscalls::{allocation::MemoryPermissions, channel::ChannelId, vmspace::VmspaceObjectId},
@@ -240,12 +240,17 @@ pub fn spawn_vmspace(
                 let cptr = new_task
                     .cspace
                     .mint(Capability { resource: CapabilityResource::Channel(new_task_channel_id), rights });
+
+                new_task
+                    .message_queue
+                    .push_back((Sender::kernel(), Message::from(KernelNotification::ChannelOpened(cptr))));
+
                 let cptr = other_task.cspace.mint(Capability {
                     resource: CapabilityResource::Channel(other_task_channel_id),
                     rights: other_rights,
                 });
 
-                new_task
+                other_task
                     .message_queue
                     .push_back((Sender::kernel(), Message::from(KernelNotification::ChannelOpened(cptr))));
             }
@@ -264,11 +269,13 @@ pub fn spawn_vmspace(
 pub fn grant_capability(
     task: &mut Task,
     id: usize,
-    cptr: CapabilityPtr,
+    cptr: usize,
     name: *const u8,
     len: usize,
-    rights: CapabilityRights,
+    rights: usize,
 ) -> SyscallResult<()> {
+    let cptr = CapabilityPtr::new(cptr);
+    let rights = CapabilityRights::new(rights as u8);
     let vmspace = match task.vmspace_objects.get_mut(&VmspaceObjectId::new(id)) {
         Some(vmspace) => vmspace,
         None => return SyscallResult::Err(KError::InvalidArgument(0)),

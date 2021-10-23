@@ -9,7 +9,7 @@ use core::num::NonZeroUsize;
 
 use super::{allocation::MemoryPermissions, Syscall};
 use crate::{
-    capabilities::CapabilityPtr,
+    capabilities::{CapabilityPtr, CapabilityRights},
     error::KError,
     message::{Recipient, SyscallRequest, SyscallResult},
     task::Tid,
@@ -91,4 +91,33 @@ pub fn spawn_vmspace(id: VmspaceObjectId, env: VmspaceSpawnEnv) -> SyscallResult
     )
     .1
     .map(|(n, cptr)| (Tid::new(NonZeroUsize::new(n).unwrap()), CapabilityPtr::new(cptr)))
+}
+
+pub fn grant_capability(
+    id: VmspaceObjectId,
+    name: &str,
+    cptr: CapabilityPtr,
+    rights: CapabilityRights,
+) -> SyscallResult<(), KError> {
+    crate::syscalls::syscall(
+        Recipient::kernel(),
+        SyscallRequest {
+            syscall: Syscall::GrantCapability,
+            arguments: [
+                id.value(),
+                cptr.value(),
+                name.as_ptr() as usize,
+                name.len(),
+                rights.value() as usize,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
+        },
+    )
+    .1
 }

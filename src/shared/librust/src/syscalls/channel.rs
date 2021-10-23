@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    capabilities::CapabilityPtr,
+    capabilities::{CapabilityPtr, CapabilityRights},
     error::KError,
     message::{Recipient, SyscallRequest, SyscallResult},
     syscalls::{syscall, Syscall},
@@ -92,4 +92,34 @@ pub fn retire_message(cptr: CapabilityPtr, message: MessageId) -> SyscallResult<
         },
     )
     .1
+}
+
+pub fn send_capability(
+    cptr: CapabilityPtr,
+    cptr_to_send: CapabilityPtr,
+    rights: CapabilityRights,
+) -> SyscallResult<(), KError> {
+    syscall(
+        Recipient::kernel(),
+        SyscallRequest {
+            syscall: Syscall::SendCapability,
+            arguments: [cptr.value(), cptr_to_send.value(), rights.value() as usize, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        },
+    )
+    .1
+}
+
+pub fn receive_capability(cptr: CapabilityPtr) -> SyscallResult<Option<CapabilityPtr>, KError> {
+    syscall(
+        Recipient::kernel(),
+        SyscallRequest {
+            syscall: Syscall::ReceiveCapability,
+            arguments: [cptr.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        },
+    )
+    .1
+    .map(|cptr| match cptr {
+        0 => None,
+        cptr => Some(CapabilityPtr::new(cptr)),
+    })
 }

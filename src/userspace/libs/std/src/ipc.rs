@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use librust::{
-    capabilities::CapabilityPtr,
+    capabilities::{CapabilityPtr, CapabilityRights},
     error::KError,
     message::SyscallResult,
     syscalls::channel::{self, ChannelMessage},
@@ -46,6 +46,20 @@ impl IpcChannel {
         let _ = channel::send_message(self.cptr, msg.id, written_len);
         // FIXME: check for failure
         Ok(())
+    }
+
+    pub fn send_capability(&self, cptr: CapabilityPtr, rights: CapabilityRights) -> Result<(), KError> {
+        match channel::send_capability(self.cptr, cptr, rights) {
+            SyscallResult::Ok(_) => Ok(()),
+            SyscallResult::Err(e) => Err(e),
+        }
+    }
+
+    pub fn receive_capability(&self) -> Result<Option<CapabilityPtr>, KError> {
+        match channel::receive_capability(self.cptr) {
+            SyscallResult::Ok(maybe_cap) => Ok(maybe_cap),
+            SyscallResult::Err(e) => Err(e),
+        }
     }
 }
 

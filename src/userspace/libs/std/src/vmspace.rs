@@ -8,7 +8,7 @@
 use core::marker::PhantomData;
 
 use librust::{
-    capabilities::CapabilityPtr,
+    capabilities::{CapabilityPtr, CapabilityRights},
     error::KError,
     message::SyscallResult,
     syscalls::{
@@ -49,6 +49,13 @@ impl Vmspace {
     pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<(Tid, CapabilityPtr), KError> {
         match vmspace::spawn_vmspace(self.id, env) {
             SyscallResult::Ok((tid, cptr)) => Ok((tid, cptr)),
+            SyscallResult::Err(e) => Err(e),
+        }
+    }
+
+    pub fn grant(&self, name: &str, cptr: CapabilityPtr, rights: CapabilityRights) -> Result<(), KError> {
+        match vmspace::grant_capability(self.id, name, cptr, rights) {
+            SyscallResult::Ok(_) => Ok(()),
             SyscallResult::Err(e) => Err(e),
         }
     }
