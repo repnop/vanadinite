@@ -5,7 +5,16 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(allocator_api, alloc_error_handler, alloc_prelude, asm, inline_const, prelude_import, thread_local)]
+#![feature(
+    allocator_api,
+    alloc_error_handler,
+    asm,
+    const_btree_new,
+    inline_const,
+    lang_items,
+    prelude_import,
+    thread_local
+)]
 #![no_std]
 #![allow(incomplete_features)]
 
@@ -19,6 +28,7 @@ pub mod heap;
 pub mod io;
 pub mod ipc;
 pub mod prelude;
+pub mod rt;
 mod task_local;
 pub mod vmspace;
 

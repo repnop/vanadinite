@@ -20,6 +20,7 @@ use librust::{
 
 pub struct Vmspace {
     id: VmspaceObjectId,
+    caps_to_send: Vec<(String, CapabilityPtr, CapabilityRights)>,
 }
 
 impl Vmspace {
@@ -27,7 +28,7 @@ impl Vmspace {
     pub fn new() -> Self {
         let id = vmspace::create_vmspace().unwrap();
 
-        Self { id }
+        Self { id, caps_to_send: Vec::new() }
     }
 
     pub fn create_object<'b>(
@@ -47,17 +48,31 @@ impl Vmspace {
     }
 
     pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<(Tid, CapabilityPtr), KError> {
-        match vmspace::spawn_vmspace(self.id, env) {
-            SyscallResult::Ok((tid, cptr)) => Ok((tid, cptr)),
-            SyscallResult::Err(e) => Err(e),
+        let (tid, cptr) = match vmspace::spawn_vmspace(self.id, env) {
+            SyscallResult::Ok((tid, cptr)) => (tid, cptr),
+            SyscallResult::Err(e) => return Err(e),
+        };
+
+        let mut channel = crate::ipc::IpcChannel::new(cptr);
+
+        for (name, cap, rights) in self.caps_to_send {
+            let mut message = channel.new_message(name.len()).unwrap();
+            message.write(name.as_bytes());
+            message.send().unwrap();
+
+            channel.send_capability(cap, rights).unwrap();
         }
+
+        const DONE: &str = "done";
+        let mut message = channel.new_message(DONE.len()).unwrap();
+        message.write(DONE.as_bytes());
+        message.send().unwrap();
+
+        Ok((tid, cptr))
     }
 
-    pub fn grant(&self, name: &str, cptr: CapabilityPtr, rights: CapabilityRights) -> Result<(), KError> {
-        match vmspace::grant_capability(self.id, name, cptr, rights) {
-            SyscallResult::Ok(_) => Ok(()),
-            SyscallResult::Err(e) => Err(e),
-        }
+    pub fn grant(&mut self, name: &str, cptr: CapabilityPtr, rights: CapabilityRights) {
+        self.caps_to_send.push((name.into(), cptr, rights));
     }
 }
 

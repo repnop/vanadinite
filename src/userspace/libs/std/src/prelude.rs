@@ -7,8 +7,14 @@
 
 pub mod rust_2018 {
     pub use crate::{dbg, print, println};
-    pub use alloc::prelude::v1::*;
-    pub use alloc::{collections::VecDeque, format, vec};
+    pub use alloc::{
+        boxed::Box,
+        collections::VecDeque,
+        format,
+        string::{String, ToString},
+        vec,
+        vec::Vec,
+    };
     pub use core::prelude::rust_2018::*;
     pub use core::{assert, assert_eq, assert_ne, panic, todo, unreachable};
     pub use librust::{task::Tid, taskgroup::TaskGroupShareable};

@@ -7,47 +7,18 @@
 
 #![feature(asm, naked_functions, start, lang_items)]
 
-mod rt_init;
+use librust::{self, capabilities::CapabilityRights, syscalls::allocation::MemoryPermissions};
 
-use std::librust::{self, capabilities::CapabilityRights, syscalls::allocation::MemoryPermissions};
-
-static mut FDT: *const u8 = core::ptr::null();
 static SERVERS: &[u8] = include_bytes!("../../../../build/initfs.tar");
 
 fn main() {
-    let fdt = unsafe { fdt::Fdt::from_ptr(FDT).unwrap() };
+    let fdt_ptr = std::env::a2() as *const u8;
+    let fdt = unsafe { fdt::Fdt::from_ptr(fdt_ptr).unwrap() };
     let fdt_size = fdt.total_size();
     let tar = tar::Archive::new(SERVERS).unwrap();
 
     println!("[INIT] args: {:?}", std::env::args());
-    println!("[INIT] FDT @ {:#p}", unsafe { FDT });
-
-    let devicemgr = tar.file("devicemgr").unwrap();
-    let (space, mut env) = loadelf::load_elf(&loadelf::Elf::new(devicemgr.contents).unwrap()).unwrap();
-
-    let mut fdt_obj = space.create_object(core::ptr::null(), fdt_size, MemoryPermissions::READ).unwrap();
-    fdt_obj.as_slice()[..fdt_size].copy_from_slice(unsafe { core::slice::from_raw_parts(FDT, fdt_size) });
-
-    let mut args = space.create_object(core::ptr::null(), 4096, MemoryPermissions::READ).unwrap();
-
-    // This makes me sad, but seems to be the easiest approach..
-    let ptr_str = format!("{:x}", fdt_obj.vmspace_address() as usize);
-    let ptr_str_addr = args.vmspace_address() as usize + 16;
-    args.as_slice()[..8].copy_from_slice(&ptr_str_addr.to_ne_bytes()[..]);
-    args.as_slice()[8..16].copy_from_slice(&ptr_str.len().to_ne_bytes()[..]);
-    args.as_slice()[16..][..ptr_str.len()].copy_from_slice(ptr_str.as_bytes());
-
-    env.a0 = 1;
-    env.a1 = args.vmspace_address() as usize;
-    env.a2 = fdt_obj.vmspace_address() as usize;
-
-    println!("[INIT] Spawning devicemgr");
-
-    let (_, devicemgr_cptr) = space.spawn(env).unwrap();
-
-    let message = librust::syscalls::channel::create_message(devicemgr_cptr, 12).unwrap();
-    unsafe { core::slice::from_raw_parts_mut(message.ptr, message.len)[..12].copy_from_slice(&[b'A'; 12][..]) };
-    librust::syscalls::channel::send_message(devicemgr_cptr, message.id, 12).unwrap();
+    println!("[INIT] fdt_ptr @ {:#p}", fdt_ptr);
 
     let servicemgr = tar.file("servicemgr").unwrap();
     let (space, mut env) = loadelf::load_elf(&loadelf::Elf::new(servicemgr.contents).unwrap()).unwrap();
@@ -56,12 +27,30 @@ fn main() {
     println!("[INIT] Spawning servicemgr");
 
     let (_, servicemgr_cptr) = space.spawn(env).unwrap();
-    librust::syscalls::channel::send_capability(
-        devicemgr_cptr,
+
+    let devicemgr = tar.file("devicemgr").unwrap();
+    let (mut space, mut env) = loadelf::load_elf(&loadelf::Elf::new(devicemgr.contents).unwrap()).unwrap();
+
+    let mut fdt_obj = space.create_object(core::ptr::null(), fdt_size, MemoryPermissions::READ).unwrap();
+    fdt_obj.as_slice()[..fdt_size].copy_from_slice(unsafe { core::slice::from_raw_parts(fdt_ptr, fdt_size) });
+
+    env.a0 = 0;
+    env.a1 = 0;
+    env.a2 = fdt_obj.vmspace_address() as usize;
+
+    space.grant(
+        "servicemgr",
         servicemgr_cptr,
         CapabilityRights::READ | CapabilityRights::WRITE | CapabilityRights::GRANT,
-    )
-    .unwrap();
+    );
+
+    println!("[INIT] Spawning devicemgr");
+
+    let (_, devicemgr_cptr) = space.spawn(env).unwrap();
+
+    let message = librust::syscalls::channel::create_message(devicemgr_cptr, 12).unwrap();
+    unsafe { core::slice::from_raw_parts_mut(message.ptr, message.len)[..12].copy_from_slice(&[b'A'; 12][..]) };
+    librust::syscalls::channel::send_message(devicemgr_cptr, message.id, 12).unwrap();
 
     loop {
         unsafe { asm!("nop") };

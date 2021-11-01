@@ -7,11 +7,11 @@
 
 #![feature(asm, lang_items)]
 
-use std::{ipc::IpcChannel, librust::capabilities::CapabilityPtr};
+use std::ipc::IpcChannel;
 
 fn main() {
     let args = std::env::args();
-    let ptr = usize::from_str_radix(args[0], 16).unwrap() as *const u8;
+    let ptr = std::env::a2() as *const u8;
     //println!("[devicemgr] FDT is at: {:#p}", ptr);
 
     let fdt = unsafe { fdt::Fdt::from_ptr(ptr) }.unwrap();
@@ -40,15 +40,7 @@ fn main() {
     //
     // unsafe { addr.write_volatile(b'\n') };
 
-    let parent_channel = IpcChannel::new(CapabilityPtr::new(0));
-    while parent_channel.read().unwrap().is_none() {}
-
-    let mut servicemgr_cap = parent_channel.receive_capability().unwrap();
-    while servicemgr_cap.is_none() {
-        servicemgr_cap = parent_channel.receive_capability().unwrap();
-    }
-
-    let servicemgr_channel = IpcChannel::new(servicemgr_cap.unwrap());
+    let servicemgr_channel = IpcChannel::new(std::env::lookup_capability("servicemgr").unwrap());
     loop {
         if let Ok(Some(message)) = servicemgr_channel.read() {
             println!("[devicemgr] from servicemgr: {}", core::str::from_utf8(message.as_bytes()).unwrap());
