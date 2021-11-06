@@ -6,261 +6,178 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod channel;
+pub mod mem;
+pub mod misc;
 pub mod vmspace;
 
 use crate::{
-    io::{ConsoleDevice, CLAIMED_DEVICES, INPUT_QUEUE},
+    io::CLAIMED_DEVICES,
     mem::{
-        manager::{AddressRegionKind, FillOption, RegionDescription},
-        paging::{flags, PageSize, PhysicalAddress, VirtualAddress},
+        paging::{PhysicalAddress, VirtualAddress},
         user::RawUserSlice,
     },
     platform::FDT,
     scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
-    task::TaskState,
+    task::{Task, TaskState},
     trap::TrapFrame,
-    utils,
 };
 use core::{convert::TryInto, sync::atomic::Ordering};
 use librust::{
+    capabilities::{CapabilityPtr, CapabilityRights},
     error::{AccessError, KError},
-    message::{Message, Recipient, Sender, SyscallRequest, SyscallResult},
+    message::{Message, Recipient, Sender, SyscallRequest},
     syscalls::{
         allocation::{AllocationOptions, DmaAllocationOptions, MemoryPermissions},
+        channel::MessageId,
         Syscall,
     },
     task::Tid,
 };
 
-pub fn handle(frame: &mut TrapFrame) {
+pub enum SyscallOutcome {
+    Processed(Message),
+    Err(KError),
+    Block,
+    Kill,
+}
+
+impl SyscallOutcome {
+    pub fn processed<T: Into<Message>>(t: T) -> Self {
+        Self::Processed(t.into())
+    }
+}
+
+// :(
+pub fn handle(frame: &mut TrapFrame, sepc: usize) -> usize {
     log::trace!("Handling syscall..");
 
     let (recipient, message) = get_message(frame);
+    let task_lock = TASKS.active_on_cpu().unwrap();
+    let mut task_lock = task_lock.lock();
+    let task = &mut *task_lock;
 
     match recipient {
-        const { Recipient::kernel() } => match do_syscall(message) {
-            SyscallResult::Ok((sender, msg)) => apply_message(false, sender, msg, frame),
-            SyscallResult::Err(e) => report_error(e, frame),
-        },
+        const { Recipient::kernel() } => {
+            match do_syscall(task, message) {
+                (sender, SyscallOutcome::Processed(message)) => apply_message(false, sender, message, frame),
+                (_, SyscallOutcome::Err(e)) => report_error(e, frame),
+                (_, SyscallOutcome::Block) => {
+                    log::debug!("Blocking process");
+                    // FIXME: we should probably have a mechanism for notifying the
+                    // scheduler
+                    task.state = TaskState::Blocked;
+                    task.context.gp_regs = frame.registers;
+
+                    // Don't re-call the syscall after its unblocked
+                    task.context.pc = sepc + 4;
+
+                    drop(task_lock);
+                    SCHEDULER.schedule()
+                }
+                (_, SyscallOutcome::Kill) => {
+                    task.state = TaskState::Dead;
+
+                    drop(task_lock);
+                    SCHEDULER.schedule()
+                }
+            }
+        }
         _ => match TASKS.get(Tid::new(recipient.value().try_into().unwrap())) {
             Some(task) => {
                 let mut task = task.lock();
 
                 if task.state.is_dead() {
-                    return report_error(KError::InvalidRecipient, frame);
+                    report_error(KError::InvalidRecipient, frame);
+                } else {
+                    log::debug!("Adding message to task (tid: {}): {:?}", recipient.value(), message);
+
+                    task.message_queue.push_back((Sender::new(CURRENT_TASK.get().unwrap().value()), message));
+                    apply_message(false, Sender::kernel(), (), frame);
                 }
-
-                log::debug!("Adding message to task (tid: {}): {:?}", recipient.value(), message);
-
-                task.message_queue.push_back((Sender::new(CURRENT_TASK.get().unwrap().value()), message));
-                apply_message(false, Sender::kernel(), (), frame);
             }
             None => report_error(KError::InvalidRecipient, frame),
         },
     }
+
+    task.context.gp_regs = frame.registers;
+    sepc + 4
 }
 
-fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
+fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
     log::trace!("Doing syscall: {:?}", msg);
 
     let mut sender = Sender::kernel();
-    let task_lock = TASKS.get(CURRENT_TASK.get().unwrap()).unwrap();
-    let mut task_lock = task_lock.lock();
-    let task = &mut *task_lock;
 
     let syscall_req = SyscallRequest {
         syscall: match Syscall::from_usize(msg.contents[0]) {
             Some(syscall) => syscall,
-            None => return SyscallResult::Err(KError::InvalidSyscall(msg.contents[0])),
+            None => return (Sender::kernel(), SyscallOutcome::Err(KError::InvalidSyscall(msg.contents[0]))),
         },
         arguments: msg.contents[1..].try_into().unwrap(),
     };
 
-    let msg: Message = match syscall_req.syscall {
+    let outcome: SyscallOutcome = match syscall_req.syscall {
         Syscall::Exit => {
             log::info!("Active process exited");
-            task.state = TaskState::Dead;
-            task.message_queue.clear();
-
-            drop(task_lock);
-
-            SCHEDULER.schedule()
+            return (Sender::kernel(), SyscallOutcome::Kill);
         }
-        Syscall::Print => {
-            let start = VirtualAddress::new(syscall_req.arguments[0]);
-            let len = syscall_req.arguments[1];
-            let user_slice = RawUserSlice::readable(start, len);
-            let user_slice = match unsafe { user_slice.validate(&task.memory_manager) } {
-                Ok(slice) => slice,
-                Err((addr, e)) => {
-                    log::error!("Bad memory from process: {:?}", e);
-                    return SyscallResult::Err(KError::InvalidAccess(AccessError::Read(addr.as_ptr())));
-                }
-            };
-
-            log::trace!("Attempting to print memory at {:#p} (len={})", start, len);
-
-            let mut console = crate::io::CONSOLE.lock();
-            user_slice.with(|bytes| bytes.iter().copied().for_each(|b| console.write(b)));
-
-            Message::default()
-        }
+        Syscall::Print => misc::print(task, VirtualAddress::new(syscall_req.arguments[0]), syscall_req.arguments[1]),
         Syscall::ReadStdin => {
-            let start = VirtualAddress::new(syscall_req.arguments[0]);
-            let len = syscall_req.arguments[1];
-            let user_slice = RawUserSlice::writable(start, len);
-            let mut user_slice = match unsafe { user_slice.validate(&task.memory_manager) } {
-                Ok(slice) => slice,
-                Err((addr, e)) => {
-                    log::error!("Bad memory from process: {:?}", e);
-                    return SyscallResult::Err(KError::InvalidAccess(AccessError::Write(addr.as_mut_ptr())));
-                }
-            };
-
-            log::trace!("Attempting to write to memory at {:#p} (len={})", start, len);
-
-            let mut n_written = 0;
-            user_slice.with(|bytes| {
-                for byte in bytes {
-                    let value = match INPUT_QUEUE.pop() {
-                        Some(v) => v,
-                        None => break,
-                    };
-                    *byte = value;
-                    n_written += 1;
-                }
-            });
-
-            Message::from(n_written)
+            misc::read_stdin(task, VirtualAddress::new(syscall_req.arguments[0]), syscall_req.arguments[1])
         }
         Syscall::ReadMessage => match task.message_queue.pop_front() {
             Some((sender_, msg)) => {
                 sender = sender_;
-                msg
+                SyscallOutcome::Processed(msg)
             }
-            None => return SyscallResult::Err(KError::NoMessages),
+            None => SyscallOutcome::Block,
         },
-        Syscall::AllocVirtualMemory => {
-            let size = syscall_req.arguments[0];
-            let options = AllocationOptions::new(syscall_req.arguments[1]);
-            let permissions = MemoryPermissions::new(syscall_req.arguments[2]);
-
-            if permissions & MemoryPermissions::WRITE && !(permissions & MemoryPermissions::READ) {
-                return SyscallResult::Err(KError::InvalidArgument(2));
-            }
-
-            let mut flags = flags::VALID | flags::USER;
-
-            if permissions & MemoryPermissions::READ {
-                flags |= flags::READ;
-            }
-
-            if permissions & MemoryPermissions::WRITE {
-                flags |= flags::WRITE;
-            }
-
-            if permissions & MemoryPermissions::EXECUTE {
-                flags |= flags::EXECUTE;
-            }
-
-            let page_size =
-                if options & AllocationOptions::LargePage { PageSize::Megapage } else { PageSize::Kilopage };
-
-            match size {
-                0 => return SyscallResult::Err(KError::InvalidArgument(0)),
-                _ => {
-                    let allocated_at = task.memory_manager.alloc_region(
-                        None,
-                        RegionDescription {
-                            size: page_size,
-                            len: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
-                            contiguous: false,
-                            flags,
-                            fill: if options & AllocationOptions::Zero {
-                                FillOption::Zeroed
-                            } else {
-                                FillOption::Unitialized
-                            },
-                            kind: AddressRegionKind::UserAllocated,
-                        },
-                    );
-
-                    log::debug!("Allocated memory at {:#p} for user process", allocated_at.start);
-
-                    Message::from(allocated_at.start.as_usize())
-                }
-            }
-        }
-        Syscall::GetTid => (CURRENT_TASK.get().unwrap().value()).into(),
+        Syscall::AllocVirtualMemory => mem::alloc_virtual_memory(
+            task,
+            syscall_req.arguments[0],
+            AllocationOptions::new(syscall_req.arguments[1]),
+            MemoryPermissions::new(syscall_req.arguments[2]),
+        ),
+        Syscall::GetTid => SyscallOutcome::processed(CURRENT_TASK.get().unwrap().value()),
         Syscall::CreateChannelMessage => {
-            Message::from(channel::create_message(task, syscall_req.arguments[0], syscall_req.arguments[1])?)
+            channel::create_message(task, CapabilityPtr::new(syscall_req.arguments[0]), syscall_req.arguments[1])
         }
-        Syscall::SendChannelMessage => Message::from(channel::send_message(
-            task,
-            syscall_req.arguments[0],
-            syscall_req.arguments[1],
-            syscall_req.arguments[2],
-        )?),
-        Syscall::ReadChannel => Message::from(channel::read_message(task, syscall_req.arguments[0])?),
-        Syscall::SendCapability => Message::from(channel::send_capability(
-            task,
-            syscall_req.arguments[0],
-            syscall_req.arguments[1],
-            syscall_req.arguments[2],
-        )?),
-        Syscall::ReceiveCapability => Message::from(channel::receive_capability(task, syscall_req.arguments[0])?),
-        Syscall::RetireChannelMessage => {
-            Message::from(channel::retire_message(task, syscall_req.arguments[0], syscall_req.arguments[1])?)
+        Syscall::SendChannelMessage => {
+            channel::send_message(task, syscall_req.arguments[0], syscall_req.arguments[1], syscall_req.arguments[2])
         }
+        Syscall::ReadChannel => channel::read_message(task, CapabilityPtr::new(syscall_req.arguments[0])),
+        Syscall::SendCapability => channel::send_capability(
+            task,
+            CapabilityPtr::new(syscall_req.arguments[0]),
+            CapabilityPtr::new(syscall_req.arguments[1]),
+            CapabilityRights::new(syscall_req.arguments[2] as u8),
+        ),
+        Syscall::ReceiveCapability => channel::receive_capability(task, CapabilityPtr::new(syscall_req.arguments[0])),
+        Syscall::RetireChannelMessage => channel::retire_message(
+            task,
+            CapabilityPtr::new(syscall_req.arguments[0]),
+            MessageId::new(syscall_req.arguments[1]),
+        ),
         Syscall::AllocDmaMemory => {
-            let size = syscall_req.arguments[0];
-            let options = DmaAllocationOptions::new(syscall_req.arguments[1]);
-            let page_size = PageSize::Kilopage;
-
-            match size {
-                0 => return SyscallResult::Err(KError::InvalidArgument(0)),
-                _ => {
-                    let allocated_at = task.memory_manager.alloc_region(
-                        None,
-                        RegionDescription {
-                            size: page_size,
-                            len: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
-                            contiguous: true,
-                            flags: flags::VALID | flags::USER | flags::READ | flags::WRITE,
-                            fill: if options & DmaAllocationOptions::ZERO {
-                                FillOption::Zeroed
-                            } else {
-                                FillOption::Unitialized
-                            },
-                            kind: AddressRegionKind::Dma,
-                        },
-                    );
-
-                    let phys = task.memory_manager.resolve(allocated_at.start).unwrap();
-
-                    log::debug!("Allocated DMA memory at {:#p} for user process", allocated_at.start);
-
-                    Message::from((phys.as_usize(), allocated_at.start.as_usize()))
-                }
-            }
+            mem::alloc_dma_memory(task, syscall_req.arguments[0], DmaAllocationOptions::new(syscall_req.arguments[1]))
         }
-        Syscall::CreateVmspace => Message::from(vmspace::create_vmspace(task)?),
-        Syscall::AllocVmspaceObject => Message::from(vmspace::alloc_vmspace_object(
+        Syscall::CreateVmspace => vmspace::create_vmspace(task),
+        Syscall::AllocVmspaceObject => vmspace::alloc_vmspace_object(
             task,
             syscall_req.arguments[0],
             syscall_req.arguments[1],
             syscall_req.arguments[2],
             syscall_req.arguments[3],
-        )?),
-        Syscall::GrantCapability => Message::from(vmspace::grant_capability(
+        ),
+        Syscall::GrantCapability => vmspace::grant_capability(
             task,
             syscall_req.arguments[0],
             syscall_req.arguments[1],
             syscall_req.arguments[2] as *const _,
             syscall_req.arguments[3],
             syscall_req.arguments[4],
-        )?),
-        Syscall::SpawnVmspace => Message::from(vmspace::spawn_vmspace(
+        ),
+        Syscall::SpawnVmspace => vmspace::spawn_vmspace(
             task,
             syscall_req.arguments[0],
             syscall_req.arguments[1],
@@ -269,7 +186,7 @@ fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
             syscall_req.arguments[4],
             syscall_req.arguments[5],
             syscall_req.arguments[6],
-        )?),
+        ),
         Syscall::ClaimDevice => {
             let start = VirtualAddress::new(syscall_req.arguments[0]);
             let len = syscall_req.arguments[1];
@@ -278,7 +195,10 @@ fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
                 Ok(slice) => slice,
                 Err((addr, e)) => {
                     log::error!("Bad memory from process: {:?}", e);
-                    return SyscallResult::Err(KError::InvalidAccess(AccessError::Read(addr.as_ptr())));
+                    return (
+                        Sender::kernel(),
+                        SyscallOutcome::Err(KError::InvalidAccess(AccessError::Read(addr.as_ptr()))),
+                    );
                 }
             };
 
@@ -287,14 +207,14 @@ fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
                 Ok(s) => s,
                 Err(_) => {
                     log::error!("Invalid UTF-8 in FDT node name from process");
-                    return SyscallResult::Err(KError::InvalidArgument(0));
+                    return (Sender::kernel(), SyscallOutcome::Err(KError::InvalidArgument(0)));
                 }
             };
 
             // FIXME: make better errors
             let claimed = CLAIMED_DEVICES.read();
             if claimed.get(node_path).is_some() {
-                return SyscallResult::Err(KError::InvalidArgument(0));
+                return (Sender::kernel(), SyscallOutcome::Err(KError::InvalidArgument(0)));
             }
 
             let fdt = unsafe { fdt::Fdt::from_ptr(FDT.load(Ordering::Acquire)) }.unwrap();
@@ -315,17 +235,17 @@ fn do_syscall(msg: Message) -> SyscallResult<(Sender, Message), KError> {
                                 )
                             };
 
-                            Message::from((map_to.start.as_usize(), len))
+                            SyscallOutcome::processed((map_to.start.as_usize(), len))
                         }
-                        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
+                        _ => return (Sender::kernel(), SyscallOutcome::Err(KError::InvalidArgument(0))),
                     }
                 }
-                None => return SyscallResult::Err(KError::InvalidArgument(0)),
+                None => return (Sender::kernel(), SyscallOutcome::Err(KError::InvalidArgument(0))),
             }
         }
     };
 
-    SyscallResult::Ok((sender, msg))
+    (sender, outcome)
 }
 
 fn get_message(frame: &TrapFrame) -> (Recipient, Message) {

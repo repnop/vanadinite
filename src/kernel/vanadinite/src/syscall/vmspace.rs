@@ -22,9 +22,11 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
     error::KError,
-    message::{KernelNotification, Message, Sender, SyscallResult},
+    message::{KernelNotification, Message, Sender},
     syscalls::{allocation::MemoryPermissions, channel::ChannelId, vmspace::VmspaceObjectId},
 };
+
+use super::SyscallOutcome;
 
 pub struct VmspaceObject {
     pub memory_manager: MemoryManager,
@@ -44,12 +46,12 @@ impl VmspaceObject {
     }
 }
 
-pub fn create_vmspace(task: &mut Task) -> SyscallResult<usize, KError> {
+pub fn create_vmspace(task: &mut Task) -> SyscallOutcome {
     let id = task.vmspace_next_id;
     task.vmspace_next_id += 1;
     task.vmspace_objects.insert(VmspaceObjectId::new(id), VmspaceObject::new());
 
-    SyscallResult::Ok(id)
+    SyscallOutcome::processed(id)
 }
 
 pub fn alloc_vmspace_object(
@@ -58,19 +60,19 @@ pub fn alloc_vmspace_object(
     address: usize,
     size: usize,
     permissions: usize,
-) -> SyscallResult<(usize, usize), KError> {
+) -> SyscallOutcome {
     let object = match task.vmspace_objects.get_mut(&VmspaceObjectId::new(id)) {
         Some(map) => map,
-        None => return SyscallResult::Err(KError::InvalidArgument(0)),
+        None => return SyscallOutcome::Err(KError::InvalidArgument(0)),
     };
 
     let permissions = MemoryPermissions::new(permissions);
     let address = VirtualAddress::new(address);
 
     if !address.is_aligned(PageSize::Kilopage) || address.is_kernel_region() || address.checked_add(size).is_none() {
-        return SyscallResult::Err(KError::InvalidArgument(1));
+        return SyscallOutcome::Err(KError::InvalidArgument(1));
     } else if size == 0 {
-        return SyscallResult::Err(KError::InvalidArgument(2));
+        return SyscallOutcome::Err(KError::InvalidArgument(2));
     }
 
     let mut flags = flags::VALID | flags::USER;
@@ -93,7 +95,7 @@ pub fn alloc_vmspace_object(
         (true, false, false) => AddressRegionKind::ReadOnly,
         (true, false, true) | (false, false, true) => AddressRegionKind::Text,
         (false, false, false) | (false, true, true) | (false, true, false) => {
-            return SyscallResult::Err(KError::InvalidArgument(3))
+            return SyscallOutcome::Err(KError::InvalidArgument(3))
         }
     };
 
@@ -125,7 +127,7 @@ pub fn alloc_vmspace_object(
     object.inprocess_mappings.push(range.start);
     log::debug!("added {:#p} to task vmspace", range.start);
 
-    SyscallResult::Ok((range.start.as_usize(), at.start.as_usize()))
+    SyscallOutcome::processed((range.start.as_usize(), at.start.as_usize()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -138,12 +140,12 @@ pub fn spawn_vmspace(
     a2: usize,
     sp: usize,
     tp: usize,
-) -> SyscallResult<(usize, usize), KError> {
+) -> SyscallOutcome {
     let current_tid = CURRENT_TASK.get().unwrap();
 
     let object = match task.vmspace_objects.remove(&VmspaceObjectId::new(id)) {
         Some(map) => map,
-        None => return SyscallResult::Err(KError::InvalidArgument(0)),
+        None => return SyscallOutcome::Err(KError::InvalidArgument(0)),
     };
 
     log::debug!(
@@ -197,7 +199,7 @@ pub fn spawn_vmspace(
     for (name, (cptr, rights)) in object.service_name_to_cptr {
         let cap = match task.cspace.resolve(cptr) {
             Some(cap) => cap,
-            None => return SyscallResult::Err(KError::InvalidArgument(1)),
+            None => return SyscallOutcome::Err(KError::InvalidArgument(1)),
         };
 
         match &cap.resource {
@@ -263,7 +265,7 @@ pub fn spawn_vmspace(
         rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
     });
 
-    SyscallResult::Ok((tid.value(), cptr.value()))
+    SyscallOutcome::processed((tid.value(), cptr.value()))
 }
 
 pub fn grant_capability(
@@ -273,36 +275,36 @@ pub fn grant_capability(
     name: *const u8,
     len: usize,
     rights: usize,
-) -> SyscallResult<()> {
+) -> SyscallOutcome {
     let cptr = CapabilityPtr::new(cptr);
     let rights = CapabilityRights::new(rights as u8);
     let vmspace = match task.vmspace_objects.get_mut(&VmspaceObjectId::new(id)) {
         Some(vmspace) => vmspace,
-        None => return SyscallResult::Err(KError::InvalidArgument(0)),
+        None => return SyscallOutcome::Err(KError::InvalidArgument(0)),
     };
 
     let cap = match task.cspace.resolve(cptr) {
         Some(cap) => cap,
-        None => return SyscallResult::Err(KError::InvalidArgument(1)),
+        None => return SyscallOutcome::Err(KError::InvalidArgument(1)),
     };
 
     if !cap.rights.is_superset(rights) {
-        return SyscallResult::Err(KError::InvalidArgument(4));
+        return SyscallOutcome::Err(KError::InvalidArgument(4));
     }
 
     let name =
         match unsafe { RawUserSlice::readable(VirtualAddress::from_ptr(name), len).validate(&task.memory_manager) } {
             Ok(slice) => slice,
-            Err(_) => return SyscallResult::Err(KError::InvalidArgument(2)),
+            Err(_) => return SyscallOutcome::Err(KError::InvalidArgument(2)),
         };
 
     let name = name.guarded();
     let name = match core::str::from_utf8(&name) {
         Ok(name) => name,
-        Err(_) => return SyscallResult::Err(KError::InvalidArgument(2)),
+        Err(_) => return SyscallOutcome::Err(KError::InvalidArgument(2)),
     };
 
     vmspace.service_name_to_cptr.insert(name.into(), (cptr, rights));
 
-    SyscallResult::Ok(())
+    SyscallOutcome::Processed(librust::message::Message::default())
 }

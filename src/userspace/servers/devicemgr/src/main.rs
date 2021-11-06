@@ -41,6 +41,7 @@ fn main() {
     // unsafe { addr.write_volatile(b'\n') };
 
     let servicemgr_channel = IpcChannel::new(std::env::lookup_capability("servicemgr").unwrap());
+    println!("[devicemgr] Got servicemgr cap");
     loop {
         if let Ok(Some(message)) = servicemgr_channel.read() {
             println!("[devicemgr] from servicemgr: {}", core::str::from_utf8(message.as_bytes()).unwrap());

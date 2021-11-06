@@ -31,6 +31,8 @@ fn main() {
     message.write(b"hell yeah");
     message.send().unwrap();
 
+    println!("[servicemgr] Message sent");
+
     #[allow(clippy::empty_loop)]
     loop {}
 }

@@ -27,10 +27,12 @@ use core::{
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
     error::KError,
-    message::{KernelNotification, SyscallResult},
+    message::KernelNotification,
     syscalls::channel::{ChannelId, MessageId},
 };
 use sync::SpinRwLock;
+
+use super::SyscallOutcome;
 
 pub const MAX_CHANNEL_BYTES: usize = 4096;
 
@@ -144,14 +146,14 @@ impl Drop for Sender {
 
 // FIXME: Definitely should be a way to return tuple values that can be
 // converted into `usize` so its a lot more clear what's what
-pub fn create_message(task: &mut Task, cptr: usize, size: usize) -> SyscallResult<(usize, usize, usize), KError> {
-    let channel_id = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+pub fn create_message(task: &mut Task, cptr: CapabilityPtr, size: usize) -> SyscallOutcome {
+    let channel_id = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::WRITE =>
         {
             channel
         }
-        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
+        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
     };
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
@@ -175,17 +177,17 @@ pub fn create_message(task: &mut Task, cptr: usize, size: usize) -> SyscallResul
 
     channel.mapped_regions.insert(MessageId::new(message_id), MappedChannelMessage::Synthesized(region.clone()));
 
-    SyscallResult::Ok((message_id, region.start.as_usize(), size))
+    SyscallOutcome::processed((message_id, region.start.as_usize(), size))
 }
 
-pub fn send_message(task: &mut Task, cptr: usize, message_id: usize, len: usize) -> SyscallResult<(), KError> {
+pub fn send_message(task: &mut Task, cptr: usize, message_id: usize, len: usize) -> SyscallOutcome {
     let channel_id = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::WRITE =>
         {
             channel
         }
-        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
+        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
     };
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
@@ -193,11 +195,11 @@ pub fn send_message(task: &mut Task, cptr: usize, message_id: usize, len: usize)
         Some(MappedChannelMessage::Synthesized(range)) => range,
         // For now we don't allow sending back received messages, but maybe that
         // should be allowed even if its not useful?
-        _ => return SyscallResult::Err(KError::InvalidArgument(1)),
+        _ => return SyscallOutcome::Err(KError::InvalidArgument(1)),
     };
 
     if range.end.as_usize() - range.start.as_usize() < len {
-        return SyscallResult::Err(KError::InvalidArgument(2));
+        return SyscallOutcome::Err(KError::InvalidArgument(2));
     }
 
     let backing = match task.memory_manager.dealloc_region(range.start) {
@@ -209,23 +211,23 @@ pub fn send_message(task: &mut Task, cptr: usize, message_id: usize, len: usize)
     // error and also check for broken channels
     channel.sender.try_send(ChannelMessage::Data(MessageId::new(message_id), backing, len)).unwrap();
 
-    SyscallResult::Ok(())
+    SyscallOutcome::Processed(librust::message::Message::default())
 }
 
-pub fn read_message(task: &mut Task, cptr: usize) -> SyscallResult<(usize, usize, usize), KError> {
-    let channel_id = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+pub fn read_message(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcome {
+    let channel_id = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::READ =>
         {
             channel
         }
-        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
+        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
     };
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
     // TODO: need to be able to return more than just the first one
     match channel.receiver.try_receive() {
-        Ok(None) => SyscallResult::Ok((0, 0, 0)),
+        Ok(None) => SyscallOutcome::processed((0, 0, 0)),
         Ok(Some(ChannelMessage::Data(message_id, region, len))) => {
             let region = match region {
                 PhysicalRegion::Shared(region) => region,
@@ -239,64 +241,68 @@ pub fn read_message(task: &mut Task, cptr: usize) -> SyscallResult<(usize, usize
                 region,
                 AddressRegionKind::Channel,
             );
-            SyscallResult::Ok((message_id.value(), region.start.as_usize(), len))
+            SyscallOutcome::processed((message_id.value(), region.start.as_usize(), len))
         }
         // Broken channel
         // FIXME: better signify this, probably needs its own error
         // FIXME: need to reinsert capability messages
-        _ => SyscallResult::Err(KError::InvalidArgument(0)),
+        _ => SyscallOutcome::Err(KError::InvalidArgument(0)),
     }
 }
 
-pub fn retire_message(task: &mut Task, cptr: usize, message_id: usize) -> SyscallResult<(), KError> {
-    let channel_id = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+pub fn retire_message(task: &mut Task, cptr: CapabilityPtr, message_id: MessageId) -> SyscallOutcome {
+    let channel_id = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::WRITE =>
         {
             channel
         }
-        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
+        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
     };
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
-    match channel.mapped_regions.remove(&MessageId::new(message_id)) {
+    match channel.mapped_regions.remove(&message_id) {
         Some(MappedChannelMessage::Received { region, .. }) => {
             task.memory_manager.dealloc_region(region.start);
-            SyscallResult::Ok(())
+            SyscallOutcome::Processed(librust::message::Message::default())
         }
-        _ => SyscallResult::Err(KError::InvalidArgument(1)),
+        _ => SyscallOutcome::Err(KError::InvalidArgument(1)),
     }
 }
 
-pub fn send_capability(task: &mut Task, cptr: usize, cptr_to_send: usize, rights: usize) -> SyscallResult<(), KError> {
-    let rights = CapabilityRights::new(rights as u8);
+pub fn send_capability(
+    task: &mut Task,
+    cptr: CapabilityPtr,
+    cptr_to_send: CapabilityPtr,
+    rights: CapabilityRights,
+) -> SyscallOutcome {
     let current_tid = CURRENT_TASK.get().unwrap();
-    let cap = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+    let cap = match task.cspace.resolve(cptr) {
         Some(cap) => cap,
-        None => return SyscallResult::Err(KError::InvalidArgument(0)),
+        None => return SyscallOutcome::Err(KError::InvalidArgument(0)),
     };
 
     if !(cap.rights & CapabilityRights::GRANT) {
-        return SyscallResult::Err(KError::InvalidArgument(0));
+        return SyscallOutcome::Err(KError::InvalidArgument(0));
     }
 
-    let channel_id = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+    let channel_id = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::READ =>
         {
             channel
         }
-        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
+        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
     };
     let (receiving_tid, receiving_channel) = task.channels.get(channel_id).unwrap();
 
-    let cap_to_send = match task.cspace.resolve(CapabilityPtr::new(cptr_to_send)) {
+    let cap_to_send = match task.cspace.resolve(cptr_to_send) {
         Some(cap) => cap,
-        None => return SyscallResult::Err(KError::InvalidArgument(1)),
+        None => return SyscallOutcome::Err(KError::InvalidArgument(1)),
     };
 
     if !cap_to_send.rights.is_superset(rights) {
-        return SyscallResult::Err(KError::InvalidArgument(2));
+        return SyscallOutcome::Err(KError::InvalidArgument(2));
     }
 
     match &cap_to_send.resource {
@@ -314,7 +320,7 @@ pub fn send_capability(task: &mut Task, cptr: usize, cptr_to_send: usize, rights
             let mut other_task = other_task.lock();
             let mut receiving_task = receiving_task.lock();
             if other_task.state.is_dead() {
-                return SyscallResult::Err(KError::InvalidArgument(1));
+                return SyscallOutcome::Err(KError::InvalidArgument(1));
             }
 
             let other_rights = other_task
@@ -357,27 +363,27 @@ pub fn send_capability(task: &mut Task, cptr: usize, cptr_to_send: usize, rights
         }
     }
 
-    SyscallResult::Ok(())
+    SyscallOutcome::Processed(librust::message::Message::default())
 }
 
-pub fn receive_capability(task: &mut Task, cptr: usize) -> SyscallResult<usize, KError> {
-    let channel_id = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+pub fn receive_capability(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcome {
+    let channel_id = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::READ =>
         {
             channel
         }
-        _ => return SyscallResult::Err(KError::InvalidArgument(0)),
+        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
     };
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
     // TODO: need to be able to return more than just the first one
     match channel.receiver.try_receive() {
-        Ok(None) => SyscallResult::Ok(0),
-        Ok(Some(ChannelMessage::Capability(cptr))) => SyscallResult::Ok(cptr.value()),
+        Ok(None) => SyscallOutcome::processed(0),
+        Ok(Some(ChannelMessage::Capability(cptr))) => SyscallOutcome::processed(cptr.value()),
         // Broken channel
         // FIXME: better signify this, probably needs its own error
         // FIXME: need to reinsert data messages
-        _ => SyscallResult::Err(KError::InvalidArgument(0)),
+        _ => SyscallOutcome::Err(KError::InvalidArgument(0)),
     }
 }
