@@ -81,12 +81,29 @@ pub struct VmspaceSpawnEnv {
     pub tp: usize,
 }
 
-pub fn spawn_vmspace(id: VmspaceObjectId, env: VmspaceSpawnEnv) -> SyscallResult<(Tid, CapabilityPtr), KError> {
+pub fn spawn_vmspace(
+    id: VmspaceObjectId,
+    name: &str,
+    env: VmspaceSpawnEnv,
+) -> SyscallResult<(Tid, CapabilityPtr), KError> {
     crate::syscalls::syscall(
         Recipient::kernel(),
         SyscallRequest {
             syscall: Syscall::SpawnVmspace,
-            arguments: [id.value(), env.pc, env.a0, env.a1, env.a2, env.sp, env.tp, 0, 0, 0, 0, 0],
+            arguments: [
+                id.value(),
+                name.as_ptr() as usize,
+                name.len(),
+                env.pc,
+                env.a0,
+                env.a1,
+                env.a2,
+                env.sp,
+                env.tp,
+                0,
+                0,
+                0,
+            ],
         },
     )
     .1

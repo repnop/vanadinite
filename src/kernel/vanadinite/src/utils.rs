@@ -121,3 +121,15 @@ macro_rules! impl_units {
 }
 
 impl_units!(u16, u32, u64, u128, i16, i32, i64, i128, usize, isize);
+
+pub struct SameHartDeadlockDetection;
+
+impl sync::DeadlockDetection for SameHartDeadlockDetection {
+    fn would_deadlock(metadata: usize) -> bool {
+        crate::HART_ID.get() == metadata
+    }
+
+    fn gather_metadata() -> usize {
+        crate::HART_ID.get()
+    }
+}

@@ -249,6 +249,7 @@ pub fn read_message(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcome {
     let mut receiver = channel.receiver.inner.write();
     match receiver.iter().position(|m| matches!(m, ChannelMessage::Data(..))) {
         None => {
+            log::info!("Registering wake for channel::read_message");
             channel.receiver.register_wake(WakeToken::new(CURRENT_TASK.get().unwrap(), move |task| {
                 log::info!("Waking task for channel::read_message!");
                 let res = read_message(task, cptr);
@@ -418,6 +419,7 @@ pub fn receive_capability(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcom
     let mut receiver = channel.receiver.inner.write();
     match receiver.iter().position(|m| matches!(m, ChannelMessage::Capability(_))) {
         None => {
+            log::info!("Registering wake for channel::receive_capability");
             channel.receiver.register_wake(WakeToken::new(CURRENT_TASK.get().unwrap(), move |task| {
                 log::info!("Waking task for channel::read_capability!");
                 let res = receive_capability(task, cptr);

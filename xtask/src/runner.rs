@@ -23,6 +23,10 @@ pub struct RunOptions {
     #[clap(long)]
     debug_log: Option<PathBuf>,
 
+    /// Whether or not to enable debugging in the simulator
+    #[clap(long)]
+    debug: bool,
+
     /// Path to a disk image
     #[clap(long)]
     drive_file: Option<PathBuf>,
@@ -57,6 +61,7 @@ impl Default for RunOptions {
         Self {
             cpus: 5,
             debug_log: None,
+            debug: false,
             drive_file: None,
             kernel_args: String::new(),
             no_build: false,
@@ -98,8 +103,8 @@ pub fn run(options: RunOptions) -> Result<()> {
     };
 
     let sbi_firmware = match (options.sbi, options.with) {
-        (SbiImpl::OpenSbi, Simulator::Qemu) => "build/opensbi-riscv64-generic-fw_jump.bin",
-        (SbiImpl::OpenSbi, Simulator::Spike) => "build/opensbi-riscv64-generic-fw_payload.bin",
+        (SbiImpl::OpenSbi, Simulator::Qemu) => "build/opensbi-riscv64-generic-fw_jump.elf",
+        (SbiImpl::OpenSbi, Simulator::Spike) => "build/opensbi-riscv64-generic-fw_payload.elf",
         (SbiImpl::Vanadium, _) => "build/vanadium.bin",
     };
 
@@ -131,11 +136,16 @@ pub fn run(options: RunOptions) -> Result<()> {
             ").run()?;
         }
         Simulator::Spike => {
+            let debug = match options.debug {
+                true => vec!["-d"],
+                false => vec![],
+            };
+
             cmd!("
                 ./build/spike
                     -p{cpu_count}
                     -m{ram}
-                    -d
+                    {debug...}
                     --isa=rv64gc
                     --bootargs={kernel_args}
                     {sbi_firmware}

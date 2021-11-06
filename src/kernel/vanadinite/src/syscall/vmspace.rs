@@ -21,7 +21,7 @@ use crate::{
 use alloc::{collections::BTreeMap, vec::Vec};
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
-    error::KError,
+    error::{AccessError, KError},
     message::{KernelNotification, Message, Sender},
     syscalls::{allocation::MemoryPermissions, channel::ChannelId, vmspace::VmspaceObjectId},
 };
@@ -133,7 +133,9 @@ pub fn alloc_vmspace_object(
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_vmspace(
     task: &mut Task,
-    id: usize,
+    id: VmspaceObjectId,
+    name: VirtualAddress,
+    len: usize,
     pc: usize,
     a0: usize,
     a1: usize,
@@ -143,9 +145,27 @@ pub fn spawn_vmspace(
 ) -> SyscallOutcome {
     let current_tid = CURRENT_TASK.get().unwrap();
 
-    let object = match task.vmspace_objects.remove(&VmspaceObjectId::new(id)) {
+    let object = match task.vmspace_objects.remove(&id) {
         Some(map) => map,
         None => return SyscallOutcome::Err(KError::InvalidArgument(0)),
+    };
+
+    let user_slice = RawUserSlice::readable(name, len);
+    let user_slice = match unsafe { user_slice.validate(&task.memory_manager) } {
+        Ok(slice) => slice,
+        Err((addr, e)) => {
+            log::error!("Bad memory from process: {:?}", e);
+            return SyscallOutcome::Err(KError::InvalidAccess(AccessError::Read(addr.as_ptr())));
+        }
+    };
+
+    let slice = user_slice.guarded();
+    let task_name = match core::str::from_utf8(&slice) {
+        Ok(s) => s,
+        Err(_) => {
+            log::error!("Invalid UTF-8 in FDT node name from process");
+            return SyscallOutcome::Err(KError::InvalidArgument(1));
+        }
     };
 
     log::debug!(
@@ -160,7 +180,7 @@ pub fn spawn_vmspace(
     log::debug!("Memory map:\n{:#?}", object.memory_manager.address_map_debug());
 
     let mut new_task = Task {
-        name: alloc::format!("userspace allocated task by {:?}", CURRENT_TASK.get().unwrap()).into_boxed_str(),
+        name: alloc::string::String::from(task_name).into_boxed_str(),
         context: Context {
             pc,
             gp_regs: GeneralRegisters { a0, a1, a2, sp, tp, ..Default::default() },

@@ -36,3 +36,20 @@ impl<T> AtomicConstPtr<T> {
         self.0.load(ordering)
     }
 }
+
+pub trait DeadlockDetection {
+    fn would_deadlock(metadata: usize) -> bool;
+    fn gather_metadata() -> usize;
+}
+
+pub struct NoCheck;
+
+impl DeadlockDetection for NoCheck {
+    fn would_deadlock(_: usize) -> bool {
+        false
+    }
+
+    fn gather_metadata() -> usize {
+        0
+    }
+}

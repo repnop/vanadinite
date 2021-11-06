@@ -12,20 +12,20 @@ use crate::{
     csr::{self, satp::Satp},
     mem::{self, paging::SATP_MODE},
     task::TaskState,
-    utils::ticks_per_us,
+    utils::{ticks_per_us, SameHartDeadlockDetection},
 };
 use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
 use sync::{Lazy, SpinMutex};
 
 struct QueuedTask {
     tid: Tid,
-    task: Arc<SpinMutex<Task>>,
+    task: Arc<SpinMutex<Task, SameHartDeadlockDetection>>,
     token: Option<WakeToken>,
 }
 
 pub struct RoundRobinScheduler {
-    blocked: Lazy<SpinMutex<VecDeque<QueuedTask>>>,
-    queues: Lazy<Vec<SpinMutex<VecDeque<QueuedTask>>>>,
+    blocked: Lazy<SpinMutex<VecDeque<QueuedTask>, SameHartDeadlockDetection>>,
+    queues: Lazy<Vec<SpinMutex<VecDeque<QueuedTask>, SameHartDeadlockDetection>>>,
 }
 
 impl RoundRobinScheduler {
@@ -45,7 +45,7 @@ impl RoundRobinScheduler {
         }
     }
 
-    fn current_queue(&self) -> &SpinMutex<VecDeque<QueuedTask>> {
+    fn current_queue(&self) -> &SpinMutex<VecDeque<QueuedTask>, SameHartDeadlockDetection> {
         let current_hart = crate::HART_ID.get();
         &self.queues[current_hart]
     }
@@ -126,9 +126,10 @@ impl Scheduler for RoundRobinScheduler {
     fn enqueue(&self, task: Task) -> Tid {
         let (tid, task) = TASKS.insert(task);
 
-        let mut queue = self.current_queue().lock();
-        queue.push_back(QueuedTask { tid, task, token: None });
-        drop(queue);
+        log::debug!("Trying to enqueue task");
+        let selected = self.queues.iter().min_by_key(|queue| queue.lock().len()).unwrap_or(&self.queues[0]);
+        selected.lock().push_back(QueuedTask { tid, task, token: None });
+        log::debug!("Enqueued task");
 
         tid
     }
@@ -153,7 +154,6 @@ impl Scheduler for RoundRobinScheduler {
         let mut task = blocked.remove(index).unwrap();
         drop(blocked);
 
-        task.task.lock().state = TaskState::Running;
         task.token = Some(token);
 
         let selected = self.queues.iter().min_by_key(|queue| queue.lock().len()).unwrap_or(&self.queues[0]);

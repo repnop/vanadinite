@@ -15,7 +15,7 @@ use std::{
 const PAGE_SIZE: usize = 4096;
 
 #[allow(clippy::result_unit_err)]
-pub fn load_elf(elf: &Elf) -> Result<(Vmspace, VmspaceSpawnEnv), ()> {
+pub fn load_elf(name: &str, elf: &Elf) -> Result<(Vmspace, VmspaceSpawnEnv), ()> {
     let relocations = elf
         .relocations()
         .map(|reloc| match reloc {
@@ -29,7 +29,7 @@ pub fn load_elf(elf: &Elf) -> Result<(Vmspace, VmspaceSpawnEnv), ()> {
         .program_headers()
         .find(|header| header.r#type == ProgramSegmentType::GnuRelro)
         .map(|header| header.vaddr as usize);
-    let vmspace = Vmspace::new();
+    let vmspace = Vmspace::new(name);
     let mut task_load_base = 0;
     let mut segment_offset = 0;
     let mut pc = 0;

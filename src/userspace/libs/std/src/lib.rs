@@ -61,7 +61,9 @@ macro_rules! dbg {
 #[doc(hidden)]
 pub fn _print(args: core::fmt::Arguments) {
     use core::fmt::Write;
-    let _ = io::Stdout.write_fmt(args);
+    // FIXME: hack rn to make output less wacky
+    let out = args.to_string();
+    let _ = io::Stdout.write_str(&out);
 }
 
 #[panic_handler]

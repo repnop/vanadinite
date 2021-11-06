@@ -29,6 +29,7 @@ use librust::{
     syscalls::{
         allocation::{AllocationOptions, DmaAllocationOptions, MemoryPermissions},
         channel::MessageId,
+        vmspace::VmspaceObjectId,
         Syscall,
     },
     task::Tid,
@@ -65,7 +66,7 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> usize {
                 (_, SyscallOutcome::Err(e)) => report_error(e, &mut frame.registers),
                 (_, SyscallOutcome::Block) => {
                     let tid = CURRENT_TASK.get().unwrap();
-                    log::info!("Blocking TID {}", tid.value());
+                    log::info!("Blocking task {:?}", task.name);
                     task.context.gp_regs = frame.registers;
 
                     // Don't re-call the syscall after its unblocked
@@ -132,8 +133,10 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
                 SyscallOutcome::Processed(msg)
             }
             None => {
+                log::info!("Registering wake for read_message");
                 task.message_queue.register_wake(WakeToken::new(CURRENT_TASK.get().unwrap(), |task| {
                     log::info!("Waking task for read_message");
+                    task.state = TaskState::Running;
                     let (sender, message) = task.message_queue.pop().expect("woken but no messages in queue?");
                     apply_message(false, sender, message, &mut task.context.gp_regs);
                 }));
@@ -187,13 +190,15 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
         ),
         Syscall::SpawnVmspace => vmspace::spawn_vmspace(
             task,
-            syscall_req.arguments[0],
-            syscall_req.arguments[1],
+            VmspaceObjectId::new(syscall_req.arguments[0]),
+            VirtualAddress::new(syscall_req.arguments[1]),
             syscall_req.arguments[2],
             syscall_req.arguments[3],
             syscall_req.arguments[4],
             syscall_req.arguments[5],
             syscall_req.arguments[6],
+            syscall_req.arguments[7],
+            syscall_req.arguments[8],
         ),
         Syscall::ClaimDevice => {
             let start = VirtualAddress::new(syscall_req.arguments[0]);

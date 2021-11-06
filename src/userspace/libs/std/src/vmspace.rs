@@ -19,16 +19,17 @@ use librust::{
 };
 
 pub struct Vmspace {
+    name: String,
     id: VmspaceObjectId,
     caps_to_send: Vec<(String, CapabilityPtr, CapabilityRights)>,
 }
 
 impl Vmspace {
     #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
+    pub fn new(name: &str) -> Self {
         let id = vmspace::create_vmspace().unwrap();
 
-        Self { id, caps_to_send: Vec::new() }
+        Self { name: name.to_string(), id, caps_to_send: Vec::new() }
     }
 
     pub fn create_object<'b>(
@@ -48,7 +49,7 @@ impl Vmspace {
     }
 
     pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<(Tid, CapabilityPtr), KError> {
-        let (tid, cptr) = match vmspace::spawn_vmspace(self.id, env) {
+        let (tid, cptr) = match vmspace::spawn_vmspace(self.id, &self.name, env) {
             SyscallResult::Ok((tid, cptr)) => (tid, cptr),
             SyscallResult::Err(e) => return Err(e),
         };

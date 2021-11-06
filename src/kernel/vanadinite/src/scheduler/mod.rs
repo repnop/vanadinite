@@ -10,7 +10,7 @@ pub mod round_robin;
 use crate::{
     cpu_local, csr,
     task::{Context, Task},
-    utils::ticks_per_us,
+    utils::{ticks_per_us, SameHartDeadlockDetection},
 };
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc};
 use core::{
@@ -49,7 +49,7 @@ impl core::fmt::Debug for WakeToken {
 }
 
 pub struct TaskList {
-    map: SpinRwLock<BTreeMap<Tid, Arc<SpinMutex<Task>>>>,
+    map: SpinRwLock<BTreeMap<Tid, Arc<SpinMutex<Task, SameHartDeadlockDetection>>>>,
     next_id: AtomicUsize,
 }
 
@@ -58,9 +58,9 @@ impl TaskList {
         Self { map: SpinRwLock::new(BTreeMap::new()), next_id: AtomicUsize::new(1) }
     }
 
-    pub fn insert(&self, task: Task) -> (Tid, Arc<SpinMutex<Task>>) {
+    pub fn insert(&self, task: Task) -> (Tid, Arc<SpinMutex<Task, SameHartDeadlockDetection>>) {
         let tid = Tid::new(NonZeroUsize::new(self.next_id.load(Ordering::Acquire)).unwrap());
-        let task = Arc::new(SpinMutex::new(task));
+        let task: Arc<SpinMutex<Task, SameHartDeadlockDetection>> = Arc::new(SpinMutex::new(task));
         // FIXME: reuse older pids at some point
         let _ = self.map.write().insert(tid, Arc::clone(&task));
         if self.next_id.fetch_add(1, Ordering::AcqRel) == usize::MAX {
@@ -72,7 +72,7 @@ impl TaskList {
         (tid, task)
     }
 
-    pub fn remove(&self, tid: Tid) -> Option<Arc<SpinMutex<Task>>> {
+    pub fn remove(&self, tid: Tid) -> Option<Arc<SpinMutex<Task, SameHartDeadlockDetection>>> {
         let res = self.map.write().remove(&tid);
 
         if res.is_some() {
@@ -82,11 +82,11 @@ impl TaskList {
         res
     }
 
-    pub fn get(&self, tid: Tid) -> Option<Arc<SpinMutex<Task>>> {
+    pub fn get(&self, tid: Tid) -> Option<Arc<SpinMutex<Task, SameHartDeadlockDetection>>> {
         self.map.read().get(&tid).cloned()
     }
 
-    pub fn active_on_cpu(&self) -> Option<Arc<SpinMutex<Task>>> {
+    pub fn active_on_cpu(&self) -> Option<Arc<SpinMutex<Task, SameHartDeadlockDetection>>> {
         match CURRENT_TASK.get() {
             Some(tid) => self.get(tid),
             None => None,

@@ -21,7 +21,7 @@ fn main() {
     println!("[INIT] fdt_ptr @ {:#p}", fdt_ptr);
 
     let servicemgr = tar.file("servicemgr").unwrap();
-    let (space, mut env) = loadelf::load_elf(&loadelf::Elf::new(servicemgr.contents).unwrap()).unwrap();
+    let (space, mut env) = loadelf::load_elf("servicemgr", &loadelf::Elf::new(servicemgr.contents).unwrap()).unwrap();
     env.a0 = 0;
 
     println!("[INIT] Spawning servicemgr");
@@ -29,7 +29,7 @@ fn main() {
     let (_, servicemgr_cptr) = space.spawn(env).unwrap();
 
     let devicemgr = tar.file("devicemgr").unwrap();
-    let (mut space, mut env) = loadelf::load_elf(&loadelf::Elf::new(devicemgr.contents).unwrap()).unwrap();
+    let (mut space, mut env) = loadelf::load_elf("devicemgr", &loadelf::Elf::new(devicemgr.contents).unwrap()).unwrap();
 
     let mut fdt_obj = space.create_object(core::ptr::null(), fdt_size, MemoryPermissions::READ).unwrap();
     fdt_obj.as_slice()[..fdt_size].copy_from_slice(unsafe { core::slice::from_raw_parts(fdt_ptr, fdt_size) });
