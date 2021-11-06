@@ -35,7 +35,6 @@ pub enum Syscall {
     SpawnVmspace = 15,
     ClaimDevice = 16,
     SendCapability = 17,
-    GrantCapability = 18,
     ReceiveCapability = 19,
 }
 
@@ -58,7 +57,6 @@ impl Syscall {
             15 => Some(Self::SpawnVmspace),
             16 => Some(Self::ClaimDevice),
             17 => Some(Self::SendCapability),
-            18 => Some(Self::GrantCapability),
             19 => Some(Self::ReceiveCapability),
             _ => None,
         }

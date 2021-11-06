@@ -66,7 +66,7 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> usize {
                 (_, SyscallOutcome::Err(e)) => report_error(e, &mut frame.registers),
                 (_, SyscallOutcome::Block) => {
                     let tid = CURRENT_TASK.get().unwrap();
-                    log::info!("Blocking task {:?}", task.name);
+                    log::debug!("Blocking task {:?}", task.name);
                     task.context.gp_regs = frame.registers;
 
                     // Don't re-call the syscall after its unblocked
@@ -120,7 +120,7 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
 
     let outcome: SyscallOutcome = match syscall_req.syscall {
         Syscall::Exit => {
-            log::info!("Active process exited");
+            log::debug!("Active process exited");
             return (Sender::kernel(), SyscallOutcome::Kill);
         }
         Syscall::Print => misc::print(task, VirtualAddress::new(syscall_req.arguments[0]), syscall_req.arguments[1]),
@@ -133,9 +133,9 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
                 SyscallOutcome::Processed(msg)
             }
             None => {
-                log::info!("Registering wake for read_message");
+                log::debug!("Registering wake for read_message");
                 task.message_queue.register_wake(WakeToken::new(CURRENT_TASK.get().unwrap(), |task| {
-                    log::info!("Waking task for read_message");
+                    log::debug!("Waking task for read_message");
                     task.state = TaskState::Running;
                     let (sender, message) = task.message_queue.pop().expect("woken but no messages in queue?");
                     apply_message(false, sender, message, &mut task.context.gp_regs);
@@ -179,14 +179,6 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
             syscall_req.arguments[1],
             syscall_req.arguments[2],
             syscall_req.arguments[3],
-        ),
-        Syscall::GrantCapability => vmspace::grant_capability(
-            task,
-            syscall_req.arguments[0],
-            syscall_req.arguments[1],
-            syscall_req.arguments[2] as *const _,
-            syscall_req.arguments[3],
-            syscall_req.arguments[4],
         ),
         Syscall::SpawnVmspace => vmspace::spawn_vmspace(
             task,
