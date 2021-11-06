@@ -7,13 +7,13 @@
 
 #![feature(asm, lang_items)]
 
-use std::ipc::IpcChannel;
+use std::{ipc::IpcChannel, librust::syscalls::current_tid};
 
 fn main() {
     let args = std::env::args();
     let ptr = std::env::a2() as *const u8;
     //println!("[devicemgr] FDT is at: {:#p}", ptr);
-
+    let tid = current_tid().value();
     let fdt = unsafe { fdt::Fdt::from_ptr(ptr) }.unwrap();
 
     if args.contains(&"debug") {
@@ -41,10 +41,13 @@ fn main() {
     // unsafe { addr.write_volatile(b'\n') };
 
     let servicemgr_channel = IpcChannel::new(std::env::lookup_capability("servicemgr").unwrap());
-    println!("[devicemgr] Got servicemgr cap");
+    println!("[devicemgr:{}] Got servicemgr cap", tid);
+
+    if let Ok(message) = servicemgr_channel.read() {
+        println!("[devicemgr:{}] from servicemgr: {}", tid, core::str::from_utf8(message.as_bytes()).unwrap());
+    }
+
     loop {
-        if let Ok(Some(message)) = servicemgr_channel.read() {
-            println!("[devicemgr] from servicemgr: {}", core::str::from_utf8(message.as_bytes()).unwrap());
-        }
+        unsafe { asm!("nop") };
     }
 }

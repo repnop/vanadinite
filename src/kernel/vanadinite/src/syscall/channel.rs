@@ -243,8 +243,11 @@ pub fn read_message(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcome {
     // TODO: need to be able to return more than just the first one FIXME: this
     // probably needs the lock to make sure a message wasn't sent after the
     // check but before the register
-    let mut lock = channel.receiver.inner.write();
-    match lock.pop_front() {
+
+    // FIXME: check for broken channel
+
+    let mut receiver = channel.receiver.inner.write();
+    match receiver.iter().position(|m| matches!(m, ChannelMessage::Data(..))) {
         None => {
             channel.receiver.register_wake(WakeToken::new(CURRENT_TASK.get().unwrap(), move |task| {
                 log::info!("Waking task for channel::read_message!");
@@ -262,25 +265,24 @@ pub fn read_message(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcome {
 
             SyscallOutcome::Block
         }
-        Some(ChannelMessage::Data(message_id, region, len)) => {
-            let region = match region {
-                PhysicalRegion::Shared(region) => region,
-                _ => unreachable!(),
-            };
+        Some(idx) => match receiver.remove(idx) {
+            Some(ChannelMessage::Data(message_id, region, len)) => {
+                let region = match region {
+                    PhysicalRegion::Shared(region) => region,
+                    _ => unreachable!(),
+                };
 
-            // FIXME: make it so we can use any kind of physical region
-            let region = task.memory_manager.apply_shared_region(
-                None,
-                flags::READ | flags::WRITE | flags::USER | flags::VALID,
-                region,
-                AddressRegionKind::Channel,
-            );
-            SyscallOutcome::processed((message_id.value(), region.start.as_usize(), len))
-        }
-        // Broken channel
-        // FIXME: better signify this, probably needs its own error
-        // FIXME: need to reinsert capability messages
-        _ => SyscallOutcome::Err(KError::InvalidArgument(0)),
+                // FIXME: make it so we can use any kind of physical region
+                let region = task.memory_manager.apply_shared_region(
+                    None,
+                    flags::READ | flags::WRITE | flags::USER | flags::VALID,
+                    region,
+                    AddressRegionKind::Channel,
+                );
+                SyscallOutcome::processed((message_id.value(), region.start.as_usize(), len))
+            }
+            _ => unreachable!(),
+        },
     }
 }
 
@@ -388,10 +390,10 @@ pub fn send_capability(
                 rights: other_rights,
             });
 
-            other_task.message_queue.push_back((
+            other_task.message_queue.push(
                 librust::message::Sender::kernel(),
                 librust::message::Message::from(KernelNotification::ChannelOpened(other_cptr)),
-            ));
+            );
 
             receiving_channel.sender.try_send(ChannelMessage::Capability(receiving_cptr)).unwrap();
         }
@@ -412,12 +414,29 @@ pub fn receive_capability(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcom
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
     // TODO: need to be able to return more than just the first one
-    match channel.receiver.try_receive() {
-        Ok(None) => SyscallOutcome::Block,
-        Ok(Some(ChannelMessage::Capability(cptr))) => SyscallOutcome::processed(cptr.value()),
-        // Broken channel
-        // FIXME: better signify this, probably needs its own error
-        // FIXME: need to reinsert data messages
-        _ => SyscallOutcome::Err(KError::InvalidArgument(0)),
+    // FIXME: check for broken channels
+    let mut receiver = channel.receiver.inner.write();
+    match receiver.iter().position(|m| matches!(m, ChannelMessage::Capability(_))) {
+        None => {
+            channel.receiver.register_wake(WakeToken::new(CURRENT_TASK.get().unwrap(), move |task| {
+                log::info!("Waking task for channel::read_capability!");
+                let res = receive_capability(task, cptr);
+                match res {
+                    SyscallOutcome::Processed(message) => super::apply_message(
+                        false,
+                        librust::message::Sender::kernel(),
+                        message,
+                        &mut task.context.gp_regs,
+                    ),
+                    _ => todo!("is this even possible?"),
+                }
+            }));
+
+            SyscallOutcome::Block
+        }
+        Some(idx) => match receiver.remove(idx) {
+            Some(ChannelMessage::Capability(cptr)) => SyscallOutcome::processed(cptr.value()),
+            _ => unreachable!(),
+        },
     }
 }

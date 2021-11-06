@@ -14,7 +14,7 @@ use crate::{
     },
     scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
     syscall::channel::UserspaceChannel,
-    task::{Context, Task},
+    task::{Context, MessageQueue, Task},
     trap::GeneralRegisters,
     utils::{self, Units},
 };
@@ -168,7 +168,7 @@ pub fn spawn_vmspace(
         },
         memory_manager: object.memory_manager,
         state: crate::task::TaskState::Running,
-        message_queue: Default::default(),
+        message_queue: MessageQueue::new(),
         promiscuous: true,
         incoming_channel_request: Default::default(),
         channels: Default::default(),
@@ -243,18 +243,14 @@ pub fn spawn_vmspace(
                     .cspace
                     .mint(Capability { resource: CapabilityResource::Channel(new_task_channel_id), rights });
 
-                new_task
-                    .message_queue
-                    .push_back((Sender::kernel(), Message::from(KernelNotification::ChannelOpened(cptr))));
+                new_task.message_queue.push(Sender::kernel(), Message::from(KernelNotification::ChannelOpened(cptr)));
 
                 let cptr = other_task.cspace.mint(Capability {
                     resource: CapabilityResource::Channel(other_task_channel_id),
                     rights: other_rights,
                 });
 
-                other_task
-                    .message_queue
-                    .push_back((Sender::kernel(), Message::from(KernelNotification::ChannelOpened(cptr))));
+                other_task.message_queue.push(Sender::kernel(), Message::from(KernelNotification::ChannelOpened(cptr)));
             }
         }
     }

@@ -15,6 +15,7 @@ use crate::{
         },
     },
     platform::FDT,
+    scheduler::{Scheduler, WakeToken, SCHEDULER},
     syscall::{channel::UserspaceChannel, vmspace::VmspaceObject},
     trap::{FloatingPointRegisters, GeneralRegisters},
     utils::{round_up_to_next, Units},
@@ -74,12 +75,39 @@ pub struct Context {
     pub pc: usize,
 }
 
+pub struct MessageQueue {
+    queue: VecDeque<(Sender, Message)>,
+    wake: Option<WakeToken>,
+}
+
+impl MessageQueue {
+    pub fn new() -> Self {
+        Self { queue: VecDeque::new(), wake: None }
+    }
+
+    pub fn push(&mut self, sender: Sender, message: Message) {
+        self.queue.push_back((sender, message));
+
+        if let Some(token) = self.wake.take() {
+            SCHEDULER.unblock(token);
+        }
+    }
+
+    pub fn pop(&mut self) -> Option<(Sender, Message)> {
+        self.queue.pop_front()
+    }
+
+    pub fn register_wake(&mut self, token: WakeToken) {
+        assert!(self.wake.replace(token).is_none(), "replacing an already blocked message queue");
+    }
+}
+
 pub struct Task {
     pub name: Box<str>,
     pub context: Context,
     pub memory_manager: MemoryManager,
     pub state: TaskState,
-    pub message_queue: VecDeque<(Sender, Message)>,
+    pub message_queue: MessageQueue,
     pub promiscuous: bool,
     pub incoming_channel_request: BTreeSet<Tid>,
     pub channels: BTreeMap<ChannelId, (Tid, UserspaceChannel)>,
@@ -341,7 +369,7 @@ impl Task {
             promiscuous: true,
             incoming_channel_request: BTreeSet::new(),
             channels: BTreeMap::new(),
-            message_queue: VecDeque::new(),
+            message_queue: MessageQueue::new(),
             vmspace_objects: BTreeMap::new(),
             vmspace_next_id: 0,
             cspace,

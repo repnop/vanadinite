@@ -35,9 +35,9 @@ impl IpcChannel {
 
     // FIXME: use a real error
     #[allow(clippy::result_unit_err)]
-    pub fn read(&self) -> Result<Option<Message>, KError> {
+    pub fn read(&self) -> Result<Message, KError> {
         match channel::read_message(self.cptr) {
-            SyscallResult::Ok(maybe_msg) => Ok(maybe_msg.map(|m| Message(self.cptr, m))),
+            SyscallResult::Ok(m) => Ok(Message(self.cptr, m)),
             SyscallResult::Err(e) => Err(e),
         }
     }
@@ -55,9 +55,9 @@ impl IpcChannel {
         }
     }
 
-    pub fn receive_capability(&self) -> Result<Option<CapabilityPtr>, KError> {
+    pub fn receive_capability(&self) -> Result<CapabilityPtr, KError> {
         match channel::receive_capability(self.cptr) {
-            SyscallResult::Ok(maybe_cap) => Ok(maybe_cap),
+            SyscallResult::Ok(cap) => Ok(cap),
             SyscallResult::Err(e) => Err(e),
         }
     }

@@ -31,13 +31,7 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize 
     let channel = crate::ipc::IpcChannel::new(librust::capabilities::CapabilityPtr::new(0));
 
     // FIXME: Wowie is this some awful code!
-    'outer: loop {
-        let msg = match channel.read() {
-            Ok(Some(msg)) => msg,
-            Ok(None) => continue,
-            Err(_) => break,
-        };
-
+    while let Ok(msg) = channel.read() {
         let name = match core::str::from_utf8(msg.as_bytes()) {
             Ok(name) => name,
             Err(_) => break,
@@ -47,12 +41,9 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize 
             break;
         }
 
-        let cap = loop {
-            match channel.receive_capability() {
-                Ok(Some(cap)) => break cap,
-                Ok(None) => continue,
-                Err(_) => break 'outer,
-            }
+        let cap = match channel.receive_capability() {
+            Ok(cap) => cap,
+            Err(_) => break,
         };
 
         map.insert(name.into(), cap);

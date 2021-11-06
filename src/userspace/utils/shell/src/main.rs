@@ -106,10 +106,7 @@ fn main() {
                     }
                 }
             },
-            "read" => match receive_message() {
-                Some(msg) => println!("We had a message! {:?}", msg),
-                None => println!("No messages :("),
-            },
+            "read" => println!("We had a message! {:?}", receive_message()),
             "test_alloc_mem" => match alloc_virtual_memory(
                 4096,
                 AllocationOptions::None,
@@ -167,13 +164,11 @@ fn main() {
             "where_main" => println!("main is at: {:#p}", main as *mut u8),
             "read_channels" => {
                 for channel in &channels {
-                    match channel.read() {
-                        Ok(Some(msg)) => match core::str::from_utf8(msg.as_bytes()) {
+                    if let Ok(msg) = channel.read() {
+                        match core::str::from_utf8(msg.as_bytes()) {
                             Err(_) => println!("A message! Contents: {:?}", msg.as_bytes()),
                             Ok(s) => println!("A message! It says: {}", s),
-                        },
-                        Ok(None) => {}
-                        Err(_) => {}
+                        }
                     }
                 }
             }

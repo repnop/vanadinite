@@ -158,7 +158,7 @@ pub enum ReadMessage {
 }
 
 #[inline]
-pub fn receive_message() -> Option<ReadMessage> {
+pub fn receive_message() -> ReadMessage {
     let (sender, resp) = syscall::<_, Message, ()>(
         Recipient::kernel(),
         SyscallRequest { syscall: Syscall::ReadMessage, arguments: [0; 12] },
@@ -166,10 +166,10 @@ pub fn receive_message() -> Option<ReadMessage> {
 
     match resp {
         SyscallResult::Ok(msg) => match sender.is_kernel() {
-            true => Some(ReadMessage::Kernel(KernelNotification::from(msg))),
-            false => Some(ReadMessage::User(Tid::new(sender.value().try_into().unwrap()), msg)),
+            true => ReadMessage::Kernel(KernelNotification::from(msg)),
+            false => ReadMessage::User(Tid::new(sender.value().try_into().unwrap()), msg),
         },
-        SyscallResult::Err(_) => None,
+        SyscallResult::Err(_) => unreachable!(),
     }
 }
 

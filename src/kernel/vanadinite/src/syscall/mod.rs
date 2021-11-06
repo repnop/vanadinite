@@ -17,7 +17,7 @@ use crate::{
         user::RawUserSlice,
     },
     platform::FDT,
-    scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
+    scheduler::{Scheduler, WakeToken, CURRENT_TASK, SCHEDULER, TASKS},
     task::{Task, TaskState},
     trap::{GeneralRegisters, TrapFrame},
 };
@@ -64,14 +64,15 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> usize {
                 }
                 (_, SyscallOutcome::Err(e)) => report_error(e, &mut frame.registers),
                 (_, SyscallOutcome::Block) => {
-                    log::info!("Blocking process");
+                    let tid = CURRENT_TASK.get().unwrap();
+                    log::info!("Blocking TID {}", tid.value());
                     task.context.gp_regs = frame.registers;
 
                     // Don't re-call the syscall after its unblocked
                     task.context.pc = sepc + 4;
 
                     drop(task_lock);
-                    SCHEDULER.block(CURRENT_TASK.get().unwrap());
+                    SCHEDULER.block(tid);
                     SCHEDULER.schedule()
                 }
                 (_, SyscallOutcome::Kill) => {
@@ -91,7 +92,7 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> usize {
                 } else {
                     log::debug!("Adding message to task (tid: {}): {:?}", recipient.value(), message);
 
-                    task.message_queue.push_back((Sender::new(CURRENT_TASK.get().unwrap().value()), message));
+                    task.message_queue.push(Sender::new(CURRENT_TASK.get().unwrap().value()), message);
                     apply_message(false, Sender::kernel(), (), &mut frame.registers);
                 }
             }
@@ -125,12 +126,19 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
         Syscall::ReadStdin => {
             misc::read_stdin(task, VirtualAddress::new(syscall_req.arguments[0]), syscall_req.arguments[1])
         }
-        Syscall::ReadMessage => match task.message_queue.pop_front() {
+        Syscall::ReadMessage => match task.message_queue.pop() {
             Some((sender_, msg)) => {
                 sender = sender_;
                 SyscallOutcome::Processed(msg)
             }
-            None => SyscallOutcome::Block,
+            None => {
+                task.message_queue.register_wake(WakeToken::new(CURRENT_TASK.get().unwrap(), |task| {
+                    log::info!("Waking task for read_message");
+                    let (sender, message) = task.message_queue.pop().expect("woken but no messages in queue?");
+                    apply_message(false, sender, message, &mut task.context.gp_regs);
+                }));
+                SyscallOutcome::Block
+            }
         },
         Syscall::AllocVirtualMemory => mem::alloc_virtual_memory(
             task,

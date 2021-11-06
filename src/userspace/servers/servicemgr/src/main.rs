@@ -9,31 +9,28 @@ use std::{
     ipc::IpcChannel,
     librust::{
         message::KernelNotification,
-        syscalls::{receive_message, ReadMessage},
+        syscalls::{current_tid, receive_message, ReadMessage},
     },
 };
 
 fn main() {
-    println!("[servicemgr] I live! Trying to send a message to devicemgr with a cap we got from our parent");
-    let mut msg = receive_message();
+    let tid = current_tid().value();
+    println!("[servicemgr:{}] I live! Trying to send a message to devicemgr with a cap we got from our parent", tid);
+    let msg = receive_message();
 
-    while msg.is_none() {
-        msg = receive_message();
-    }
-
-    let cap = match msg.unwrap() {
+    let cap = match msg {
         ReadMessage::Kernel(KernelNotification::ChannelOpened(cap)) => cap,
         _ => unreachable!(),
     };
 
-    println!("[servicemgr] Got cap");
+    println!("[servicemgr:{}] Got cap", tid);
 
     let mut channel = IpcChannel::new(cap);
     let mut message = channel.new_message(4096).unwrap();
     message.write(b"hell yeah");
     message.send().unwrap();
 
-    println!("[servicemgr] Message sent");
+    println!("[servicemgr:{}] Message sent", tid);
 
     #[allow(clippy::empty_loop)]
     loop {}

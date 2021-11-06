@@ -71,16 +71,13 @@ pub fn send_message(cptr: CapabilityPtr, message: MessageId, message_len: usize)
     .1
 }
 
-pub fn read_message(cptr: CapabilityPtr) -> SyscallResult<Option<ChannelMessage>, KError> {
+pub fn read_message(cptr: CapabilityPtr) -> SyscallResult<ChannelMessage, KError> {
     syscall(
         Recipient::kernel(),
         SyscallRequest { syscall: Syscall::ReadChannel, arguments: [cptr.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
     )
     .1
-    .map(|res| match res {
-        (0, 0, 0) => None,
-        (id, ptr, len) => Some(ChannelMessage { id: MessageId::new(id), ptr: ptr as *mut u8, len }),
-    })
+    .map(|(id, ptr, len)| ChannelMessage { id: MessageId::new(id), ptr: ptr as *mut u8, len })
 }
 
 pub fn retire_message(cptr: CapabilityPtr, message: MessageId) -> SyscallResult<(), KError> {
@@ -109,7 +106,7 @@ pub fn send_capability(
     .1
 }
 
-pub fn receive_capability(cptr: CapabilityPtr) -> SyscallResult<Option<CapabilityPtr>, KError> {
+pub fn receive_capability(cptr: CapabilityPtr) -> SyscallResult<CapabilityPtr, KError> {
     syscall(
         Recipient::kernel(),
         SyscallRequest {
@@ -118,8 +115,5 @@ pub fn receive_capability(cptr: CapabilityPtr) -> SyscallResult<Option<Capabilit
         },
     )
     .1
-    .map(|cptr| match cptr {
-        0 => None,
-        cptr => Some(CapabilityPtr::new(cptr)),
-    })
+    .map(CapabilityPtr::new)
 }
