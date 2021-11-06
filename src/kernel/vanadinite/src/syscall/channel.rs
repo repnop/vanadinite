@@ -12,7 +12,7 @@ use crate::{
         paging::{flags, PageSize, VirtualAddress},
         region::{MemoryRegion, PhysicalRegion},
     },
-    scheduler::{CURRENT_TASK, TASKS},
+    scheduler::{Scheduler, WakeToken, CURRENT_TASK, SCHEDULER, TASKS},
     task::Task,
     utils::{self, Units},
 };
@@ -30,7 +30,7 @@ use librust::{
     message::KernelNotification,
     syscalls::channel::{ChannelId, MessageId},
 };
-use sync::SpinRwLock;
+use sync::{SpinMutex, SpinRwLock};
 
 use super::SyscallOutcome;
 
@@ -49,9 +49,11 @@ impl UserspaceChannel {
         let (sender1, receiver1) = {
             let message_queue = Arc::new(SpinRwLock::new(VecDeque::new()));
             let alive = Arc::new(AtomicBool::new(true));
+            let wake = Arc::new(SpinMutex::new(None));
 
-            let sender = Sender { inner: Arc::clone(&message_queue), alive: Arc::clone(&alive) };
-            let receiver = Receiver { inner: message_queue, alive };
+            let sender =
+                Sender { inner: Arc::clone(&message_queue), alive: Arc::clone(&alive), wake: Arc::clone(&wake) };
+            let receiver = Receiver { inner: message_queue, alive, wake };
 
             (sender, receiver)
         };
@@ -59,9 +61,11 @@ impl UserspaceChannel {
         let (sender2, receiver2) = {
             let message_queue = Arc::new(SpinRwLock::new(VecDeque::new()));
             let alive = Arc::new(AtomicBool::new(true));
+            let wake = Arc::new(SpinMutex::new(None));
 
-            let sender = Sender { inner: Arc::clone(&message_queue), alive: Arc::clone(&alive) };
-            let receiver = Receiver { inner: message_queue, alive };
+            let sender =
+                Sender { inner: Arc::clone(&message_queue), alive: Arc::clone(&alive), wake: Arc::clone(&wake) };
+            let receiver = Receiver { inner: message_queue, alive, wake };
 
             (sender, receiver)
         };
@@ -98,6 +102,7 @@ struct Receiver {
     // FIXME: Replace these with something like a lockfree ring buffer
     inner: Arc<SpinRwLock<VecDeque<ChannelMessage>>>,
     alive: Arc<AtomicBool>,
+    wake: Arc<SpinMutex<Option<WakeToken>>>,
 }
 
 impl Receiver {
@@ -110,6 +115,10 @@ impl Receiver {
                 false => Err(()),
             },
         }
+    }
+
+    fn register_wake(&self, token: WakeToken) {
+        self.wake.lock().replace(token);
     }
 }
 
@@ -124,6 +133,7 @@ struct Sender {
     // FIXME: Replace these with something like a lockfree ring buffer
     inner: Arc<SpinRwLock<VecDeque<ChannelMessage>>>,
     alive: Arc<AtomicBool>,
+    wake: Arc<SpinMutex<Option<WakeToken>>>,
 }
 
 impl Sender {
@@ -134,6 +144,11 @@ impl Sender {
 
         // FIXME: set a buffer limit at some point
         self.inner.write().push_back(message);
+
+        if let Some(token) = self.wake.lock().take() {
+            SCHEDULER.unblock(token);
+        }
+
         Ok(())
     }
 }
@@ -225,10 +240,29 @@ pub fn read_message(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcome {
     };
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
-    // TODO: need to be able to return more than just the first one
-    match channel.receiver.try_receive() {
-        Ok(None) => SyscallOutcome::processed((0, 0, 0)),
-        Ok(Some(ChannelMessage::Data(message_id, region, len))) => {
+    // TODO: need to be able to return more than just the first one FIXME: this
+    // probably needs the lock to make sure a message wasn't sent after the
+    // check but before the register
+    let mut lock = channel.receiver.inner.write();
+    match lock.pop_front() {
+        None => {
+            channel.receiver.register_wake(WakeToken::new(CURRENT_TASK.get().unwrap(), move |task| {
+                log::info!("Waking task for channel::read_message!");
+                let res = read_message(task, cptr);
+                match res {
+                    SyscallOutcome::Processed(message) => super::apply_message(
+                        false,
+                        librust::message::Sender::kernel(),
+                        message,
+                        &mut task.context.gp_regs,
+                    ),
+                    _ => todo!("is this even possible?"),
+                }
+            }));
+
+            SyscallOutcome::Block
+        }
+        Some(ChannelMessage::Data(message_id, region, len)) => {
             let region = match region {
                 PhysicalRegion::Shared(region) => region,
                 _ => unreachable!(),
@@ -379,7 +413,7 @@ pub fn receive_capability(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcom
 
     // TODO: need to be able to return more than just the first one
     match channel.receiver.try_receive() {
-        Ok(None) => SyscallOutcome::processed(0),
+        Ok(None) => SyscallOutcome::Block,
         Ok(Some(ChannelMessage::Capability(cptr))) => SyscallOutcome::processed(cptr.value()),
         // Broken channel
         // FIXME: better signify this, probably needs its own error

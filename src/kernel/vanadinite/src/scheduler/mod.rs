@@ -12,7 +12,7 @@ use crate::{
     task::{Context, Task},
     utils::ticks_per_us,
 };
-use alloc::{collections::BTreeMap, sync::Arc};
+use alloc::{boxed::Box, collections::BTreeMap, sync::Arc};
 use core::{
     cell::Cell,
     num::NonZeroUsize,
@@ -30,6 +30,23 @@ static N_TASKS: AtomicUsize = AtomicUsize::new(0);
 //pub fn init_scheduler(scheduler: Box<dyn Scheduler>) {
 //    SCHEDULER.0.write().replace(scheduler).expect("reinitialized scheduler!");
 //}
+
+pub struct WakeToken {
+    tid: Tid,
+    work: Box<dyn FnOnce(&mut Task) + Send>,
+}
+
+impl WakeToken {
+    pub fn new(tid: Tid, work: impl FnOnce(&mut Task) + Send + 'static) -> Self {
+        Self { tid, work: Box::new(work) }
+    }
+}
+
+impl core::fmt::Debug for WakeToken {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("WakeToken").field("tid", &self.tid).finish_non_exhaustive()
+    }
+}
 
 pub struct TaskList {
     map: SpinRwLock<BTreeMap<Tid, Arc<SpinMutex<Task>>>>,
@@ -85,6 +102,8 @@ pub trait Scheduler: Send {
     fn schedule(&self) -> !;
     fn enqueue(&self, task: Task) -> Tid;
     fn dequeue(&self, tid: Tid);
+    fn block(&self, tid: Tid);
+    fn unblock(&self, token: WakeToken);
 }
 
 fn sleep() -> ! {

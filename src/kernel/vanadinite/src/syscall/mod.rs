@@ -19,7 +19,7 @@ use crate::{
     platform::FDT,
     scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
     task::{Task, TaskState},
-    trap::TrapFrame,
+    trap::{GeneralRegisters, TrapFrame},
 };
 use core::{convert::TryInto, sync::atomic::Ordering};
 use librust::{
@@ -59,19 +59,19 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> usize {
     match recipient {
         const { Recipient::kernel() } => {
             match do_syscall(task, message) {
-                (sender, SyscallOutcome::Processed(message)) => apply_message(false, sender, message, frame),
-                (_, SyscallOutcome::Err(e)) => report_error(e, frame),
+                (sender, SyscallOutcome::Processed(message)) => {
+                    apply_message(false, sender, message, &mut frame.registers)
+                }
+                (_, SyscallOutcome::Err(e)) => report_error(e, &mut frame.registers),
                 (_, SyscallOutcome::Block) => {
-                    log::debug!("Blocking process");
-                    // FIXME: we should probably have a mechanism for notifying the
-                    // scheduler
-                    task.state = TaskState::Blocked;
+                    log::info!("Blocking process");
                     task.context.gp_regs = frame.registers;
 
                     // Don't re-call the syscall after its unblocked
                     task.context.pc = sepc + 4;
 
                     drop(task_lock);
+                    SCHEDULER.block(CURRENT_TASK.get().unwrap());
                     SCHEDULER.schedule()
                 }
                 (_, SyscallOutcome::Kill) => {
@@ -87,15 +87,15 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> usize {
                 let mut task = task.lock();
 
                 if task.state.is_dead() {
-                    report_error(KError::InvalidRecipient, frame);
+                    report_error(KError::InvalidRecipient, &mut frame.registers);
                 } else {
                     log::debug!("Adding message to task (tid: {}): {:?}", recipient.value(), message);
 
                     task.message_queue.push_back((Sender::new(CURRENT_TASK.get().unwrap().value()), message));
-                    apply_message(false, Sender::kernel(), (), frame);
+                    apply_message(false, Sender::kernel(), (), &mut frame.registers);
                 }
             }
-            None => report_error(KError::InvalidRecipient, frame),
+            None => report_error(KError::InvalidRecipient, &mut frame.registers),
         },
     }
 
@@ -269,26 +269,26 @@ fn get_message(frame: &TrapFrame) -> (Recipient, Message) {
     (recipient, Message { contents })
 }
 
-fn apply_message<T: Into<Message>>(is_err: bool, sender: Sender, msg: T, frame: &mut TrapFrame) {
-    frame.registers.t0 = is_err as usize;
-    frame.registers.t1 = sender.value();
+fn apply_message<T: Into<Message>>(is_err: bool, sender: Sender, msg: T, frame: &mut GeneralRegisters) {
+    frame.t0 = is_err as usize;
+    frame.t1 = sender.value();
 
     let msg = msg.into();
-    frame.registers.t2 = msg.contents[0];
-    frame.registers.t3 = msg.contents[1];
-    frame.registers.t4 = msg.contents[2];
-    frame.registers.t5 = msg.contents[3];
-    frame.registers.t6 = msg.contents[4];
-    frame.registers.a0 = msg.contents[5];
-    frame.registers.a1 = msg.contents[6];
-    frame.registers.a2 = msg.contents[7];
-    frame.registers.a3 = msg.contents[8];
-    frame.registers.a4 = msg.contents[9];
-    frame.registers.a5 = msg.contents[10];
-    frame.registers.a6 = msg.contents[11];
-    frame.registers.a7 = msg.contents[12];
+    frame.t2 = msg.contents[0];
+    frame.t3 = msg.contents[1];
+    frame.t4 = msg.contents[2];
+    frame.t5 = msg.contents[3];
+    frame.t6 = msg.contents[4];
+    frame.a0 = msg.contents[5];
+    frame.a1 = msg.contents[6];
+    frame.a2 = msg.contents[7];
+    frame.a3 = msg.contents[8];
+    frame.a4 = msg.contents[9];
+    frame.a5 = msg.contents[10];
+    frame.a6 = msg.contents[11];
+    frame.a7 = msg.contents[12];
 }
 
-fn report_error<T: Into<Message>>(error: T, frame: &mut TrapFrame) {
+fn report_error<T: Into<Message>>(error: T, frame: &mut GeneralRegisters) {
     apply_message(true, Sender::kernel(), error, frame)
 }

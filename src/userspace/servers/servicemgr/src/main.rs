@@ -26,6 +26,8 @@ fn main() {
         _ => unreachable!(),
     };
 
+    println!("[servicemgr] Got cap");
+
     let mut channel = IpcChannel::new(cap);
     let mut message = channel.new_message(4096).unwrap();
     message.write(b"hell yeah");

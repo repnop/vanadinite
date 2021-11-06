@@ -48,6 +48,12 @@ impl<T: Send> SpinMutex<T> {
 unsafe impl<T: Send> Send for SpinMutex<T> {}
 unsafe impl<T: Send> Sync for SpinMutex<T> {}
 
+impl<T: Send> core::fmt::Debug for SpinMutex<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SpinMutex").finish_non_exhaustive()
+    }
+}
+
 pub struct SpinMutexGuard<'a, T: Send> {
     lock: &'a SpinMutex<T>,
 }
