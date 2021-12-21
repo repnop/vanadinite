@@ -17,7 +17,7 @@ struct TlsIndex {
 #[no_mangle]
 unsafe extern "C" fn __tls_get_addr(_index: *const TlsIndex) -> *mut Void {
     let tp: *mut Void;
-    asm!("mv {}, tp", out(reg) tp, options(nostack));
+    core::arch::asm!("mv {}, tp", out(reg) tp, options(nostack));
 
     tp
 }

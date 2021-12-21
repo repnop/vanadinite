@@ -33,7 +33,7 @@ impl BlockDevice {
         Ok(Self { device, queue, command_buffer, issued_commands: BTreeMap::new() })
     }
 
-    pub fn queue_read(&mut self, sector: u64, read_to: PhysicalAddress) {
+    pub fn queue_read(&mut self, sector: u64, read_to: PhysicalAddress) -> usize {
         let (index, mut request) = self.command_buffer.alloc().unwrap();
 
         unsafe { *request.get_mut() = Command { kind: CommandKind::Read, _reserved: 0, sector, status: 0 } };
@@ -73,6 +73,8 @@ impl BlockDevice {
         librust::mem::fence(librust::mem::FenceMode::Full);
 
         self.device.header.queue_notify.notify();
+
+        desc1
     }
 }
 
@@ -84,7 +86,7 @@ struct CommandBuffer {
 impl CommandBuffer {
     fn new(len: usize) -> Self {
         Self {
-            buffer: unsafe { DmaRegion::zeroed(len).unwrap().assume_init() },
+            buffer: unsafe { DmaRegion::zeroed_many(len).unwrap().assume_init() },
             free_indices: (0..len as u16).collect(),
         }
     }

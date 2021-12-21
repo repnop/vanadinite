@@ -11,7 +11,7 @@
 //! implementation that resides in M-mode
 
 #![warn(missing_docs)]
-#![feature(asm, never_type)]
+#![feature(never_type)]
 #![no_std]
 
 /// Required base SBI functionality
@@ -78,7 +78,7 @@ pub unsafe fn ecall(arguments: [usize; 6], extension_id: usize, function_id: usi
     let error: isize;
     let value: usize;
 
-    asm!(
+    core::arch::asm!(
         "ecall",
         in("a0") arguments[0],
         in("a1") arguments[1],

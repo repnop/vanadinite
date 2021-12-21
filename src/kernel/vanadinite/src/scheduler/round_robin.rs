@@ -148,6 +148,7 @@ impl Scheduler for RoundRobinScheduler {
         self.blocked.lock().push_back(task);
     }
 
+    #[track_caller]
     fn unblock(&self, token: WakeToken) {
         let mut blocked = self.blocked.lock();
         let index = blocked.iter().position(|t| t.tid == token.tid).expect("trying to wake a non-blocked task");

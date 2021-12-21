@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(asm, naked_functions, start, lang_items)]
+#![feature(naked_functions, start, lang_items)]
 
 use librust::{self, capabilities::CapabilityRights, syscalls::allocation::MemoryPermissions};
 
@@ -17,19 +17,11 @@ fn main() {
     let fdt_size = fdt.total_size();
     let tar = tar::Archive::new(SERVERS).unwrap();
 
-    println!("[INIT] args: {:?}", std::env::args());
-    println!("[INIT] fdt_ptr @ {:#p}", fdt_ptr);
-
-    let servicemgr = tar.file("servicemgr").unwrap();
-    let (space, mut env) = loadelf::load_elf("servicemgr", &loadelf::Elf::new(servicemgr.contents).unwrap()).unwrap();
-    env.a0 = 0;
-
-    println!("[INIT] Spawning servicemgr");
-
-    let (_, servicemgr_cptr) = space.spawn(env).unwrap();
+    // println!("[INIT] args: {:?}", std::env::args());
+    // println!("[INIT] fdt_ptr @ {:#p}", fdt_ptr);
 
     let devicemgr = tar.file("devicemgr").unwrap();
-    let (mut space, mut env) = loadelf::load_elf("devicemgr", &loadelf::Elf::new(devicemgr.contents).unwrap()).unwrap();
+    let (space, mut env) = loadelf::load_elf("devicemgr", &loadelf::Elf::new(devicemgr.contents).unwrap()).unwrap();
 
     let mut fdt_obj = space.create_object(core::ptr::null(), fdt_size, MemoryPermissions::READ).unwrap();
     fdt_obj.as_slice()[..fdt_size].copy_from_slice(unsafe { core::slice::from_raw_parts(fdt_ptr, fdt_size) });
@@ -38,23 +30,21 @@ fn main() {
     env.a1 = 0;
     env.a2 = fdt_obj.vmspace_address() as usize;
 
-    space.grant(
-        "servicemgr",
-        servicemgr_cptr,
-        CapabilityRights::READ | CapabilityRights::WRITE | CapabilityRights::GRANT,
-    );
-
-    println!("[INIT] Spawning devicemgr");
+    // println!("[INIT] Spawning devicemgr");
 
     let (_, devicemgr_cptr) = space.spawn(env).unwrap();
 
-    let message = librust::syscalls::channel::create_message(devicemgr_cptr, 12).unwrap();
-    unsafe { core::slice::from_raw_parts_mut(message.ptr, message.len)[..12].copy_from_slice(&[b'A'; 12][..]) };
-    librust::syscalls::channel::send_message(devicemgr_cptr, message.id, 12).unwrap();
+    let stdio = tar.file("stdio").unwrap();
+    let (mut space, env) = loadelf::load_elf("stdio", &loadelf::Elf::new(stdio.contents).unwrap()).unwrap();
+    space.grant("devicemgr", devicemgr_cptr, CapabilityRights::READ | CapabilityRights::WRITE);
+    // println!("[INIT] Spawning stdio");
+    let (_, stdio_cptr) = space.spawn(env).unwrap();
 
-    loop {
-        unsafe { asm!("nop") };
-    }
+    let servicemgr = tar.file("servicemgr").unwrap();
+    let (mut space, env) = loadelf::load_elf("servicemgr", &loadelf::Elf::new(servicemgr.contents).unwrap()).unwrap();
+    space.grant("stdio", stdio_cptr, CapabilityRights::READ | CapabilityRights::WRITE);
+    // println!("[INIT] Spawning servicemgr");
+    space.spawn(env).unwrap();
 
     // println!("[INIT] Spawning shell");
     //

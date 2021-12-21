@@ -26,7 +26,7 @@ impl SplitVirtqueue {
         let freelist = (0..queue_size as u16).collect();
 
         // FIXME: return errors
-        let descriptors = unsafe { DmaRegion::zeroed(queue_size).unwrap().assume_init() };
+        let descriptors = unsafe { DmaRegion::zeroed_many(queue_size).unwrap().assume_init() };
         let available = unsafe { DmaRegion::new_raw(queue_size, true).unwrap() };
         let used = unsafe { DmaRegion::new_raw(queue_size, true).unwrap() };
 

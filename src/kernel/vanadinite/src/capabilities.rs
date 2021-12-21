@@ -5,11 +5,15 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use core::ops::Range;
+
 use alloc::collections::BTreeMap;
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
     syscalls::channel::ChannelId,
 };
+
+use crate::mem::{manager::AddressRegionKind, paging::VirtualAddress, region::SharedPhysicalRegion};
 
 pub struct CapabilitySpace {
     inner: BTreeMap<CapabilityPtr, Capability>,
@@ -52,4 +56,5 @@ pub struct Capability {
 #[derive(Debug)]
 pub enum CapabilityResource {
     Channel(ChannelId),
+    Memory(SharedPhysicalRegion, Range<VirtualAddress>, AddressRegionKind),
 }

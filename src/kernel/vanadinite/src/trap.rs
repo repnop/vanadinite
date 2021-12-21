@@ -297,7 +297,7 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
 #[repr(align(4))]
 pub unsafe extern "C" fn stvec_trap_shim() -> ! {
     #[rustfmt::skip]
-    asm!("
+    core::arch::asm!("
         # Disable interrupts
         csrci sstatus, 2
         csrrw s0, sscratch, s0
@@ -417,7 +417,7 @@ pub unsafe extern "C" fn stvec_trap_shim() -> ! {
 #[rustfmt::skip]
 extern "C" fn save_fp_registers(fp_regs: &mut FloatingPointRegisters) {
     unsafe {
-        asm!("
+        core::arch::asm!("
                 fsd f0, 0({regs})
                 fsd f1, 8({regs})
                 fsd f2, 16({regs})

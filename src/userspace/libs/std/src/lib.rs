@@ -5,16 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(
-    allocator_api,
-    alloc_error_handler,
-    asm,
-    const_btree_new,
-    inline_const,
-    lang_items,
-    prelude_import,
-    thread_local
-)]
+#![feature(allocator_api, alloc_error_handler, const_btree_new, inline_const, lang_items, prelude_import, thread_local)]
 #![no_std]
 #![allow(incomplete_features)]
 
@@ -36,7 +27,7 @@ pub use alloc::collections;
 pub use librust;
 
 #[prelude_import]
-pub use prelude::rust_2018::*;
+pub use prelude::rust_2021::*;
 
 #[macro_export]
 macro_rules! print {

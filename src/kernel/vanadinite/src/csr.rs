@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod stvec {
+    use core::arch::asm;
     #[inline(always)]
     pub fn set(ptr: unsafe extern "C" fn() -> !) {
         unsafe { asm!("csrw stvec, {}", in(reg) ptr) };
@@ -13,6 +14,7 @@ pub mod stvec {
 }
 
 pub mod sie {
+    use core::arch::asm;
     #[inline(always)]
     pub fn enable() {
         unsafe { asm!("csrw sie, {}", in(reg) 0x222) };
@@ -29,6 +31,7 @@ pub mod sie {
 }
 
 pub mod sip {
+    use core::arch::asm;
     #[inline(always)]
     pub fn read() -> usize {
         let val: usize;
@@ -40,6 +43,7 @@ pub mod sip {
 }
 
 pub mod sstatus {
+    use core::arch::asm;
     pub fn enable_interrupts() {
         unsafe { asm!("csrsi sstatus, 2") };
     }
@@ -103,6 +107,7 @@ pub mod sstatus {
 }
 
 pub mod time {
+    use core::arch::asm;
     pub fn read() -> u64 {
         let value: u64;
 
@@ -113,6 +118,7 @@ pub mod time {
 }
 
 pub mod cycle {
+    use core::arch::asm;
     pub fn read() -> usize {
         let value: usize;
 
@@ -123,6 +129,7 @@ pub mod cycle {
 }
 
 pub mod sscratch {
+    use core::arch::asm;
     pub fn read() -> usize {
         let value: usize;
 
@@ -138,6 +145,7 @@ pub mod sscratch {
 
 pub mod satp {
     use crate::mem::paging::PhysicalAddress;
+    use core::arch::asm;
 
     #[derive(Debug, Clone, Copy)]
     pub struct Satp {

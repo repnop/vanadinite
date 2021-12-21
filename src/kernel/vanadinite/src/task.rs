@@ -59,7 +59,7 @@ impl ThreadControlBlock {
     /// in the `sstatus` register
     pub unsafe fn the() -> *mut Self {
         let ret;
-        asm!("csrr {}, sstatus", out(reg) ret);
+        core::arch::asm!("csrr {}, sstatus", out(reg) ret);
         ret
     }
 }

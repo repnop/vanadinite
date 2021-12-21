@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(allocator_api, asm)]
+#![feature(allocator_api)]
 
 extern crate alloc;
 
@@ -145,16 +145,16 @@ fn main() {
             }
             "test_guard_page" => unsafe {
                 let sp: *mut u8;
-                asm!("mv {}, sp", out(reg) sp);
+                core::arch::asm!("mv {}, sp", out(reg) sp);
 
                 *(sp.add(4096)) = 0;
             },
             "test_large_page_alloc" => unsafe {
-                alloc::alloc::alloc(alloc::alloc::Layout::from_size_align(32768, 8).unwrap());
+                let _ = alloc::alloc::alloc(alloc::alloc::Layout::from_size_align(32768, 8).unwrap());
             },
             "tp" => {
                 let tp: usize;
-                unsafe { asm!("mv {}, tp", out(reg) tp) };
+                unsafe { core::arch::asm!("mv {}, tp", out(reg) tp) };
 
                 println!("tp={:#p}", tp as *mut u8);
             }

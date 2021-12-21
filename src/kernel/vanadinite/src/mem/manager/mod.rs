@@ -163,7 +163,7 @@ impl MemoryManager {
         from: PhysicalAddress,
         to: Option<VirtualAddress>,
         len: usize,
-    ) -> Range<VirtualAddress> {
+    ) -> (Range<VirtualAddress>, SharedPhysicalRegion) {
         let n_pages = crate::utils::round_up_to_next(4.kib(), len) / 4.kib();
         let at = to.unwrap_or_else(|| self.find_free_region(PageSize::Kilopage, n_pages));
 
@@ -175,7 +175,7 @@ impl MemoryManager {
             n_pages
         );
 
-        let backing = UniquePhysicalRegion::mmio(from, PageSize::Kilopage, n_pages);
+        let backing = UniquePhysicalRegion::mmio(from, PageSize::Kilopage, n_pages).into_shared_region();
 
         let iter = backing
             .physical_addresses()
@@ -193,10 +193,14 @@ impl MemoryManager {
 
         let range = at..at.add(PageSize::Kilopage.to_byte_size() * len);
         self.address_map
-            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), AddressRegionKind::Mmio)
+            .alloc(
+                range.clone(),
+                MemoryRegion::Backed(PhysicalRegion::Shared(backing.clone())),
+                AddressRegionKind::Mmio,
+            )
             .expect("bad address mapping");
 
-        range
+        (range, backing)
     }
 
     pub fn apply_shared_region(

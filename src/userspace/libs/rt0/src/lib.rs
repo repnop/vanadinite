@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(asm, naked_functions, start, lang_items)]
+#![feature(naked_functions, start, lang_items)]
 #![no_std]
 
 #[no_mangle]
@@ -15,7 +15,7 @@ unsafe extern "C" fn _start(argc: isize, argv: *const *const u8) -> ! {
     }
 
     #[rustfmt::skip]
-    asm!("
+    core::arch::asm!("
         .option push
         .option norelax
         lla gp, __global_pointer$

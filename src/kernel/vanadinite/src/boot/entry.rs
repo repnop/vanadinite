@@ -14,7 +14,7 @@
 #[link_section = ".init.boot"]
 pub unsafe extern "C" fn _boot() -> ! {
     #[rustfmt::skip]
-    asm!("
+    core::arch::asm!("
         csrw sie, zero
         csrci sstatus, 2
         

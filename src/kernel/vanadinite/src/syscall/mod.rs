@@ -11,8 +11,10 @@ pub mod misc;
 pub mod vmspace;
 
 use crate::{
+    capabilities::{Capability, CapabilityResource},
     io::CLAIMED_DEVICES,
     mem::{
+        manager::AddressRegionKind,
         paging::{PhysicalAddress, VirtualAddress},
         user::RawUserSlice,
     },
@@ -35,6 +37,7 @@ use librust::{
     task::Tid,
 };
 
+#[derive(Debug)]
 pub enum SyscallOutcome {
     Processed(Message),
     Err(KError),
@@ -153,9 +156,12 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
         Syscall::CreateChannelMessage => {
             channel::create_message(task, CapabilityPtr::new(syscall_req.arguments[0]), syscall_req.arguments[1])
         }
-        Syscall::SendChannelMessage => {
-            channel::send_message(task, syscall_req.arguments[0], syscall_req.arguments[1], syscall_req.arguments[2])
-        }
+        Syscall::SendChannelMessage => channel::send_message(
+            task,
+            CapabilityPtr::new(syscall_req.arguments[0]),
+            MessageId::new(syscall_req.arguments[1]),
+            syscall_req.arguments[2],
+        ),
         Syscall::ReadChannel => channel::read_message(task, CapabilityPtr::new(syscall_req.arguments[0])),
         Syscall::SendCapability => channel::send_capability(
             task,
@@ -173,6 +179,7 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
             mem::alloc_dma_memory(task, syscall_req.arguments[0], DmaAllocationOptions::new(syscall_req.arguments[1]))
         }
         Syscall::CreateVmspace => vmspace::create_vmspace(task),
+        Syscall::QueryMemoryCapability => mem::query_mem_cap(task, CapabilityPtr::new(syscall_req.arguments[0])),
         Syscall::AllocVmspaceObject => vmspace::alloc_vmspace_object(
             task,
             syscall_req.arguments[0],
@@ -226,13 +233,17 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
 
             // FIXME: probably should add some sanity checks for what we're
             // mapping
-            match fdt.find_node(node_path) {
+            //
+            // FIXME: `fdt` needs updated so that we can get the full node path,
+            // so work around that temporarily here
+            let mut all_nodes = fdt.all_nodes();
+            match all_nodes.find(|n| n.name == node_path) {
                 Some(node) => {
                     // FIXME: what about multiple regions?
                     match node.reg().into_iter().flatten().next() {
                         Some(fdt::standard_nodes::MemoryRegion { size: Some(len), starting_address }) => {
                             claimed.upgrade().insert(node_path.into(), CURRENT_TASK.get().unwrap());
-                            let map_to = unsafe {
+                            let (map_to, shared_region) = unsafe {
                                 task.memory_manager.map_mmio_device(
                                     PhysicalAddress::from_ptr(starting_address),
                                     None,
@@ -240,12 +251,17 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
                                 )
                             };
 
-                            SyscallOutcome::processed((map_to.start.as_usize(), len))
+                            let cptr = task.cspace.mint(Capability {
+                                resource: CapabilityResource::Memory(shared_region, map_to, AddressRegionKind::Mmio),
+                                rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
+                            });
+
+                            SyscallOutcome::processed(cptr.value())
                         }
-                        _ => return (Sender::kernel(), SyscallOutcome::Err(KError::InvalidArgument(0))),
+                        _ => return crate::dbg!((Sender::kernel(), SyscallOutcome::Err(KError::InvalidArgument(0)))),
                     }
                 }
-                None => return (Sender::kernel(), SyscallOutcome::Err(KError::InvalidArgument(0))),
+                None => return crate::dbg!((Sender::kernel(), SyscallOutcome::Err(KError::InvalidArgument(0)))),
             }
         }
     };

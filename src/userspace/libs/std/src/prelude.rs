@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-pub mod rust_2018 {
+pub mod rust_2021 {
     pub use crate::{dbg, print, println};
     pub use alloc::{
         boxed::Box,

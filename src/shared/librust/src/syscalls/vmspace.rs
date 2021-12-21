@@ -9,7 +9,7 @@ use core::num::NonZeroUsize;
 
 use super::{allocation::MemoryPermissions, Syscall};
 use crate::{
-    capabilities::{CapabilityPtr, CapabilityRights},
+    capabilities::CapabilityPtr,
     error::KError,
     message::{Recipient, SyscallRequest, SyscallResult},
     task::Tid,

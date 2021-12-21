@@ -7,8 +7,7 @@
 
 #![feature(
     allocator_api,
-    asm,
-    inline_const,
+    inline_const_pat,
     layout_for_ptr,
     never_type,
     ptr_metadata,

@@ -5,15 +5,14 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(asm, lang_items)]
+#![feature(lang_items)]
 
-use std::{ipc::IpcChannel, librust::syscalls::current_tid};
+use librust::{capabilities::CapabilityRights, message::KernelNotification, syscalls::ReadMessage};
+use std::ipc::IpcChannel;
 
 fn main() {
     let args = std::env::args();
     let ptr = std::env::a2() as *const u8;
-    //println!("[devicemgr] FDT is at: {:#p}", ptr);
-    let tid = current_tid().value();
     let fdt = unsafe { fdt::Fdt::from_ptr(ptr) }.unwrap();
 
     if args.contains(&"debug") {
@@ -30,24 +29,43 @@ fn main() {
         }
     }
 
-    // let (addr, _) = std::librust::syscalls::claim_device("/soc/uart").unwrap();
-    //
-    // println!("Claimed UART @ {:#p}!", addr);
-    //
-    // for i in 0..9 {
-    //     unsafe { addr.write_volatile(i + b'0') };
-    // }
-    //
-    // unsafe { addr.write_volatile(b'\n') };
-
-    let servicemgr_channel = IpcChannel::new(std::env::lookup_capability("servicemgr").unwrap());
-    println!("[devicemgr:{}] Got servicemgr cap", tid);
-
-    if let Ok(message) = servicemgr_channel.read() {
-        println!("[devicemgr:{}] from servicemgr: {}", tid, core::str::from_utf8(message.as_bytes()).unwrap());
-    }
-
     loop {
-        unsafe { asm!("nop") };
+        #[allow(clippy::collapsible_match)]
+        let cptr = match librust::syscalls::receive_message() {
+            ReadMessage::Kernel(kmsg) => match kmsg {
+                KernelNotification::NewChannelMessage(cptr) => cptr,
+                _ => continue,
+            },
+            _ => continue,
+        };
+
+        let mut channel = IpcChannel::new(cptr);
+        let msg = channel.read().unwrap();
+        let compatible: Vec<&str> = {
+            let s = match core::str::from_utf8(msg.as_bytes()) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            s.split(',').collect()
+        };
+
+        match fdt.find_compatible(&compatible) {
+            Some(device) => {
+                let cptr = librust::syscalls::mem::claim_device(device.name).unwrap();
+                channel
+                    .send_bytes("yes")
+                    .and_then(|_| {
+                        channel.send_capability(
+                            cptr,
+                            CapabilityRights::READ | CapabilityRights::WRITE | CapabilityRights::GRANT,
+                        )
+                    })
+                    .unwrap();
+            }
+            None => {
+                let _ = channel.send_bytes("no");
+            }
+        }
     }
 }

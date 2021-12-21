@@ -195,8 +195,9 @@ pub fn create_message(task: &mut Task, cptr: CapabilityPtr, size: usize) -> Sysc
     SyscallOutcome::processed((message_id, region.start.as_usize(), size))
 }
 
-pub fn send_message(task: &mut Task, cptr: usize, message_id: usize, len: usize) -> SyscallOutcome {
-    let channel_id = match task.cspace.resolve(CapabilityPtr::new(cptr)) {
+pub fn send_message(task: &mut Task, cptr: CapabilityPtr, message_id: MessageId, len: usize) -> SyscallOutcome {
+    let current_tid = CURRENT_TASK.get().unwrap();
+    let channel_id = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::WRITE =>
         {
@@ -204,9 +205,9 @@ pub fn send_message(task: &mut Task, cptr: usize, message_id: usize, len: usize)
         }
         _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
     };
-    let (_, channel) = task.channels.get_mut(channel_id).unwrap();
+    let (other_tid, channel) = task.channels.get_mut(channel_id).unwrap();
 
-    let range = match channel.mapped_regions.remove(&MessageId::new(message_id)) {
+    let range = match channel.mapped_regions.remove(&message_id) {
         Some(MappedChannelMessage::Synthesized(range)) => range,
         // For now we don't allow sending back received messages, but maybe that
         // should be allowed even if its not useful?
@@ -222,9 +223,17 @@ pub fn send_message(task: &mut Task, cptr: usize, message_id: usize, len: usize)
         _ => unreachable!(),
     };
 
+    let other_task = TASKS.get(*other_tid).unwrap();
+    let mut other_task = other_task.lock();
+
     // FIXME: once buffer limits exist, will need to either block or return an
     // error and also check for broken channels
-    channel.sender.try_send(ChannelMessage::Data(MessageId::new(message_id), backing, len)).unwrap();
+    channel.sender.try_send(ChannelMessage::Data(message_id, backing, len)).unwrap();
+
+    let other_cptr = *other_task.cspace.all().find(|(_, cap)| matches!(cap, Capability { resource: CapabilityResource::Channel(cid), .. } if other_task.channels.get(cid).unwrap().0 == current_tid)).unwrap().0;
+    other_task
+        .message_queue
+        .push(librust::message::Sender::kernel(), KernelNotification::NewChannelMessage(other_cptr).into());
 
     SyscallOutcome::Processed(librust::message::Message::default())
 }
@@ -342,6 +351,12 @@ pub fn send_capability(
         return SyscallOutcome::Err(KError::InvalidArgument(2));
     }
 
+    let receiving_task = match TASKS.get(*receiving_tid) {
+        Some(task) => task,
+        None => panic!("wut"),
+    };
+    let mut receiving_task = receiving_task.lock();
+
     match &cap_to_send.resource {
         CapabilityResource::Channel(cid) => {
             let (other_tid, _) = task.channels.get(cid).unwrap();
@@ -349,13 +364,8 @@ pub fn send_capability(
                 Some(task) => task,
                 None => panic!("wut"),
             };
-            let receiving_task = match TASKS.get(*receiving_tid) {
-                Some(task) => task,
-                None => panic!("wut"),
-            };
 
             let mut other_task = other_task.lock();
-            let mut receiving_task = receiving_task.lock();
             if other_task.state.is_dead() {
                 return SyscallOutcome::Err(KError::InvalidArgument(1));
             }
@@ -370,6 +380,7 @@ pub fn send_capability(
                             false => None,
                         }
                     }
+                    _ => None,
                 })
                 .unwrap();
 
@@ -397,6 +408,22 @@ pub fn send_capability(
             );
 
             receiving_channel.sender.try_send(ChannelMessage::Capability(receiving_cptr)).unwrap();
+        }
+        CapabilityResource::Memory(phys_region, _, kind) => {
+            let mut flags = flags::USER | flags::VALID;
+            flags |= match (rights & CapabilityRights::READ, rights & CapabilityRights::WRITE) {
+                (true, true) => flags::READ | flags::WRITE,
+                (true, false) => flags::READ,
+                // Write-only pages aren't supported & doesn't really make sense
+                // to send memory the process can't use at all
+                (_, _) => return SyscallOutcome::Err(KError::InvalidArgument(2)),
+            };
+
+            let range = receiving_task.memory_manager.apply_shared_region(None, flags, phys_region.clone(), *kind);
+            let mem_cap = receiving_task
+                .cspace
+                .mint(Capability { rights, resource: CapabilityResource::Memory(phys_region.clone(), range, *kind) });
+            receiving_channel.sender.try_send(ChannelMessage::Capability(mem_cap)).unwrap();
         }
     }
 

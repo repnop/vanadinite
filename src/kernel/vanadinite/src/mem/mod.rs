@@ -6,7 +6,10 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use {
-    core::sync::atomic::{AtomicUsize, Ordering},
+    core::{
+        arch::asm,
+        sync::atomic::{AtomicUsize, Ordering},
+    },
     paging::{PageSize, PhysicalAddress, VirtualAddress},
     phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
 };

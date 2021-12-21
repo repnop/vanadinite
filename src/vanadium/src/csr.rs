@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod misa {
+    use core::arch::asm;
 
     #[derive(Debug, Clone, Copy)]
     pub struct Misa(usize);
@@ -28,6 +29,8 @@ pub mod misa {
 }
 
 pub mod mvendorid {
+    use core::arch::asm;
+
     pub fn read() -> usize {
         let mvendorid: usize;
         unsafe { asm!("csrr {}, mvendorid", out(reg) mvendorid) };
@@ -36,6 +39,8 @@ pub mod mvendorid {
 }
 
 pub mod marchid {
+    use core::arch::asm;
+
     pub fn read() -> usize {
         let marchid: usize;
         unsafe { asm!("csrr {}, marchid", out(reg) marchid) };
@@ -44,6 +49,8 @@ pub mod marchid {
 }
 
 pub mod mimpid {
+    use core::arch::asm;
+
     pub fn read() -> usize {
         let mimpid: usize;
         unsafe { asm!("csrr {}, mimpid", out(reg) mimpid) };
@@ -52,6 +59,8 @@ pub mod mimpid {
 }
 
 pub mod mhartid {
+    use core::arch::asm;
+
     pub fn read() -> usize {
         let mhartid: usize;
         unsafe { asm!("csrr {}, mhartid", out(reg) mhartid) };

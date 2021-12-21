@@ -2,7 +2,7 @@
 name = "vanadinite"
 version = "0.1.0"
 authors = ["Wesley Norris <repnop@outlook.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 crossbeam-queue = { version = "0.3.2", default-features = false, features = [

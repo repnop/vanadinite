@@ -12,17 +12,16 @@ use crate::{
         paging::{flags, PageSize, VirtualAddress},
         user::RawUserSlice,
     },
-    scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
+    scheduler::{Scheduler, CURRENT_TASK, SCHEDULER},
     syscall::channel::UserspaceChannel,
     task::{Context, MessageQueue, Task},
     trap::GeneralRegisters,
     utils::{self, Units},
 };
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::vec::Vec;
 use librust::{
-    capabilities::{CapabilityPtr, CapabilityRights},
+    capabilities::CapabilityRights,
     error::{AccessError, KError},
-    message::{KernelNotification, Message, Sender},
     syscalls::{allocation::MemoryPermissions, channel::ChannelId, vmspace::VmspaceObjectId},
 };
 
@@ -32,17 +31,11 @@ pub struct VmspaceObject {
     pub memory_manager: MemoryManager,
     pub inprocess_mappings: Vec<VirtualAddress>,
     pub cspace: CapabilitySpace,
-    pub service_name_to_cptr: BTreeMap<alloc::string::String, (CapabilityPtr, CapabilityRights)>,
 }
 
 impl VmspaceObject {
     pub fn new() -> Self {
-        Self {
-            memory_manager: MemoryManager::new(),
-            inprocess_mappings: Vec::new(),
-            cspace: CapabilitySpace::new(),
-            service_name_to_cptr: BTreeMap::new(),
-        }
+        Self { memory_manager: MemoryManager::new(), inprocess_mappings: Vec::new(), cspace: CapabilitySpace::new() }
     }
 }
 
@@ -213,67 +206,6 @@ pub fn spawn_vmspace(
     // need it at all) so we don't have to lock the task after insertion
 
     let tid = SCHEDULER.enqueue(new_task);
-    let new_task = TASKS.get(tid).unwrap();
-    let mut new_task = new_task.lock();
-
-    for (name, (cptr, rights)) in object.service_name_to_cptr {
-        let cap = match task.cspace.resolve(cptr) {
-            Some(cap) => cap,
-            None => return SyscallOutcome::Err(KError::InvalidArgument(1)),
-        };
-
-        match &cap.resource {
-            CapabilityResource::Channel(channel_id) => {
-                // FIXME: can this unwrap fail..?
-                let (other_tid, _) = task.channels.get(channel_id).unwrap();
-                let other_task = match TASKS.get(*other_tid) {
-                    Some(task) => task,
-                    None => panic!("wut"),
-                };
-
-                let mut other_task = other_task.lock();
-                if other_task.state.is_dead() {
-                    // FIXME: report error or?
-                    continue;
-                }
-
-                let other_rights = other_task
-                    .cspace
-                    .all()
-                    .find_map(|(_, cap)| match cap {
-                        Capability { resource: CapabilityResource::Channel(id), rights } => {
-                            match other_task.channels.get(id).unwrap().0 == current_tid {
-                                true => Some(*rights),
-                                false => None,
-                            }
-                        }
-                    })
-                    .unwrap();
-
-                let new_task_channel_id =
-                    ChannelId::new(new_task.channels.last_key_value().map(|(id, _)| id.value() + 1).unwrap_or(0));
-                let other_task_channel_id =
-                    ChannelId::new(other_task.channels.last_key_value().map(|(id, _)| id.value() + 1).unwrap_or(0));
-
-                let (channel1, channel2) = UserspaceChannel::new();
-                new_task.channels.insert(new_task_channel_id, (*other_tid, channel1));
-                other_task.channels.insert(other_task_channel_id, (tid, channel2));
-
-                let cptr = new_task
-                    .cspace
-                    .mint(Capability { resource: CapabilityResource::Channel(new_task_channel_id), rights });
-
-                new_task.message_queue.push(Sender::kernel(), Message::from(KernelNotification::ChannelOpened(cptr)));
-
-                let cptr = other_task.cspace.mint(Capability {
-                    resource: CapabilityResource::Channel(other_task_channel_id),
-                    rights: other_rights,
-                });
-
-                other_task.message_queue.push(Sender::kernel(), Message::from(KernelNotification::ChannelOpened(cptr)));
-            }
-        }
-    }
 
     task.channels.insert(this_new_channel_id, (tid, channel2));
     let cptr = task.cspace.mint(Capability {

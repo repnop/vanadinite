@@ -5,7 +5,7 @@ unsafe extern "C" fn _start(argc: isize, argv: *const *const u8, a2: usize) -> !
     }
 
     #[rustfmt::skip]
-    asm!("
+    core::arch::asm!("
         .option push
         .option norelax
         lla gp, __global_pointer$
@@ -32,6 +32,7 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize 
 
     // FIXME: Wowie is this some awful code!
     while let Ok(msg) = channel.read() {
+        let _ = librust::syscalls::receive_message();
         let name = match core::str::from_utf8(msg.as_bytes()) {
             Ok(name) => name,
             Err(_) => break,

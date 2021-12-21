@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(asm, naked_functions, fn_align)]
+#![feature(naked_functions, fn_align)]
 #![no_std]
 #![no_main]
 
@@ -20,7 +20,7 @@ pub mod sbi;
 /// # Safety
 /// no2
 pub unsafe extern "C" fn _entry(_fdt: *const u8) -> ! {
-    asm!("
+    core::arch::asm!("
         # Disable interrupts
         csrci mstatus, 3
 
@@ -138,10 +138,14 @@ impl core::fmt::Write for VirtUart {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for b in s.bytes() {
             #[cfg(feature = "platform.virt")]
-            unsafe { *(0x10000000 as *mut u8) = b };
+            unsafe {
+                *(0x10000000 as *mut u8) = b
+            };
 
             #[cfg(feature = "platform.sifive_u")]
-            unsafe { *(0x10010000 as *mut u32) = b as u32 };
+            unsafe {
+                *(0x10010000 as *mut u32) = b as u32
+            };
         }
 
         Ok(())

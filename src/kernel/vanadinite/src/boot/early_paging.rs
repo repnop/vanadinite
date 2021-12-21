@@ -172,7 +172,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     crate::mem::PHYSICAL_OFFSET.store(PHYS_OFFSET_VALUE, core::sync::atomic::Ordering::Relaxed);
 
     let gp: usize;
-    asm!("lla {}, __global_pointer$", out(reg) gp);
+    core::arch::asm!("lla {}, __global_pointer$", out(reg) gp);
 
     let new_sp = (tmp_stack_end - phys_load) + page_offset_value;
     let new_gp = (gp - phys_load) + page_offset_value;
@@ -188,7 +188,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let fdt = crate::mem::phys2virt(PhysicalAddress::from_ptr(fdt)).as_ptr();
 
     #[rustfmt::skip]
-    asm!(
+    core::arch::asm!(
         "
             # Set up stack pointer and global pointer
             mv sp, {new_sp}

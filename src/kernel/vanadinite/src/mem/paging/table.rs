@@ -12,7 +12,7 @@ mod repr;
 use crate::mem::{phys2virt, virt2phys};
 use alloc::{boxed::Box, vec::Vec};
 use allocator::PageTableAllocator;
-use core::{array::IntoIter, ptr::NonNull};
+use core::ptr::NonNull;
 use flags::Flags;
 pub use repr::{EntryKind, PageSize, PhysicalAddress, VirtualAddress};
 
@@ -51,7 +51,7 @@ impl PageTable {
         let mut table = &mut *self.root;
         let mut current = PageSize::top_level();
 
-        for vpn in IntoIter::new(to.vpns()).rev() {
+        for vpn in to.vpns().into_iter().rev() {
             let entry = &mut table.entries[vpn];
 
             if current == size {
@@ -144,7 +144,7 @@ impl PageTable {
         let mut table = &mut *self.root;
         let mut current = PageSize::top_level();
 
-        for vpn in IntoIter::new(to.vpns()).rev() {
+        for vpn in to.vpns().into_iter().rev() {
             let entry = &mut table.entries[vpn];
             if current == size {
                 if entry.is_valid() {
@@ -185,7 +185,7 @@ impl PageTable {
         let mut table = &mut *self.root;
         let mut current = PageSize::top_level();
 
-        for vpn in IntoIter::new(address.vpns()).rev() {
+        for vpn in address.vpns().into_iter().rev() {
             let entry = &mut table.entries[vpn];
 
             match entry.kind() {
@@ -211,7 +211,7 @@ impl PageTable {
         let mut table = &*self.root;
         let mut current = PageSize::top_level();
 
-        for vpn in IntoIter::new(address.vpns()).rev() {
+        for vpn in address.vpns().into_iter().rev() {
             let entry = &table.entries[vpn];
 
             match entry.kind() {

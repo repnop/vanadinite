@@ -113,7 +113,7 @@ fn sleep() -> ! {
 
     #[rustfmt::skip]
     unsafe {
-        asm!("
+        core::arch::asm!("
             1: wfi
                j 1b
         ", options(noreturn))
@@ -124,7 +124,7 @@ fn sleep() -> ! {
 #[no_mangle]
 unsafe extern "C" fn return_to_usermode(_registers: &Context) -> ! {
     #[rustfmt::skip]
-    asm!("
+    core::arch::asm!("
         li t0, 1 << 8
         csrc sstatus, t0
         li t0, 1 << 19

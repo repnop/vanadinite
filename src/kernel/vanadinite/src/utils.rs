@@ -9,7 +9,7 @@
 macro_rules! dbg {
     ($e:expr) => {{
         let value = $e;
-        crate::println!(concat!(stringify!($e), " = {:?}"), value);
+        crate::println!(concat!("[", file!(), ":", line!(), "] ", stringify!($e), " = {:?}"), value);
         value
     }};
 }
@@ -79,7 +79,7 @@ pub fn ticks_per_us(target_us: u64, hz: u64) -> u64 {
 pub fn manual_debug_point() {
     unsafe {
         loop {
-            asm!("nop");
+            core::arch::asm!("nop");
         }
     }
 }

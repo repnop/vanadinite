@@ -7,6 +7,7 @@
 
 pub mod allocation;
 pub mod channel;
+pub mod mem;
 pub mod vmspace;
 
 use crate::{
@@ -36,6 +37,7 @@ pub enum Syscall {
     ClaimDevice = 16,
     SendCapability = 17,
     ReceiveCapability = 19,
+    QueryMemoryCapability = 20,
 }
 
 impl Syscall {
@@ -58,6 +60,7 @@ impl Syscall {
             16 => Some(Self::ClaimDevice),
             17 => Some(Self::SendCapability),
             19 => Some(Self::ReceiveCapability),
+            20 => Some(Self::QueryMemoryCapability),
             _ => None,
         }
     }
@@ -87,7 +90,7 @@ pub fn syscall<T: Into<Message>, U: From<Message>, E: From<Message>>(
 
     unsafe {
         #[rustfmt::skip]
-        asm!(
+        core::arch::asm!(
             "ecall",
             inlateout("t0") recipient.value() => is_err,
             inlateout("t1") 0usize => sender,
@@ -190,17 +193,4 @@ pub fn current_tid() -> Tid {
         )
         .unwrap(),
     )
-}
-
-#[inline]
-pub fn claim_device(node: &str) -> SyscallResult<(*mut u8, usize), KError> {
-    syscall(
-        Recipient::kernel(),
-        SyscallRequest {
-            syscall: Syscall::ClaimDevice,
-            arguments: [node.as_ptr() as usize, node.len(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        },
-    )
-    .1
-    .map(|(addr, len)| (addr as *mut _, len))
 }

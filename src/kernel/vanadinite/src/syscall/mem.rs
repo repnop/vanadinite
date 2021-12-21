@@ -7,6 +7,7 @@
 
 use super::SyscallOutcome;
 use crate::{
+    capabilities::{Capability, CapabilityResource},
     mem::{
         manager::{AddressRegionKind, FillOption, RegionDescription},
         paging::{flags, PageSize},
@@ -15,6 +16,7 @@ use crate::{
     utils,
 };
 use librust::{
+    capabilities::{CapabilityPtr, CapabilityRights},
     error::KError,
     message::Message,
     syscalls::allocation::{AllocationOptions, DmaAllocationOptions, MemoryPermissions},
@@ -96,5 +98,24 @@ pub fn alloc_dma_memory(task: &mut Task, size: usize, options: DmaAllocationOpti
 
             SyscallOutcome::processed((phys.as_usize(), allocated_at.start.as_usize()))
         }
+    }
+}
+
+pub fn query_mem_cap(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcome {
+    match task.cspace.resolve(cptr) {
+        Some(Capability { resource: CapabilityResource::Memory(_, vmem, _), rights }) => {
+            let memory_perms = match (*rights & CapabilityRights::READ, *rights & CapabilityRights::WRITE) {
+                (true, true) => MemoryPermissions::READ | MemoryPermissions::WRITE,
+                (true, false) => MemoryPermissions::READ,
+                _ => unreachable!("[BUG] no memory capabilities should be marked as write-only or non-read-write"),
+            };
+
+            SyscallOutcome::processed((
+                vmem.start.as_usize(),
+                vmem.end.as_usize() - vmem.start.as_usize(),
+                memory_perms.value(),
+            ))
+        }
+        _ => SyscallOutcome::Err(KError::InvalidArgument(0)),
     }
 }

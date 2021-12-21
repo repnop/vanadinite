@@ -22,9 +22,9 @@ pub enum FenceMode {
 #[inline(always)]
 pub fn fence(mode: FenceMode) {
     match mode {
-        FenceMode::Full => unsafe { asm!("fence iorw, iorw") },
-        FenceMode::Read => unsafe { asm!("fence ir, ir") },
-        FenceMode::Write => unsafe { asm!("fence ow, ow") },
+        FenceMode::Full => unsafe { core::arch::asm!("fence iorw, iorw") },
+        FenceMode::Read => unsafe { core::arch::asm!("fence ir, ir") },
+        FenceMode::Write => unsafe { core::arch::asm!("fence ow, ow") },
     }
 }
 
@@ -67,12 +67,12 @@ pub struct DmaRegion<T: ?Sized> {
 }
 
 impl<T: Sized> DmaRegion<[MaybeUninit<T>]> {
-    pub fn new(n_elements: usize) -> SyscallResult<Self, KError> {
+    pub fn new_many(n_elements: usize) -> SyscallResult<Self, KError> {
         alloc_dma_memory(n_elements * core::mem::size_of::<T>(), DmaAllocationOptions::NONE)
             .map(|(phys, virt)| Self { phys, virt: core::ptr::slice_from_raw_parts_mut(virt.cast(), n_elements) })
     }
 
-    pub unsafe fn zeroed(n_elements: usize) -> SyscallResult<Self, KError> {
+    pub unsafe fn zeroed_many(n_elements: usize) -> SyscallResult<Self, KError> {
         alloc_dma_memory(n_elements * core::mem::size_of::<T>(), DmaAllocationOptions::ZERO)
             .map(|(phys, virt)| Self { phys, virt: core::ptr::slice_from_raw_parts_mut(virt.cast(), n_elements) })
     }
@@ -115,6 +115,32 @@ impl<T: ?Sized> DmaRegion<T> {
 
     pub fn get_mut(&mut self) -> &mut T {
         unsafe { &mut *self.virt }
+    }
+}
+
+impl<T> DmaRegion<MaybeUninit<T>> {
+    pub unsafe fn new() -> SyscallResult<Self, KError>
+    where
+        T: Pointee<Metadata = ()>,
+    {
+        let (phys, virt) = alloc_dma_memory(core::mem::size_of::<T>(), DmaAllocationOptions::NONE)?;
+        SyscallResult::Ok(Self { phys, virt: core::ptr::from_raw_parts_mut(virt.cast(), ()) })
+    }
+
+    pub unsafe fn zeroed() -> SyscallResult<Self, KError>
+    where
+        T: Pointee<Metadata = ()>,
+    {
+        let (phys, virt) = alloc_dma_memory(core::mem::size_of::<T>(), DmaAllocationOptions::ZERO)?;
+        SyscallResult::Ok(Self { phys, virt: core::ptr::from_raw_parts_mut(virt.cast(), ()) })
+    }
+
+    pub unsafe fn assume_init(self) -> DmaRegion<T> {
+        let phys = self.phys;
+        let virt = self.virt;
+        core::mem::forget(self);
+
+        DmaRegion { phys, virt: virt.cast() }
     }
 }
 

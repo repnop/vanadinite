@@ -82,12 +82,12 @@ pub unsafe fn init_thread_locals() {
 
     core::slice::from_raw_parts_mut(new_thread_locals, size)[..].copy_from_slice(original_thread_locals);
 
-    asm!("mv tp, {}", in(reg) new_thread_locals);
+    core::arch::asm!("mv tp, {}", in(reg) new_thread_locals);
 }
 
 pub fn tp() -> *mut u8 {
     let val: usize;
-    unsafe { asm!("mv {}, tp", out(reg) val) };
+    unsafe { core::arch::asm!("mv {}, tp", out(reg) val) };
 
     val as *mut u8
 }

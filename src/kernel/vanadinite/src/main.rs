@@ -11,15 +11,15 @@
     alloc_error_handler,
     allocator_api,
     arbitrary_self_types,
-    asm,
+    asm_sym,
     const_btree_new,
     const_fn_fn_ptr_basics,
     const_fn_trait_bound,
     custom_test_frameworks,
-    destructuring_assignment,
     extern_types,
     fn_align,
     inline_const,
+    inline_const_pat,
     map_first_last,
     naked_functions,
     new_uninit,
@@ -338,7 +338,7 @@ extern "C" fn kalt(hart_id: usize) -> ! {
 #[no_mangle]
 unsafe extern "C" fn other_hart_boot() -> ! {
     #[rustfmt::skip]
-    asm!(
+    core::arch::asm!(
         "
             # We start here with only two registers in a defined state:
             #  a0: hart id
@@ -448,7 +448,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
         unsafe { uart.write_volatile(b'\n') };
         loop {
-            unsafe { asm!("wfi") };
+            unsafe { core::arch::asm!("wfi") };
         }
     }
 

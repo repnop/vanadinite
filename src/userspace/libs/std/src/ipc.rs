@@ -24,13 +24,20 @@ impl IpcChannel {
 
     // FIXME: use a real error
     #[allow(clippy::result_unit_err)]
-    pub fn new_message(&mut self, size: usize) -> Result<NewMessage<'_>, ()> {
+    pub fn new_message(&mut self, size: usize) -> Result<NewMessage<'_>, KError> {
         let message = match channel::create_message(self.cptr, size) {
             SyscallResult::Ok(msg) => msg,
-            SyscallResult::Err(_) => return Err(()),
+            SyscallResult::Err(e) => return Err(e),
         };
 
         Ok(NewMessage { channel: self, message, cursor: 0 })
+    }
+
+    pub fn send_bytes<T: AsRef<[u8]>>(&mut self, msg: T) -> Result<(), KError> {
+        let msg = msg.as_ref();
+        let mut chan_msg = self.new_message(msg.len())?;
+        chan_msg.write(msg);
+        chan_msg.send()
     }
 
     // FIXME: use a real error
@@ -42,8 +49,11 @@ impl IpcChannel {
         }
     }
 
-    fn send(&mut self, msg: ChannelMessage, written_len: usize) -> Result<(), SendMessageError> {
-        let _ = channel::send_message(self.cptr, msg.id, written_len);
+    fn send(&mut self, msg: ChannelMessage, written_len: usize) -> Result<(), KError> {
+        if let SyscallResult::Err(e) = channel::send_message(self.cptr, msg.id, written_len) {
+            return Err(e);
+        }
+
         // FIXME: check for failure
         Ok(())
     }
@@ -90,7 +100,7 @@ pub struct NewMessage<'a> {
 }
 
 impl NewMessage<'_> {
-    pub fn send(self) -> Result<(), SendMessageError> {
+    pub fn send(self) -> Result<(), KError> {
         self.channel.send(self.message, self.cursor)
     }
 

@@ -7,6 +7,12 @@
 
 mod drivers;
 
+use librust::mem::DmaRegion;
+
 fn main() {
-    println!("Hello, world!");
+    let addr = if true { todo!() } else { unsafe { &*(core::mem::align_of::<()>() as *const _) } };
+    let mut drv = drivers::virtio::BlockDevice::new(addr).unwrap();
+
+    let mem: DmaRegion<[u8; 512]> = unsafe { DmaRegion::zeroed().unwrap().assume_init() };
+    drv.queue_read(0, mem.physical_address());
 }
