@@ -7,6 +7,7 @@
 
 pub mod allocation;
 pub mod channel;
+pub mod io;
 pub mod mem;
 pub mod vmspace;
 
@@ -38,6 +39,8 @@ pub enum Syscall {
     SendCapability = 17,
     ReceiveCapability = 19,
     QueryMemoryCapability = 20,
+    CompleteInterrupt = 21,
+    QueryMmioCapability = 22,
 }
 
 impl Syscall {
@@ -61,6 +64,8 @@ impl Syscall {
             17 => Some(Self::SendCapability),
             19 => Some(Self::ReceiveCapability),
             20 => Some(Self::QueryMemoryCapability),
+            21 => Some(Self::CompleteInterrupt),
+            22 => Some(Self::QueryMmioCapability),
             _ => None,
         }
     }

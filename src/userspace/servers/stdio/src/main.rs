@@ -25,17 +25,27 @@ fn main() {
     }
 
     let uart_cap = devicemgr.receive_capability().unwrap();
-    let (uart_ptr, _, _) = librust::syscalls::mem::query_memory_capability(uart_cap).unwrap();
+    let uart_info = librust::syscalls::io::query_mmio_cap(uart_cap).unwrap();
 
-    let uart = unsafe { &*(uart_ptr as *mut _ as *const Uart16550) };
+    let uart = unsafe { &*(uart_info.address() as *mut _ as *const Uart16550) };
     uart.init();
 
     uart.write_str("[stdio] got UART from devicemgr!\n");
 
+    let mut input = Vec::new();
     loop {
         let cptr = match librust::syscalls::receive_message() {
             ReadMessage::Kernel(kmsg) => match kmsg {
-                KernelNotification::NewChannelMessage(cptr) => cptr,
+                // hack to skip the notification from devicemgr since its
+                // stale...
+                KernelNotification::NewChannelMessage(cptr) if cptr.value() != 1 => cptr,
+                KernelNotification::InterruptOccurred(id) => {
+                    let read = uart.read();
+                    librust::syscalls::io::complete_interrupt(id).unwrap();
+                    input.push(read);
+                    uart.write(read);
+                    continue;
+                }
                 _ => continue,
             },
             _ => continue,

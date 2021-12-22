@@ -47,14 +47,6 @@ impl Uart16550 {
         self.data_register.read()
     }
 
-    pub fn try_read(&self) -> Option<u8> {
-        if !self.data_waiting() {
-            return None;
-        }
-
-        Some(self.data_register.read())
-    }
-
     pub fn data_empty(&self) -> bool {
         let value = self.line_status() & (1 << 5);
 

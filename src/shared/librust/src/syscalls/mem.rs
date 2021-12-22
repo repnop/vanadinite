@@ -23,16 +23,3 @@ pub fn query_memory_capability(cptr: CapabilityPtr) -> SyscallResult<(*mut u8, u
     .1
     .map(|(ptr, len, perms)| (ptr as *mut u8, len, MemoryPermissions::new(perms)))
 }
-
-#[inline]
-pub fn claim_device(node: &str) -> SyscallResult<CapabilityPtr, KError> {
-    syscall(
-        Recipient::kernel(),
-        SyscallRequest {
-            syscall: Syscall::ClaimDevice,
-            arguments: [node.as_ptr() as usize, node.len(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        },
-    )
-    .1
-    .map(CapabilityPtr::new)
-}

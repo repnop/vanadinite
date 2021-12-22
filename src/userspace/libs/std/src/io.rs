@@ -14,6 +14,7 @@ impl core::fmt::Write for Stdout {
             None => return Ok(()),
         };
         let _ = stdio.send_bytes(s);
+        // let _ = librust::syscalls::print(s.as_bytes());
         Ok(())
     }
 }

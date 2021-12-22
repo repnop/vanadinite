@@ -52,7 +52,7 @@ fn main() {
 
         match fdt.find_compatible(&compatible) {
             Some(device) => {
-                let cptr = librust::syscalls::mem::claim_device(device.name).unwrap();
+                let cptr = librust::syscalls::io::claim_device(device.name).unwrap();
                 channel
                     .send_bytes("yes")
                     .and_then(|_| {

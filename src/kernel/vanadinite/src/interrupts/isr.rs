@@ -5,43 +5,43 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-pub type IsrCallback = fn(interrupt_id: usize, private: usize) -> Result<(), &'static str>;
+use crate::drivers::generic::plic::{InterruptClaim, Plic};
+use sync::SpinRwLock;
 
 const ISR_LIMIT: usize = 128;
 
-pub(super) static ISR_REGISTRY: [IsrEntry; ISR_LIMIT] = [const { IsrEntry::new() }; ISR_LIMIT];
+static ISR_REGISTRY: [IsrEntry; ISR_LIMIT] = [const { IsrEntry::new() }; ISR_LIMIT];
+
+type DynIsrCallback = dyn Fn(&Plic, InterruptClaim<'_>, usize) -> Result<(), &'static str> + Send + 'static;
 
 #[derive(Debug)]
 pub struct IsrEntry {
-    active: AtomicBool,
-    f: AtomicUsize,
-    private: AtomicUsize,
+    f: SpinRwLock<Option<alloc::boxed::Box<DynIsrCallback>>>,
 }
 
 impl IsrEntry {
     const fn new() -> Self {
-        Self { active: AtomicBool::new(false), f: AtomicUsize::new(0), private: AtomicUsize::new(0) }
+        Self { f: SpinRwLock::new(None) }
+    }
+
+    fn set(&self, f: impl Fn(&Plic, InterruptClaim<'_>, usize) -> Result<(), &'static str> + Send + 'static) {
+        *self.f.write() = Some(alloc::boxed::Box::new(f));
     }
 }
 
-pub fn register_isr(interrupt_id: usize, private: usize, f: IsrCallback) {
+// TODO: move the trait bound to a trait alias when it doesn't cause inference
+// issues...
+pub fn register_isr<F>(interrupt_id: usize, f: F)
+where
+    F: Fn(&Plic, InterruptClaim<'_>, usize) -> Result<(), &'static str> + Send + 'static,
+{
     log::debug!("Registering ISR for interrupt ID {}", interrupt_id);
-    let _disabler = super::InterruptDisabler::new();
-    let slot = &ISR_REGISTRY[interrupt_id];
-
-    slot.active.store(true, Ordering::SeqCst);
-    slot.f.store(f as usize, Ordering::SeqCst);
-    slot.private.store(private, Ordering::SeqCst);
+    ISR_REGISTRY[interrupt_id].set(f);
 }
 
-pub fn isr_entry(id: usize) -> Option<(IsrCallback, usize)> {
-    let entry = &ISR_REGISTRY[id];
-
-    if entry.active.load(Ordering::Relaxed) {
-        Some((unsafe { core::mem::transmute(entry.f.load(Ordering::Relaxed)) }, entry.private.load(Ordering::Relaxed)))
-    } else {
-        None
+pub fn invoke_isr(plic: &Plic, claim: InterruptClaim<'_>, interrupt_id: usize) -> Result<(), &'static str> {
+    match ISR_REGISTRY[interrupt_id].f.read().as_ref() {
+        Some(f) => f(plic, claim, interrupt_id),
+        None => Ok(claim.complete()),
     }
 }

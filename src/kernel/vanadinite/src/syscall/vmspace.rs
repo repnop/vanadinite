@@ -18,7 +18,7 @@ use crate::{
     trap::GeneralRegisters,
     utils::{self, Units},
 };
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, vec::Vec};
 use librust::{
     capabilities::CapabilityRights,
     error::{AccessError, KError},
@@ -188,6 +188,7 @@ pub fn spawn_vmspace(
         vmspace_next_id: 0,
         vmspace_objects: Default::default(),
         cspace: CapabilitySpace::new(),
+        claimed_interrupts: BTreeMap::new(),
     };
 
     let this_new_channel_id = ChannelId::new(task.channels.last_key_value().map(|(id, _)| id.value() + 1).unwrap_or(0));

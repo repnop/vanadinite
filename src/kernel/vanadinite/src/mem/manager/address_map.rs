@@ -87,6 +87,12 @@ impl AddressMap {
             Some((_, range))
                 if range.span.start > subrange.start || range.span.end < subrange.end || range.region.is_some() =>
             {
+                log::trace!(
+                    "Address region {:#p}-{:#p} already occupied by region {:?}",
+                    subrange.start,
+                    subrange.end,
+                    range
+                );
                 return Err(AddressMappingError::Occupied);
             }
             None => return Err(AddressMappingError::OutOfBounds),

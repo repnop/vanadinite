@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![allow(clippy::match_bool, clippy::identity_op, clippy::never_loop, clippy::new_without_default)]
+#![allow(clippy::match_bool, clippy::identity_op, clippy::never_loop, clippy::new_without_default, clippy::unit_arg)]
 #![allow(incomplete_features)]
 #![feature(
     alloc_error_handler,
@@ -120,7 +120,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             if let Some(interrupts) = node.interrupts() {
                 // Try to get stdout loaded ASAP, so register interrupts later
                 // on if there are any
-                stdout_interrupts = Some((device, interrupts, ptr));
+                stdout_interrupts = Some((device, interrupts));
             }
         }
     }
@@ -162,7 +162,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
                                 if let Some(interrupts) = node.interrupts() {
                                     // Try to get stdout loaded ASAP, so register interrupts later
                                     // on if there are any
-                                    stdout_interrupts = Some((device, interrupts, ptr));
+                                    stdout_interrupts = Some((device, interrupts));
                                 }
                             }
                         }
@@ -257,9 +257,9 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         interrupts::register_plic(plic);
     }
 
-    if let Some((device, interrupts, ptr)) = stdout_interrupts {
+    if let Some((device, interrupts)) = stdout_interrupts {
         for interrupt in interrupts {
-            device.register_isr(interrupt, ptr.as_usize());
+            device.register_isr(interrupt);
         }
     }
 

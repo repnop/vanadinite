@@ -119,3 +119,32 @@ pub fn query_mem_cap(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcome {
         _ => SyscallOutcome::Err(KError::InvalidArgument(0)),
     }
 }
+
+pub fn query_mmio_cap(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcome {
+    match task.cspace.resolve(cptr) {
+        Some(Capability { resource: CapabilityResource::Mmio(vmem, interrupts), rights }) => {
+            let memory_perms = match (*rights & CapabilityRights::READ, *rights & CapabilityRights::WRITE) {
+                (true, true) => MemoryPermissions::READ | MemoryPermissions::WRITE,
+                (true, false) => MemoryPermissions::READ,
+                _ => unreachable!("[BUG] no memory capabilities should be marked as write-only or non-read-write"),
+            };
+
+            if interrupts.len() > 8 {
+                log::warn!(
+                    "Memory mapped device has more than 8 interrupts! They will be truncated in syscall response!"
+                );
+            }
+
+            let mut msg = Message::default();
+            let n_interrupts = interrupts.len().min(8);
+            msg.contents[0] = vmem.start.as_usize();
+            msg.contents[1] = vmem.end.as_usize() - vmem.start.as_usize();
+            msg.contents[2] = memory_perms.value();
+            msg.contents[3] = n_interrupts;
+            msg.contents[4..][..n_interrupts].copy_from_slice(&interrupts[..n_interrupts]);
+
+            SyscallOutcome::processed(msg)
+        }
+        _ => SyscallOutcome::Err(KError::InvalidArgument(0)),
+    }
+}

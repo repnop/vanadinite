@@ -7,7 +7,7 @@
 
 use crate::{
     csr::sstatus,
-    interrupts::{isr::isr_entry, PLIC},
+    interrupts::{isr::invoke_isr, PLIC},
     mem::{
         manager::AddressRegion,
         paging::{flags, VirtualAddress},
@@ -211,13 +211,11 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                 if let Some(claimed) = plic.claim(crate::platform::current_plic_context()) {
                     log::debug!("External interrupt for: {:?}", claimed);
 
-                    if let Some((callback, private)) = isr_entry(claimed.interrupt_id()) {
-                        if let Err(e) = callback(claimed.interrupt_id(), private) {
-                            log::error!("Error during ISR: {}", e);
-                        }
+                    let interrupt_id = claimed.interrupt_id();
+                    match invoke_isr(plic, claimed, interrupt_id) {
+                        Ok(_) => log::trace!("ISR (interrupt ID: {}) completed successfully", interrupt_id),
+                        Err(e) => log::error!("Error during ISR: {}", e),
                     }
-
-                    claimed.complete();
                 }
             }
 
@@ -269,12 +267,7 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                             sepc
                         }
                         false => {
-                            log::error!(
-                                "Process {:?} died to a {:?} @ {:#p}",
-                                CURRENT_TASK.get().unwrap(),
-                                trap_kind,
-                                stval
-                            );
+                            log::error!("Process {} died to a {:?} @ {:#p}", active_task.name, trap_kind, stval);
                             active_task.state = TaskState::Dead;
 
                             drop(active_task);

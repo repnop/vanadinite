@@ -97,14 +97,17 @@ pub fn round_up_to_next(n: usize, size: usize) -> usize {
 pub trait Units: core::ops::Mul<Self, Output = Self> + Sized {
     const KIB: Self;
 
+    #[must_use]
     fn kib(self) -> Self {
         self * <Self as Units>::KIB
     }
 
+    #[must_use]
     fn mib(self) -> Self {
         self * Self::KIB * Self::KIB
     }
 
+    #[must_use]
     fn gib(self) -> Self {
         self * Self::KIB * Self::KIB * Self::KIB
     }

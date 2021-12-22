@@ -114,6 +114,7 @@ pub struct Task {
     pub vmspace_objects: BTreeMap<VmspaceObjectId, VmspaceObject>,
     pub vmspace_next_id: usize,
     pub cspace: CapabilitySpace,
+    pub claimed_interrupts: BTreeMap<usize, usize>,
 }
 
 impl Task {
@@ -373,6 +374,7 @@ impl Task {
             vmspace_objects: BTreeMap::new(),
             vmspace_next_id: 0,
             cspace,
+            claimed_interrupts: BTreeMap::new(),
         }
     }
 }

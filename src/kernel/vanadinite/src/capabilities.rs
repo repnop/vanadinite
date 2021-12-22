@@ -5,15 +5,13 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use core::ops::Range;
-
+use crate::mem::{manager::AddressRegionKind, paging::VirtualAddress, region::SharedPhysicalRegion};
 use alloc::collections::BTreeMap;
+use core::ops::Range;
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
     syscalls::channel::ChannelId,
 };
-
-use crate::mem::{manager::AddressRegionKind, paging::VirtualAddress, region::SharedPhysicalRegion};
 
 pub struct CapabilitySpace {
     inner: BTreeMap<CapabilityPtr, Capability>,
@@ -39,6 +37,10 @@ impl CapabilitySpace {
         self.inner.get(&cptr)
     }
 
+    pub fn remove(&mut self, cptr: CapabilityPtr) -> Option<Capability> {
+        self.inner.remove(&cptr)
+    }
+
     pub fn resolve_mut(&mut self, cptr: CapabilityPtr) -> Option<&mut Capability> {
         self.inner.get_mut(&cptr)
     }
@@ -57,4 +59,5 @@ pub struct Capability {
 pub enum CapabilityResource {
     Channel(ChannelId),
     Memory(SharedPhysicalRegion, Range<VirtualAddress>, AddressRegionKind),
+    Mmio(Range<VirtualAddress>, alloc::vec::Vec<usize>),
 }

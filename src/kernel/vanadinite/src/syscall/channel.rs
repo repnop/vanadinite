@@ -15,6 +15,7 @@ use crate::{
     scheduler::{Scheduler, WakeToken, CURRENT_TASK, SCHEDULER, TASKS},
     task::Task,
     utils::{self, Units},
+    HART_ID,
 };
 use alloc::{
     collections::{BTreeMap, VecDeque},
@@ -27,7 +28,7 @@ use core::{
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
     error::KError,
-    message::KernelNotification,
+    message::{KernelNotification, Message},
     syscalls::channel::{ChannelId, MessageId},
 };
 use sync::{SpinMutex, SpinRwLock};
@@ -424,6 +425,66 @@ pub fn send_capability(
                 .cspace
                 .mint(Capability { rights, resource: CapabilityResource::Memory(phys_region.clone(), range, *kind) });
             receiving_channel.sender.try_send(ChannelMessage::Capability(mem_cap)).unwrap();
+        }
+        CapabilityResource::Mmio(..) => {
+            let cap = task.cspace.remove(cptr_to_send).unwrap();
+            let (vregion, interrupts) = match cap.resource {
+                CapabilityResource::Mmio(vregion, interrupts) => (vregion, interrupts),
+                _ => unreachable!(),
+            };
+
+            let region = match task.memory_manager.dealloc_region(vregion.start) {
+                MemoryRegion::Backed(region) => region,
+                _ => unreachable!(),
+            };
+
+            // FIXME: need to change `map_mmio_device` to probably accept a
+            // new-typed size or something to make it more obvious its length
+            // and not page count
+            let size = region.page_count() * 4.kib();
+            let start = region.physical_addresses().next().unwrap();
+            // We know at this point that its been removed from the previous
+            // process and MMIO caps are unique in a system
+            let vrange = unsafe { receiving_task.memory_manager.map_mmio_device(start, None, size) };
+
+            // We want to avoid a possible race here, we want the task to know
+            // about the MMIO device capability _before_ any interrupts occur
+            //
+            // May also need to consider disabling these interrupts before
+            // transferring the cap so interrupts aren't lost, but I think for
+            // now that shouldn't be an issue since ideally the devices aren't
+            // initialized until they're received by the final recipient
+            let receiving_cptr = receiving_task
+                .cspace
+                .mint(Capability { resource: CapabilityResource::Mmio(vrange, interrupts.clone()), rights });
+            receiving_channel.sender.try_send(ChannelMessage::Capability(receiving_cptr)).unwrap();
+
+            let receiving_tid = *receiving_tid;
+            for interrupt in interrupts {
+                // FIXME: This is copy/pasted from the `ClaimDevice` syscall, maybe
+                // refactor them both out to a function or something?
+                log::debug!(
+                    "Reregistering interrupt {} from task {} to task {}",
+                    interrupt,
+                    task.name,
+                    receiving_task.name
+                );
+                crate::interrupts::isr::register_isr(interrupt, move |plic, _, id| {
+                    plic.disable_interrupt(crate::platform::current_plic_context(), id);
+                    let task = TASKS.get(receiving_tid).unwrap();
+                    let mut task = task.lock();
+
+                    log::debug!("Interrupt {} triggered (hart: {}), notifying task {}", id, HART_ID.get(), task.name);
+
+                    task.claimed_interrupts.insert(id, HART_ID.get());
+                    task.message_queue.push(
+                        librust::message::Sender::kernel(),
+                        Message::from(KernelNotification::InterruptOccurred(id)),
+                    );
+
+                    Ok(())
+                });
+            }
         }
     }
 

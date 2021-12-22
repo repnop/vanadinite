@@ -12,9 +12,9 @@ pub mod vmspace;
 
 use crate::{
     capabilities::{Capability, CapabilityResource},
+    interrupts::PLIC,
     io::CLAIMED_DEVICES,
     mem::{
-        manager::AddressRegionKind,
         paging::{PhysicalAddress, VirtualAddress},
         user::RawUserSlice,
     },
@@ -22,12 +22,13 @@ use crate::{
     scheduler::{Scheduler, WakeToken, CURRENT_TASK, SCHEDULER, TASKS},
     task::{Task, TaskState},
     trap::{GeneralRegisters, TrapFrame},
+    HART_ID,
 };
 use core::{convert::TryInto, sync::atomic::Ordering};
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
     error::{AccessError, KError},
-    message::{Message, Recipient, Sender, SyscallRequest},
+    message::{KernelNotification, Message, Recipient, Sender, SyscallRequest},
     syscalls::{
         allocation::{AllocationOptions, DmaAllocationOptions, MemoryPermissions},
         channel::MessageId,
@@ -123,7 +124,7 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
 
     let outcome: SyscallOutcome = match syscall_req.syscall {
         Syscall::Exit => {
-            log::debug!("Active process exited");
+            log::debug!("Active process {:?} exited", task.name);
             return (Sender::kernel(), SyscallOutcome::Kill);
         }
         Syscall::Print => misc::print(task, VirtualAddress::new(syscall_req.arguments[0]), syscall_req.arguments[1]),
@@ -132,6 +133,7 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
         }
         Syscall::ReadMessage => match task.message_queue.pop() {
             Some((sender_, msg)) => {
+                log::debug!("Message read for task {}", task.name);
                 sender = sender_;
                 SyscallOutcome::Processed(msg)
             }
@@ -243,7 +245,7 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
                     match node.reg().into_iter().flatten().next() {
                         Some(fdt::standard_nodes::MemoryRegion { size: Some(len), starting_address }) => {
                             claimed.upgrade().insert(node_path.into(), CURRENT_TASK.get().unwrap());
-                            let (map_to, shared_region) = unsafe {
+                            let map_to = unsafe {
                                 task.memory_manager.map_mmio_device(
                                     PhysicalAddress::from_ptr(starting_address),
                                     None,
@@ -251,19 +253,69 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
                                 )
                             };
 
+                            // FIXME: this probably needs marked as `Clone` in
+                            // `fdt` or something
+                            let interrupts = node.interrupts().into_iter().flatten();
                             let cptr = task.cspace.mint(Capability {
-                                resource: CapabilityResource::Memory(shared_region, map_to, AddressRegionKind::Mmio),
+                                resource: CapabilityResource::Mmio(map_to, interrupts.collect()),
                                 rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
                             });
 
+                            let current_tid = CURRENT_TASK.get().unwrap();
+                            let interrupts = node.interrupts().into_iter().flatten();
+
+                            let plic = PLIC.lock();
+                            let plic = plic.as_ref().unwrap();
+                            for interrupt in interrupts {
+                                log::debug!("Giving interrupt {} to task {}", interrupt, task.name);
+                                plic.enable_interrupt(crate::platform::current_plic_context(), interrupt);
+                                plic.set_interrupt_priority(crate::platform::current_plic_context(), 3);
+                                crate::interrupts::isr::register_isr(interrupt, move |plic, _, id| {
+                                    plic.disable_interrupt(crate::platform::current_plic_context(), id);
+                                    let task = TASKS.get(current_tid).unwrap();
+                                    let mut task = task.lock();
+
+                                    log::debug!(
+                                        "Interrupt {} triggered (hart: {}), notifying task {}",
+                                        id,
+                                        HART_ID.get(),
+                                        task.name
+                                    );
+
+                                    task.claimed_interrupts.insert(id, HART_ID.get());
+                                    task.message_queue.push(
+                                        Sender::kernel(),
+                                        Message::from(KernelNotification::InterruptOccurred(id)),
+                                    );
+
+                                    Ok(())
+                                });
+                            }
+
                             SyscallOutcome::processed(cptr.value())
                         }
-                        _ => return crate::dbg!((Sender::kernel(), SyscallOutcome::Err(KError::InvalidArgument(0)))),
+                        _ => return (Sender::kernel(), SyscallOutcome::Err(KError::InvalidArgument(0))),
                     }
                 }
-                None => return crate::dbg!((Sender::kernel(), SyscallOutcome::Err(KError::InvalidArgument(0)))),
+                None => return (Sender::kernel(), SyscallOutcome::Err(KError::InvalidArgument(0))),
             }
         }
+        Syscall::CompleteInterrupt => {
+            let interrupt_id = syscall_req.arguments[0];
+            match task.claimed_interrupts.remove(&interrupt_id) {
+                None => SyscallOutcome::Err(KError::InvalidArgument(0)),
+                Some(hart) => {
+                    log::debug!("Task {} completing interrupt {}", task.name, interrupt_id);
+                    if let Some(plic) = &*PLIC.lock() {
+                        plic.complete(crate::platform::plic_context_for(hart), interrupt_id);
+                        plic.enable_interrupt(crate::platform::plic_context_for(hart), interrupt_id);
+                    }
+
+                    SyscallOutcome::processed(())
+                }
+            }
+        }
+        Syscall::QueryMmioCapability => mem::query_mmio_cap(task, CapabilityPtr::new(syscall_req.arguments[0])),
     };
 
     (sender, outcome)
