@@ -114,7 +114,17 @@ pub fn run(options: RunOptions) -> Result<()> {
             let debug_log = match &options.debug_log {
                 Some(path) => vec![
                     String::from("-d"),
-                    String::from("guest_errors,trace:riscv_trap,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int"),
+                    String::from("guest_errors,\
+                                    trace:virtio_blk_req_complete,\
+                                    trace:virtio_blk_rw_complete,\
+                                    trace:virtio_blk_handle_write,\
+                                    trace:virtio_blk_handle_read,\
+                                    trace:virtio_blk_submit_multireq,\
+                                    trace:virtio_mmio_read,\
+                                    trace:virtio_notify,\
+                                    trace:virtio_notify_irqfd,\
+                                    trace:virtio_queue_notify,\
+                                    trace:virtio_set_status"),
                     String::from("-D"),
                     format!("{}", path.display()),
                     String::from("-monitor"), String::from("stdio"),

@@ -269,9 +269,10 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
                             for interrupt in interrupts {
                                 log::debug!("Giving interrupt {} to task {}", interrupt, task.name);
                                 plic.enable_interrupt(crate::platform::current_plic_context(), interrupt);
-                                plic.set_interrupt_priority(crate::platform::current_plic_context(), 3);
+                                plic.set_context_threshold(crate::platform::current_plic_context(), 0);
+                                plic.set_interrupt_priority(interrupt, 7);
                                 crate::interrupts::isr::register_isr(interrupt, move |plic, _, id| {
-                                    plic.disable_interrupt(crate::platform::current_plic_context(), id);
+                                    crate::dbg!(plic.disable_interrupt(crate::platform::current_plic_context(), id));
                                     let task = TASKS.get(current_tid).unwrap();
                                     let mut task = task.lock();
 

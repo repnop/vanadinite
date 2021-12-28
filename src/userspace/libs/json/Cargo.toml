@@ -1,12 +1,8 @@
 [package]
-name = "devicemgr"
+name = "json"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-fdt = "0.1.3"
-librust = { path = "../../../shared/librust" }
-std = { path = "../../libs/std" }
-json = { path = "../../libs/json" }

@@ -252,6 +252,8 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
         plic.init(ndevs, contexts);
         plic.set_context_threshold(platform::current_plic_context(), 0);
+        plic.enable_interrupt(platform::current_plic_context(), 8);
+        plic.set_interrupt_priority(8, 7);
 
         debug!("Registering PLIC @ {:#p}", ic_virt);
         interrupts::register_plic(plic);

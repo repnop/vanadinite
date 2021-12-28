@@ -10,6 +10,29 @@
 use librust::{capabilities::CapabilityRights, message::KernelNotification, syscalls::ReadMessage};
 use std::ipc::IpcChannel;
 
+json::derive! {
+    Serialize,
+    struct Device {
+        name: String,
+        compatible: Vec<String>,
+        interrupts: Vec<usize>,
+    }
+}
+
+json::derive! {
+    Serialize,
+    struct Devices {
+        devices: Vec<Device>,
+    }
+}
+
+json::derive! {
+    Deserialize,
+    struct WantedCompatible {
+        compatible: Vec<String>,
+    }
+}
+
 fn main() {
     let args = std::env::args();
     let ptr = std::env::a2() as *const u8;
@@ -29,7 +52,10 @@ fn main() {
         }
     }
 
+    let mut buffer = Vec::new();
     loop {
+        buffer.clear();
+
         #[allow(clippy::collapsible_match)]
         let cptr = match librust::syscalls::receive_message() {
             ReadMessage::Kernel(kmsg) => match kmsg {
@@ -41,30 +67,51 @@ fn main() {
 
         let mut channel = IpcChannel::new(cptr);
         let msg = channel.read().unwrap();
-        let compatible: Vec<&str> = {
-            let s = match core::str::from_utf8(msg.as_bytes()) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
+        let compatible = json::deserialize::<WantedCompatible>(msg.as_bytes()).unwrap().compatible;
 
-            s.split(',').collect()
-        };
+        let all_compatible = fdt
+            .all_nodes()
+            .filter_map(|n| {
+                Some({
+                    n.compatible()?.all().find(|c| compatible.iter().any(|c2| c2 == c))?;
+                    n
+                })
+            })
+            .collect::<Vec<_>>();
 
-        match fdt.find_compatible(&compatible) {
-            Some(device) => {
-                let cptr = librust::syscalls::io::claim_device(device.name).unwrap();
+        match all_compatible.len() {
+            0 => drop(channel.send_bytes({
+                json::serialize(&mut buffer, &Devices { devices: vec![] });
+                &buffer
+            })),
+            _ => {
+                let devices = Devices {
+                    devices: all_compatible
+                        .iter()
+                        .map(|n| Device {
+                            name: n.name.into(),
+                            compatible: n.compatible().unwrap().all().map(ToString::to_string).collect(),
+                            interrupts: n.interrupts().map(|ints| ints.collect()).unwrap_or_default(),
+                        })
+                        .collect(),
+                };
+
                 channel
-                    .send_bytes("yes")
-                    .and_then(|_| {
-                        channel.send_capability(
+                    .send_bytes({
+                        json::serialize(&mut buffer, &devices);
+                        &buffer
+                    })
+                    .unwrap();
+
+                for device in all_compatible {
+                    let cptr = librust::syscalls::io::claim_device(device.name).unwrap();
+                    channel
+                        .send_capability(
                             cptr,
                             CapabilityRights::READ | CapabilityRights::WRITE | CapabilityRights::GRANT,
                         )
-                    })
-                    .unwrap();
-            }
-            None => {
-                let _ = channel.send_bytes("no");
+                        .unwrap();
+                }
             }
         }
     }

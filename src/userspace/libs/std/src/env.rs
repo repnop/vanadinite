@@ -36,3 +36,7 @@ pub(crate) static CAP_MAP: SpinRwLock<BTreeMap<String, CapabilityPtr>> = SpinRwL
 pub fn lookup_capability(service: &str) -> Option<CapabilityPtr> {
     CAP_MAP.read().get(service).copied()
 }
+
+pub fn register_capability(service: &str, cptr: CapabilityPtr) {
+    CAP_MAP.write().insert(service.into(), cptr);
+}

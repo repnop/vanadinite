@@ -7,6 +7,7 @@
 
 use crate::{
     capabilities::{Capability, CapabilityResource},
+    interrupts::PLIC,
     mem::{
         manager::{AddressRegionKind, FillOption, RegionDescription},
         paging::{flags, PageSize, VirtualAddress},
@@ -459,6 +460,8 @@ pub fn send_capability(
                 .mint(Capability { resource: CapabilityResource::Mmio(vrange, interrupts.clone()), rights });
             receiving_channel.sender.try_send(ChannelMessage::Capability(receiving_cptr)).unwrap();
 
+            let plic = PLIC.lock();
+            let plic = plic.as_ref().unwrap();
             let receiving_tid = *receiving_tid;
             for interrupt in interrupts {
                 // FIXME: This is copy/pasted from the `ClaimDevice` syscall, maybe
@@ -469,6 +472,9 @@ pub fn send_capability(
                     task.name,
                     receiving_task.name
                 );
+                plic.enable_interrupt(crate::platform::current_plic_context(), interrupt);
+                plic.set_context_threshold(crate::platform::current_plic_context(), 0);
+                plic.set_interrupt_priority(interrupt, 7);
                 crate::interrupts::isr::register_isr(interrupt, move |plic, _, id| {
                     plic.disable_interrupt(crate::platform::current_plic_context(), id);
                     let task = TASKS.get(receiving_tid).unwrap();
@@ -518,7 +524,7 @@ pub fn receive_capability(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcom
                         message,
                         &mut task.context.gp_regs,
                     ),
-                    _ => todo!("is this even possible?"),
+                    r => todo!("is this even possible? {:?}", r),
                 }
             }));
 

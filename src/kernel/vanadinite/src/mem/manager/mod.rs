@@ -332,9 +332,10 @@ impl MemoryManager {
         self.table.debug()
     }
 
-    /// Debug printable representation of the [`AddressMap`]
-    pub fn address_map_debug(&self) -> &AddressMap {
-        &self.address_map
+    /// Debug printable representation of the [`AddressMap`] with an optional
+    /// [`VirtualAddress`] to search for
+    pub fn address_map_debug(&self, faulting_addr: Option<VirtualAddress>) -> impl core::fmt::Debug + '_ {
+        self.address_map.debug(faulting_addr)
     }
 
     /// Search for an unoccupied memory region that satisfies the given

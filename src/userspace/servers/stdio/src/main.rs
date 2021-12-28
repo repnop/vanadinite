@@ -10,19 +10,35 @@ mod ns16550;
 use librust::{message::KernelNotification, syscalls::ReadMessage};
 use ns16550::Uart16550;
 
+json::derive! {
+    #[derive(Debug)]
+    struct Device {
+        name: String,
+        compatible: Vec<String>,
+        interrupts: Vec<usize>,
+    }
+}
+
+json::derive! {
+    #[derive(Debug)]
+    struct Devices {
+        devices: Vec<Device>,
+    }
+}
+
+json::derive! {
+    Serialize,
+    struct WantedCompatible {
+        compatible: Vec<String>,
+    }
+}
+
 fn main() {
     let devicemgr = std::env::lookup_capability("devicemgr").unwrap();
     let mut devicemgr = std::ipc::IpcChannel::new(devicemgr);
 
-    let msg = "ns16550,ns16550a";
-    let mut message = devicemgr.new_message(msg.len()).unwrap();
-    message.write(msg.as_bytes());
-    message.send().unwrap();
-
-    let response = devicemgr.read().unwrap();
-    if response.as_bytes() != b"yes" {
-        librust::syscalls::exit();
-    }
+    let msg = json::to_bytes(&WantedCompatible { compatible: vec![String::from("ns16550"), String::from("ns16550a")] });
+    devicemgr.send_bytes(&msg).unwrap();
 
     let uart_cap = devicemgr.receive_capability().unwrap();
     let uart_info = librust::syscalls::io::query_mmio_cap(uart_cap).unwrap();
@@ -30,7 +46,13 @@ fn main() {
     let uart = unsafe { &*(uart_info.address() as *mut _ as *const Uart16550) };
     uart.init();
 
-    uart.write_str("[stdio] got UART from devicemgr!\n");
+    let response = devicemgr.read().unwrap();
+    let devices: Devices = json::deserialize(response.as_bytes()).unwrap();
+
+    // uart.write_str("Got the following devices from devicemgr:\n");
+    // for device in devices.devices.iter() {
+    //     uart.write_str(&format!("    {:?}\n", device));
+    // }
 
     let mut input = Vec::new();
     loop {

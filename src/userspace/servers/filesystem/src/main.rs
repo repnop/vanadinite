@@ -7,12 +7,73 @@
 
 mod drivers;
 
-use librust::mem::DmaRegion;
+use librust::{capabilities::CapabilityPtr, mem::DmaRegion, message::KernelNotification, syscalls::ReadMessage};
+use std::ipc::IpcChannel;
+
+json::derive! {
+    #[derive(Debug, Clone)]
+    struct Device {
+        name: String,
+        compatible: Vec<String>,
+        interrupts: Vec<usize>,
+    }
+}
+
+json::derive! {
+    Serialize,
+    struct VirtIoDeviceRequest {
+        ty: u32,
+    }
+}
+
+json::derive! {
+    Deserialize,
+    struct VirtIoDeviceResponse {
+        devices: Vec<Device>,
+    }
+}
+
+struct BlockDevice {
+    mmio_cap: CapabilityPtr,
+    interrupts: Vec<usize>,
+    device: drivers::virtio::BlockDevice,
+}
 
 fn main() {
-    let addr = if true { todo!() } else { unsafe { &*(core::mem::align_of::<()>() as *const _) } };
-    let mut drv = drivers::virtio::BlockDevice::new(addr).unwrap();
+    let mut block_devices = Vec::new();
+    let mut virtiomgr = IpcChannel::new(std::env::lookup_capability("virtiomgr").unwrap());
+
+    virtiomgr.send_bytes(&json::to_bytes(&VirtIoDeviceRequest { ty: virtio::DeviceType::BlockDevice as u32 })).unwrap();
+    // println!("[filesystem] Sent device request");
+    let response: VirtIoDeviceResponse = json::deserialize(virtiomgr.read().unwrap().as_bytes()).unwrap();
+
+    for device in response.devices {
+        let mmio_cap = virtiomgr.receive_capability().unwrap();
+        let info = librust::syscalls::io::query_mmio_cap(mmio_cap).unwrap();
+
+        // println!("[filesystem] Got a VirtIO block device!");
+
+        block_devices.push(BlockDevice {
+            mmio_cap,
+            interrupts: device.interrupts,
+            device: drivers::virtio::BlockDevice::new(unsafe {
+                &*(info.address() as *const drivers::virtio::VirtIoBlockDevice)
+            })
+            .unwrap(),
+        });
+    }
+
+    let drv = &mut block_devices[0].device;
 
     let mem: DmaRegion<[u8; 512]> = unsafe { DmaRegion::zeroed().unwrap().assume_init() };
     drv.queue_read(0, mem.physical_address());
+
+    loop {
+        match librust::syscalls::receive_message() {
+            ReadMessage::Kernel(KernelNotification::InterruptOccurred(_)) => break,
+            _ => continue,
+        }
+    }
+
+    println!("[filesystem] Sector 0 = {:?}", &*mem);
 }

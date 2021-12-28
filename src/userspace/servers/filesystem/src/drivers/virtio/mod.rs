@@ -7,7 +7,9 @@
 
 mod block_device;
 
-use block_device::{Command, CommandKind, VirtIoBlockDevice};
+pub use block_device::VirtIoBlockDevice;
+
+use block_device::{Command, CommandKind};
 use librust::mem::{DmaElement, DmaRegion, PhysicalAddress};
 use std::collections::BTreeMap;
 use virtio::{

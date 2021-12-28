@@ -267,7 +267,17 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                             sepc
                         }
                         false => {
-                            log::error!("Process {} died to a {:?} @ {:#p}", active_task.name, trap_kind, stval);
+                            log::error!(
+                                "Process {} died to a {:?} @ {:#p} (PC: {:#p})",
+                                active_task.name,
+                                trap_kind,
+                                stval,
+                                VirtualAddress::new(sepc),
+                            );
+                            log::error!(
+                                "Memory map:\n{:#?}",
+                                active_task.memory_manager.address_map_debug(Some(stval))
+                            );
                             active_task.state = TaskState::Dead;
 
                             drop(active_task);

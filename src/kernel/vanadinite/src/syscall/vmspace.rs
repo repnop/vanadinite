@@ -170,7 +170,7 @@ pub fn spawn_vmspace(
         a1,
         a2
     );
-    log::debug!("Memory map:\n{:#?}", object.memory_manager.address_map_debug());
+    log::debug!("Memory map:\n{:#?}", object.memory_manager.address_map_debug(None));
 
     let mut new_task = Task {
         name: alloc::string::String::from(task_name).into_boxed_str(),

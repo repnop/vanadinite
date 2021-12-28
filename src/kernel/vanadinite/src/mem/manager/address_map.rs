@@ -48,6 +48,7 @@ pub enum AddressRegionKind {
 
 /// Represents the userspace address space and allows for allocating and
 /// deallocating regions of the address space
+#[derive(Debug)]
 pub struct AddressMap {
     map: BTreeMap<VirtualAddress, AddressRegion>,
 }
@@ -199,26 +200,53 @@ impl AddressMap {
     pub fn occupied_regions(&self) -> impl Iterator<Item = &AddressRegion> {
         self.map.values().filter(|v| v.region.is_some())
     }
+
+    pub fn debug(&self, addr: Option<VirtualAddress>) -> impl core::fmt::Debug + '_ {
+        AddressMapDebug(self, addr)
+    }
 }
 
-impl core::fmt::Debug for AddressMap {
+struct AddressMapDebug<'a>(&'a AddressMap, Option<VirtualAddress>);
+impl core::fmt::Debug for AddressMapDebug<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match f.alternate() {
             true => {
-                for region in self.occupied_regions() {
+                let inside_region = match self.1 {
+                    Some(addr) => self.0.occupied_regions().find(|r| r.span.contains(&addr)),
+                    None => None,
+                };
+
+                let inbetween_regions = match self.1 {
+                    Some(addr) => self
+                        .0
+                        .occupied_regions()
+                        .zip(self.0.occupied_regions().skip(1))
+                        .find(|(s, e)| (s.span.end..e.span.start).contains(&addr)),
+                    None => None,
+                };
+
+                for region in self.0.occupied_regions() {
                     writeln!(
                         f,
-                        "[{:?}] {:#p}..{:#p}: {:?}",
+                        "[{:?}] {:#p}..{:#p}: {:<20}{}",
                         region.region.as_ref().unwrap().page_size(),
                         region.span.start,
                         region.span.end,
-                        region.kind,
+                        // Apparently padding doesn't work with debug printing...
+                        alloc::format!("{:?}", region.kind),
+                        match (inside_region, inbetween_regions) {
+                            (Some(inside), _) if inside.span == region.span => "<-- fault lies inside this region",
+                            (None, Some((start, _))) if start.span == region.span =>
+                                "<-- fault lies inbetween this region",
+                            (None, Some((_, end))) if end.span == region.span => "<-- ... and this region",
+                            _ => "",
+                        }
                     )?;
                 }
 
                 Ok(())
             }
-            false => f.debug_struct("AddressMap").field("map", &self.map).finish(),
+            false => f.debug_struct("AddressMap").field("map", &self.0).finish(),
         }
     }
 }

@@ -7,9 +7,53 @@
 
 #![feature(naked_functions, start, lang_items)]
 
-use librust::{self, capabilities::CapabilityRights, syscalls::allocation::MemoryPermissions};
+use librust::{
+    self,
+    capabilities::{CapabilityPtr, CapabilityRights},
+    syscalls::allocation::MemoryPermissions,
+};
 
 static SERVERS: &[u8] = include_bytes!("../../../../build/initfs.tar");
+
+static INIT_ORDER: &str = r#"{
+    "servers": [
+        {
+            "name": "devicemgr",
+            "caps": ["fdt"],
+        },
+        {
+            "name": "stdio",
+            "caps": ["devicemgr"],
+        },
+        {
+            "name": "servicemgr",
+            "caps": ["devicemgr", "stdio"],
+        },
+        {
+            "name": "virtiomgr",
+            "caps": ["devicemgr", "stdio"],
+        },
+        {
+            "name": "filesystem",
+            "caps": ["virtiomgr", "stdio"],
+        },
+    ]
+}"#;
+
+json::derive! {
+    Deserialize,
+    struct InitOrder {
+        servers: Vec<Server>,
+    }
+}
+
+json::derive! {
+    Deserialize,
+    struct Server {
+        name: String,
+        caps: Vec<String>,
+    }
+}
 
 fn main() {
     let fdt_ptr = std::env::a2() as *const u8;
@@ -17,63 +61,29 @@ fn main() {
     let fdt_size = fdt.total_size();
     let tar = tar::Archive::new(SERVERS).unwrap();
 
-    // println!("[INIT] args: {:?}", std::env::args());
-    // println!("[INIT] fdt_ptr @ {:#p}", fdt_ptr);
+    let mut caps = std::collections::BTreeMap::<String, CapabilityPtr>::new();
+    let init_order: InitOrder = json::deserialize(INIT_ORDER.as_bytes()).unwrap();
 
-    let devicemgr = tar.file("devicemgr").unwrap();
-    let (space, mut env) = loadelf::load_elf("devicemgr", &loadelf::Elf::new(devicemgr.contents).unwrap()).unwrap();
+    for server in init_order.servers {
+        let file = tar.file(&server.name).unwrap();
+        let (mut space, mut env) = loadelf::load_elf(&server.name, &loadelf::Elf::new(file.contents).unwrap()).unwrap();
 
-    let mut fdt_obj = space.create_object(core::ptr::null(), fdt_size, MemoryPermissions::READ).unwrap();
-    fdt_obj.as_slice()[..fdt_size].copy_from_slice(unsafe { core::slice::from_raw_parts(fdt_ptr, fdt_size) });
+        for cap in server.caps {
+            if cap == "fdt" {
+                let mut fdt_obj = space.create_object(core::ptr::null(), fdt_size, MemoryPermissions::READ).unwrap();
+                fdt_obj.as_slice()[..fdt_size]
+                    .copy_from_slice(unsafe { core::slice::from_raw_parts(fdt_ptr, fdt_size) });
+                env.a2 = fdt_obj.vmspace_address() as usize;
+                continue;
+            }
 
-    env.a0 = 0;
-    env.a1 = 0;
-    env.a2 = fdt_obj.vmspace_address() as usize;
+            let cptr = *caps.get(&cap).unwrap();
+            space.grant(&cap, cptr, CapabilityRights::READ | CapabilityRights::WRITE);
+        }
 
-    // println!("[INIT] Spawning devicemgr");
-
-    let (_, devicemgr_cptr) = space.spawn(env).unwrap();
-
-    let stdio = tar.file("stdio").unwrap();
-    let (mut space, env) = loadelf::load_elf("stdio", &loadelf::Elf::new(stdio.contents).unwrap()).unwrap();
-    space.grant("devicemgr", devicemgr_cptr, CapabilityRights::READ | CapabilityRights::WRITE);
-    // println!("[INIT] Spawning stdio");
-    let (_, stdio_cptr) = space.spawn(env).unwrap();
-
-    let servicemgr = tar.file("servicemgr").unwrap();
-    let (mut space, env) = loadelf::load_elf("servicemgr", &loadelf::Elf::new(servicemgr.contents).unwrap()).unwrap();
-    space.grant("stdio", stdio_cptr, CapabilityRights::READ | CapabilityRights::WRITE);
-    // println!("[INIT] Spawning servicemgr");
-    space.spawn(env).unwrap();
-
-    // println!("[INIT] Spawning shell");
-    //
-    // let shell = tar.file("shell").unwrap();
-    // let (space, env) = loadelf::load_elf(&loadelf::Elf::new(shell.contents).unwrap()).unwrap();
-    //
-    // space.spawn(env).unwrap();
-
-    // let mut channels = Vec::new();
-    // loop {
-    //     let msg = librust::syscalls::receive_message();
-    //
-    //     if let Some(ReadMessage::Kernel(KernelNotification::ChannelRequest(tid))) = msg {
-    //         let channel_id = channel::create_channel(tid).unwrap();
-    //         let mut channel = ipc::IpcChannel::new(channel_id);
-    //
-    //         let mut msg = channel.new_message(HELLO_FRIEND.len()).unwrap();
-    //         msg.write(HELLO_FRIEND.as_bytes());
-    //         msg.send().unwrap();
-    //
-    //         channels.push(channel);
-    //     }
-    //
-    //     for channel in &channels {
-    //         match channel.read() {
-    //             Ok(Some(_)) => {} //println!("[INIT] Someone sent a message on {:?}", channel_id),
-    //             Ok(None) => {}
-    //             Err(_) => {} //println!("Error reading message from channel: {:?}", e),
-    //         }
-    //     }
-    // }
+        env.a0 = 0;
+        env.a1 = 0;
+        let (_, cap) = space.spawn(env).unwrap();
+        caps.insert(server.name, cap);
+    }
 }

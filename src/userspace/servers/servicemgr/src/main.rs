@@ -6,5 +6,5 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 fn main() {
-    println!("hello world from servicemgr");
+    // println!("hello world from servicemgr");
 }
