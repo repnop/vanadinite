@@ -4,6 +4,8 @@ extern crate alloc;
 pub mod deser;
 pub mod parser;
 
+use parser::ParseError;
+
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use core::ops::{Deref, Index};
 
@@ -159,7 +161,7 @@ pub enum Value {
 }
 
 impl deser::Deserialize for Value {
-    fn deserialize<'a, D: deser::Deserializer<'a>>(deserializer: &mut D) -> Self {
+    fn deserialize<'a, D: deser::Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
         deserializer.deserialize_value()
     }
 }
@@ -303,5 +305,5 @@ pub fn serialize<Sr: deser::Serializer, S: deser::Serialize<Sr>>(serializer: &mu
 }
 
 pub fn deserialize<D: deser::Deserialize>(bytes: &[u8]) -> Result<D, parser::ParseError> {
-    Ok(D::deserialize(&mut parser::Parser::new(bytes)))
+    D::deserialize(&mut parser::Parser::new(bytes))
 }
