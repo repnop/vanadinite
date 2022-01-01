@@ -136,3 +136,37 @@ pub enum CommandKind {
     Discard = 11,
     WriteZeroes = 13,
 }
+
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum CommandStatus {
+    Ok = 0,
+    IoError = 1,
+    Unsupported = 2,
+}
+
+impl CommandStatus {
+    pub fn from_u8(n: u8) -> Option<Self> {
+        match n {
+            0 => Some(CommandStatus::Ok),
+            1 => Some(CommandStatus::IoError),
+            2 => Some(CommandStatus::Unsupported),
+            _ => None,
+        }
+    }
+
+    pub fn into_result(self) -> Result<(), CommandError> {
+        match self {
+            CommandStatus::Ok => Ok(()),
+            CommandStatus::IoError => Err(CommandError::IoError),
+            CommandStatus::Unsupported => Err(CommandError::Unsupported),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CommandError {
+    IoError,
+    Unsupported,
+    UnknownStatusCode(u8),
+}

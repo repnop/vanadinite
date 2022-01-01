@@ -175,11 +175,12 @@ impl<'a, T> DmaElement<'a, T> {
         self.phys
     }
 
-    pub fn get(&self) -> *mut T {
-        self.virt
+    pub fn get(&self) -> &'a T {
+        unsafe { &*(self.virt as *const _) }
     }
 
-    pub unsafe fn get_mut(&mut self) -> &mut T {
-        &mut *self.virt
+    // FIXME: does this need to be unsafe?
+    pub fn get_mut(&mut self) -> &'a mut T {
+        unsafe { &mut *self.virt }
     }
 }

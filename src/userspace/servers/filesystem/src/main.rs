@@ -65,15 +65,31 @@ fn main() {
 
     let drv = &mut block_devices[0].device;
 
-    let mem: DmaRegion<[u8; 512]> = unsafe { DmaRegion::zeroed().unwrap().assume_init() };
-    drv.queue_read(0, mem.physical_address());
+    drv.queue_read(0);
 
-    loop {
+    let id = loop {
         match librust::syscalls::receive_message() {
-            ReadMessage::Kernel(KernelNotification::InterruptOccurred(_)) => break,
+            ReadMessage::Kernel(KernelNotification::InterruptOccurred(id)) => {
+                break id;
+            }
             _ => continue,
         }
-    }
+    };
 
-    println!("[filesystem] Sector 0 = {:?}", &*mem);
+    println!("[filesystem] Sector 0 = {:?}", drv.finish_command());
+    librust::syscalls::io::complete_interrupt(id).unwrap();
+
+    drv.queue_write(0, &[1; 512][..]);
+
+    let id = loop {
+        match librust::syscalls::receive_message() {
+            ReadMessage::Kernel(KernelNotification::InterruptOccurred(id)) => {
+                break id;
+            }
+            _ => continue,
+        }
+    };
+
+    println!("[filesystem] Sector 0 = {:?}", drv.finish_command());
+    librust::syscalls::io::complete_interrupt(id).unwrap();
 }

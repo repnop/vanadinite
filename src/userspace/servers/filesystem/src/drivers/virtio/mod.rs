@@ -9,74 +9,162 @@ mod block_device;
 
 pub use block_device::VirtIoBlockDevice;
 
-use block_device::{Command, CommandKind};
+use block_device::{Command, CommandError, CommandKind, CommandStatus};
 use librust::mem::{DmaElement, DmaRegion, PhysicalAddress};
 use std::collections::BTreeMap;
 use virtio::{
-    splitqueue::{DescriptorFlags, SplitVirtqueue},
+    splitqueue::{DescriptorFlags, SplitVirtqueue, SplitqueueIndex, VirtqueueDescriptor},
     VirtIoDeviceError,
 };
+
+#[derive(Debug, Clone, Copy)]
+pub enum OperationRequest<'a> {
+    Read { sector: u64 },
+    Write { sector: u64, data: &'a [u8] },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum OperationResult {
+    Read([u8; 512]),
+    Write,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Error {
+    CommandError(CommandError),
+    NoCommandCompletion,
+}
+
+impl From<CommandError> for Error {
+    fn from(e: CommandError) -> Self {
+        Self::CommandError(e)
+    }
+}
 
 pub struct BlockDevice {
     device: &'static VirtIoBlockDevice,
     // TODO: allow for multiple queues
     queue: SplitVirtqueue,
     command_buffer: CommandBuffer,
-    issued_commands: BTreeMap<usize, usize>,
+    data_buffer: DataBuffer,
+    issued_commands: BTreeMap<SplitqueueIndex<VirtqueueDescriptor>, (usize, usize)>,
 }
 
 impl BlockDevice {
     pub fn new(device: &'static VirtIoBlockDevice) -> Result<Self, VirtIoDeviceError> {
         let queue = SplitVirtqueue::new(64).unwrap();
         let command_buffer = CommandBuffer::new(512);
+        let data_buffer = DataBuffer::new(512);
 
         device.init(&queue, 0)?;
 
-        Ok(Self { device, queue, command_buffer, issued_commands: BTreeMap::new() })
+        Ok(Self { device, queue, command_buffer, data_buffer, issued_commands: BTreeMap::new() })
     }
 
-    pub fn queue_read(&mut self, sector: u64, read_to: PhysicalAddress) -> usize {
-        let (index, mut request) = self.command_buffer.alloc().unwrap();
+    fn queue_command(&mut self, operation: OperationRequest<'_>) {
+        let (command_index, mut request) = self.command_buffer.alloc().unwrap();
+        let (data_index, mut buffer) = self.data_buffer.alloc().unwrap();
+        let (sector, descriptor_flag, length) = match operation {
+            OperationRequest::Read { sector } => (sector, DescriptorFlags::NEXT | DescriptorFlags::WRITE, 512),
+            OperationRequest::Write { sector, data } => (sector, DescriptorFlags::NEXT, data.len().min(512)),
+        };
 
-        unsafe { *request.get_mut() = Command { kind: CommandKind::Read, _reserved: 0, sector, status: 0 } };
+        *request.get_mut() = Command {
+            kind: match operation {
+                OperationRequest::Read { .. } => CommandKind::Read,
+                OperationRequest::Write { .. } => CommandKind::Write,
+            },
+            _reserved: 0,
+            sector,
+            status: 0,
+        };
+
+        if let OperationRequest::Write { data, .. } = operation {
+            buffer.get_mut()[..length].copy_from_slice(&data[..length]);
+        }
 
         let desc1 = self.queue.alloc_descriptor().unwrap();
         let desc2 = self.queue.alloc_descriptor().unwrap();
         let desc3 = self.queue.alloc_descriptor().unwrap();
 
-        let entry1 = &mut self.queue.descriptors[desc1];
-        entry1.address = request.physical_address();
-        entry1.length = 16;
-        entry1.flags = DescriptorFlags::NEXT;
-        entry1.next = desc2 as u16;
+        self.queue.descriptors.write(
+            desc1,
+            VirtqueueDescriptor {
+                address: request.physical_address(),
+                length: 16,
+                flags: DescriptorFlags::NEXT,
+                next: desc2,
+            },
+        );
 
-        let entry2 = &mut self.queue.descriptors[desc2];
-        entry2.address = read_to;
-        entry2.length = 512;
-        entry2.flags = DescriptorFlags::NEXT | DescriptorFlags::WRITE;
-        entry2.next = desc3 as u16;
+        self.queue.descriptors.write(
+            desc2,
+            VirtqueueDescriptor {
+                address: buffer.physical_address(),
+                length: length as u32,
+                flags: descriptor_flag,
+                next: desc3,
+            },
+        );
 
-        let entry3 = &mut self.queue.descriptors[desc3];
-        entry3.address = PhysicalAddress::new(request.physical_address().as_usize() + 16);
-        entry3.length = 1;
-        entry3.flags = DescriptorFlags::WRITE;
+        self.queue.descriptors.write(
+            desc3,
+            VirtqueueDescriptor {
+                address: PhysicalAddress::new(request.physical_address().as_usize() + 16),
+                length: 1,
+                flags: DescriptorFlags::WRITE,
+                ..Default::default()
+            },
+        );
 
-        let avail = &mut self.queue.available;
-        let avail_index = avail.index as usize;
-        avail.ring[avail_index] = desc1 as u16;
+        self.queue.available.push(desc1);
 
-        // FIXME: check for queue size overflow
-        avail.index += 1;
-
-        self.issued_commands.insert(desc1, index);
+        self.issued_commands.insert(desc1, (command_index, data_index));
 
         // Fence the MMIO register write since its not guaranteed to be in the
         // same order relative to RAM read/writes
-        librust::mem::fence(librust::mem::FenceMode::Full);
+        librust::mem::fence(librust::mem::FenceMode::Write);
 
         self.device.header.queue_notify.notify();
+    }
 
-        desc1
+    pub fn queue_read(&mut self, sector: u64) {
+        self.queue_command(OperationRequest::Read { sector });
+    }
+
+    pub fn queue_write(&mut self, sector: u64, data: &[u8]) {
+        self.queue_command(OperationRequest::Write { sector, data });
+    }
+
+    pub fn finish_command(&mut self) -> Result<OperationResult, Error> {
+        let desc1 = SplitqueueIndex::new(self.queue.used.pop().ok_or(Error::NoCommandCompletion)?.start_index as u16);
+        let desc2 = self.queue.descriptors.read(desc1).next;
+        let desc3 = self.queue.descriptors.read(desc2).next;
+
+        librust::mem::fence(librust::mem::FenceMode::Full);
+        self.device.header.interrupt_ack.acknowledge_buffer_used();
+
+        let (command_idx, data_idx) = self.issued_commands.remove(&desc1).unwrap();
+        let command = self.command_buffer.get(command_idx).unwrap();
+        let data = self.data_buffer.get(data_idx).unwrap();
+
+        self.queue.free_descriptor(desc1);
+        self.queue.free_descriptor(desc2);
+        self.queue.free_descriptor(desc3);
+
+        let command = command.get();
+        CommandStatus::from_u8(command.status).unwrap().into_result()?;
+
+        let ret = match command.kind {
+            CommandKind::Read => Ok(OperationResult::Read(*data.get())),
+            CommandKind::Write => Ok(OperationResult::Write),
+            _ => todo!(),
+        };
+
+        self.command_buffer.dealloc(command_idx);
+        self.data_buffer.dealloc(data_idx);
+
+        ret
     }
 }
 
@@ -96,6 +184,45 @@ impl CommandBuffer {
     fn alloc(&mut self) -> Option<(usize, DmaElement<'_, Command>)> {
         let index = self.free_indices.pop_front()? as usize;
         Some((index, self.buffer.get(index).unwrap()))
+    }
+
+    fn dealloc(&mut self, index: usize) {
+        let index = u16::try_from(index).expect("invalid index supplied");
+        assert!(!self.free_indices.contains(&index));
+        self.free_indices.push_back(index);
+    }
+
+    fn get(&self, index: usize) -> Option<DmaElement<'_, Command>> {
+        self.buffer.get(index)
+    }
+}
+
+struct DataBuffer {
+    buffer: DmaRegion<[[u8; 512]]>,
+    free_indices: VecDeque<u16>,
+}
+
+impl DataBuffer {
+    fn new(len: usize) -> Self {
+        Self {
+            buffer: unsafe { DmaRegion::zeroed_many(len).unwrap().assume_init() },
+            free_indices: (0..len as u16).collect(),
+        }
+    }
+
+    fn alloc(&mut self) -> Option<(usize, DmaElement<'_, [u8; 512]>)> {
+        let index = self.free_indices.pop_front()? as usize;
+        Some((index, self.buffer.get(index).unwrap()))
+    }
+
+    fn dealloc(&mut self, index: usize) {
+        let index = u16::try_from(index).expect("invalid index supplied");
+        assert!(!self.free_indices.contains(&index));
+        self.free_indices.push_back(index);
+    }
+
+    fn get(&self, index: usize) -> Option<DmaElement<'_, [u8; 512]>> {
+        self.buffer.get(index)
     }
 }
 
