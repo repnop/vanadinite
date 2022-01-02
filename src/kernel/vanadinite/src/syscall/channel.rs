@@ -5,6 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::SyscallOutcome;
 use crate::{
     capabilities::{Capability, CapabilityResource},
     interrupts::PLIC,
@@ -12,6 +13,7 @@ use crate::{
         manager::{AddressRegionKind, FillOption, RegionDescription},
         paging::{flags, PageSize, VirtualAddress},
         region::{MemoryRegion, PhysicalRegion},
+        user::{self, RawUserSlice},
     },
     scheduler::{Scheduler, WakeToken, CURRENT_TASK, SCHEDULER, TASKS},
     task::Task,
@@ -21,6 +23,7 @@ use crate::{
 use alloc::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
+    vec::Vec,
 };
 use core::{
     ops::Range,
@@ -34,8 +37,6 @@ use librust::{
 };
 use sync::{SpinMutex, SpinRwLock};
 
-use super::SyscallOutcome;
-
 pub const MAX_CHANNEL_BYTES: usize = 4096;
 
 pub struct UserspaceChannel {
@@ -47,7 +48,7 @@ pub struct UserspaceChannel {
 
 impl UserspaceChannel {
     pub fn new() -> (Self, Self) {
-        let message_id_counter = Arc::new(AtomicUsize::new(0));
+        let message_id_counter = Arc::new(AtomicUsize::new(1));
         let (sender1, receiver1) = {
             let message_queue = Arc::new(SpinRwLock::new(VecDeque::new()));
             let alive = Arc::new(AtomicBool::new(true));
@@ -94,9 +95,9 @@ enum MappedChannelMessage {
 }
 
 #[derive(Debug)]
-enum ChannelMessage {
-    Data(MessageId, PhysicalRegion, usize),
-    Capability(CapabilityPtr),
+struct ChannelMessage {
+    data: Option<(MessageId, PhysicalRegion, usize)>,
+    caps: Vec<librust::capabilities::Capability>,
 }
 
 #[derive(Debug, Clone)]
@@ -197,17 +198,53 @@ pub fn create_message(task: &mut Task, cptr: CapabilityPtr, size: usize) -> Sysc
     SyscallOutcome::processed((message_id, region.start.as_usize(), size))
 }
 
-pub fn send_message(task: &mut Task, cptr: CapabilityPtr, message_id: MessageId, len: usize) -> SyscallOutcome {
+pub fn send_message(
+    task: &mut Task,
+    cptr: CapabilityPtr,
+    message_id: MessageId,
+    len: usize,
+    caps: RawUserSlice<user::Read, librust::capabilities::Capability>,
+) -> SyscallOutcome {
     let current_tid = CURRENT_TASK.get().unwrap();
     let channel_id = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::WRITE =>
         {
-            channel
+            *channel
         }
         _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
     };
-    let (other_tid, channel) = task.channels.get_mut(channel_id).unwrap();
+
+    // Fixup caps here so we can error on any invalid caps/slice and not dealloc
+    // the message region
+    let caps = match caps.len() {
+        0 => Vec::new(),
+        _ => {
+            let cap_slice = match unsafe { caps.validate(&task.memory_manager) } {
+                Ok(cap_slice) => cap_slice,
+                Err(_) => return SyscallOutcome::Err(KError::InvalidArgument(3)),
+            };
+
+            let cap_slice = cap_slice.guarded();
+            let transferred_caps: Result<Vec<librust::capabilities::Capability>, KError> = cap_slice
+                .iter()
+                .copied()
+                .map(|cap| {
+                    Ok(librust::capabilities::Capability {
+                        cptr: transfer_capability(task, cptr, cap.cptr, cap.rights)?,
+                        rights: cap.rights,
+                    })
+                })
+                .collect();
+
+            match transferred_caps {
+                Ok(caps) => caps,
+                Err(e) => return SyscallOutcome::Err(e),
+            }
+        }
+    };
+
+    let (other_tid, channel) = task.channels.get_mut(&channel_id).unwrap();
 
     let range = match channel.mapped_regions.remove(&message_id) {
         Some(MappedChannelMessage::Synthesized(range)) => range,
@@ -230,7 +267,7 @@ pub fn send_message(task: &mut Task, cptr: CapabilityPtr, message_id: MessageId,
 
     // FIXME: once buffer limits exist, will need to either block or return an
     // error and also check for broken channels
-    channel.sender.try_send(ChannelMessage::Data(message_id, backing, len)).unwrap();
+    channel.sender.try_send(ChannelMessage { data: Some((message_id, backing, len)), caps }).unwrap();
 
     let other_cptr = *other_task.cspace.all().find(|(_, cap)| matches!(cap, Capability { resource: CapabilityResource::Channel(cid), .. } if other_task.channels.get(cid).unwrap().0 == current_tid)).unwrap().0;
     other_task
@@ -240,7 +277,11 @@ pub fn send_message(task: &mut Task, cptr: CapabilityPtr, message_id: MessageId,
     SyscallOutcome::Processed(librust::message::Message::default())
 }
 
-pub fn read_message(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcome {
+pub fn read_message(
+    task: &mut Task,
+    cptr: CapabilityPtr,
+    cap_buffer: RawUserSlice<user::ReadWrite, librust::capabilities::Capability>,
+) -> SyscallOutcome {
     let channel_id = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::READ =>
@@ -258,12 +299,12 @@ pub fn read_message(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcome {
     // FIXME: check for broken channel
 
     let mut receiver = channel.receiver.inner.write();
-    match receiver.iter().position(|m| matches!(m, ChannelMessage::Data(..))) {
+    match receiver.pop_front() {
         None => {
             log::debug!("Registering wake for channel::read_message");
             channel.receiver.register_wake(WakeToken::new(CURRENT_TASK.get().unwrap(), move |task| {
                 log::debug!("Waking task for channel::read_message!");
-                let res = read_message(task, cptr);
+                let res = read_message(task, cptr, cap_buffer);
                 match res {
                     SyscallOutcome::Processed(message) => super::apply_message(
                         false,
@@ -277,24 +318,53 @@ pub fn read_message(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcome {
 
             SyscallOutcome::Block
         }
-        Some(idx) => match receiver.remove(idx) {
-            Some(ChannelMessage::Data(message_id, region, len)) => {
-                let region = match region {
+        Some(ChannelMessage { data, mut caps }) => {
+            let mut message_id = MessageId::new(0);
+            let mut region = VirtualAddress::new(0)..VirtualAddress::new(0);
+            let mut len = 0;
+
+            if let Some((mid, mregion, mlen)) = data {
+                message_id = mid;
+                len = mlen;
+
+                let mregion = match mregion {
                     PhysicalRegion::Shared(region) => region,
                     _ => unreachable!(),
                 };
 
                 // FIXME: make it so we can use any kind of physical region
-                let region = task.memory_manager.apply_shared_region(
+                region = task.memory_manager.apply_shared_region(
                     None,
                     flags::READ | flags::WRITE | flags::USER | flags::VALID,
-                    region,
+                    mregion,
                     AddressRegionKind::Channel,
                 );
-                SyscallOutcome::processed((message_id.value(), region.start.as_usize(), len))
             }
-            _ => unreachable!(),
-        },
+
+            let (caps_written, caps_remaining) = match cap_buffer.len() {
+                0 => (0, caps.len()),
+                len => {
+                    let cap_slice = match unsafe { cap_buffer.validate(&task.memory_manager) } {
+                        Ok(cap_slice) => cap_slice,
+                        Err(_) => return SyscallOutcome::Err(KError::InvalidArgument(3)),
+                    };
+
+                    let n_caps_to_write = len.min(caps.len());
+                    let mut cap_slice = cap_slice.guarded();
+                    for (target, cap) in cap_slice.iter_mut().zip(caps.drain(..n_caps_to_write)) {
+                        *target = cap;
+                    }
+
+                    (n_caps_to_write, caps.len())
+                }
+            };
+
+            if caps_remaining != 0 {
+                receiver.push_front(ChannelMessage { data: None, caps });
+            }
+
+            SyscallOutcome::processed((message_id.value(), region.start.as_usize(), len, caps_written, caps_remaining))
+        }
     }
 }
 
@@ -318,20 +388,20 @@ pub fn retire_message(task: &mut Task, cptr: CapabilityPtr, message_id: MessageI
     }
 }
 
-pub fn send_capability(
+fn transfer_capability(
     task: &mut Task,
     cptr: CapabilityPtr,
     cptr_to_send: CapabilityPtr,
     rights: CapabilityRights,
-) -> SyscallOutcome {
+) -> Result<CapabilityPtr, KError> {
     let current_tid = CURRENT_TASK.get().unwrap();
     let cap = match task.cspace.resolve(cptr) {
         Some(cap) => cap,
-        None => return SyscallOutcome::Err(KError::InvalidArgument(0)),
+        None => return Err(KError::InvalidArgument(0)),
     };
 
     if !(cap.rights & CapabilityRights::GRANT) {
-        return SyscallOutcome::Err(KError::InvalidArgument(0));
+        return Err(KError::InvalidArgument(0));
     }
 
     let channel_id = match task.cspace.resolve(cptr) {
@@ -340,17 +410,18 @@ pub fn send_capability(
         {
             channel
         }
-        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
+        _ => return Err(KError::InvalidArgument(0)),
     };
-    let (receiving_tid, receiving_channel) = task.channels.get(channel_id).unwrap();
+
+    let (receiving_tid, _) = task.channels.get(channel_id).unwrap();
 
     let cap_to_send = match task.cspace.resolve(cptr_to_send) {
         Some(cap) => cap,
-        None => return SyscallOutcome::Err(KError::InvalidArgument(1)),
+        None => return Err(KError::InvalidArgument(1)),
     };
 
     if !cap_to_send.rights.is_superset(rights) {
-        return SyscallOutcome::Err(KError::InvalidArgument(2));
+        return Err(KError::InvalidArgument(2));
     }
 
     let receiving_task = match TASKS.get(*receiving_tid) {
@@ -369,7 +440,7 @@ pub fn send_capability(
 
             let mut other_task = other_task.lock();
             if other_task.state.is_dead() {
-                return SyscallOutcome::Err(KError::InvalidArgument(1));
+                return Err(KError::InvalidArgument(1));
             }
 
             let other_rights = other_task
@@ -409,7 +480,7 @@ pub fn send_capability(
                 librust::message::Message::from(KernelNotification::ChannelOpened(other_cptr)),
             );
 
-            receiving_channel.sender.try_send(ChannelMessage::Capability(receiving_cptr)).unwrap();
+            Ok(receiving_cptr)
         }
         CapabilityResource::Memory(phys_region, _, kind) => {
             let mut flags = flags::USER | flags::VALID;
@@ -418,14 +489,15 @@ pub fn send_capability(
                 (true, false) => flags::READ,
                 // Write-only pages aren't supported & doesn't really make sense
                 // to send memory the process can't use at all
-                (_, _) => return SyscallOutcome::Err(KError::InvalidArgument(2)),
+                (_, _) => return Err(KError::InvalidArgument(2)),
             };
 
             let range = receiving_task.memory_manager.apply_shared_region(None, flags, phys_region.clone(), *kind);
             let mem_cap = receiving_task
                 .cspace
                 .mint(Capability { rights, resource: CapabilityResource::Memory(phys_region.clone(), range, *kind) });
-            receiving_channel.sender.try_send(ChannelMessage::Capability(mem_cap)).unwrap();
+
+            Ok(mem_cap)
         }
         CapabilityResource::Mmio(..) => {
             let cap = task.cspace.remove(cptr_to_send).unwrap();
@@ -458,7 +530,6 @@ pub fn send_capability(
             let receiving_cptr = receiving_task
                 .cspace
                 .mint(Capability { resource: CapabilityResource::Mmio(vrange, interrupts.clone()), rights });
-            receiving_channel.sender.try_send(ChannelMessage::Capability(receiving_cptr)).unwrap();
 
             let plic = PLIC.lock();
             let plic = plic.as_ref().unwrap();
@@ -491,48 +562,8 @@ pub fn send_capability(
                     Ok(())
                 });
             }
+
+            Ok(receiving_cptr)
         }
-    }
-
-    SyscallOutcome::Processed(librust::message::Message::default())
-}
-
-pub fn receive_capability(task: &mut Task, cptr: CapabilityPtr) -> SyscallOutcome {
-    let channel_id = match task.cspace.resolve(cptr) {
-        Some(Capability { resource: CapabilityResource::Channel(channel), rights })
-            if *rights & CapabilityRights::READ =>
-        {
-            channel
-        }
-        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
-    };
-    let (_, channel) = task.channels.get_mut(channel_id).unwrap();
-
-    // TODO: need to be able to return more than just the first one
-    // FIXME: check for broken channels
-    let mut receiver = channel.receiver.inner.write();
-    match receiver.iter().position(|m| matches!(m, ChannelMessage::Capability(_))) {
-        None => {
-            log::debug!("Registering wake for channel::receive_capability");
-            channel.receiver.register_wake(WakeToken::new(CURRENT_TASK.get().unwrap(), move |task| {
-                log::debug!("Waking task for channel::read_capability!");
-                let res = receive_capability(task, cptr);
-                match res {
-                    SyscallOutcome::Processed(message) => super::apply_message(
-                        false,
-                        librust::message::Sender::kernel(),
-                        message,
-                        &mut task.context.gp_regs,
-                    ),
-                    r => todo!("is this even possible? {:?}", r),
-                }
-            }));
-
-            SyscallOutcome::Block
-        }
-        Some(idx) => match receiver.remove(idx) {
-            Some(ChannelMessage::Capability(cptr)) => SyscallOutcome::processed(cptr.value()),
-            _ => unreachable!(),
-        },
     }
 }

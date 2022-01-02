@@ -163,15 +163,13 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
             CapabilityPtr::new(syscall_req.arguments[0]),
             MessageId::new(syscall_req.arguments[1]),
             syscall_req.arguments[2],
+            RawUserSlice::new(VirtualAddress::new(syscall_req.arguments[3]), syscall_req.arguments[4]),
         ),
-        Syscall::ReadChannel => channel::read_message(task, CapabilityPtr::new(syscall_req.arguments[0])),
-        Syscall::SendCapability => channel::send_capability(
+        Syscall::ReadChannel => channel::read_message(
             task,
             CapabilityPtr::new(syscall_req.arguments[0]),
-            CapabilityPtr::new(syscall_req.arguments[1]),
-            CapabilityRights::new(syscall_req.arguments[2] as u8),
+            RawUserSlice::new(VirtualAddress::new(syscall_req.arguments[1]), syscall_req.arguments[2]),
         ),
-        Syscall::ReceiveCapability => channel::receive_capability(task, CapabilityPtr::new(syscall_req.arguments[0])),
         Syscall::RetireChannelMessage => channel::retire_message(
             task,
             CapabilityPtr::new(syscall_req.arguments[0]),
@@ -272,7 +270,7 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
                                 plic.set_context_threshold(crate::platform::current_plic_context(), 0);
                                 plic.set_interrupt_priority(interrupt, 7);
                                 crate::interrupts::isr::register_isr(interrupt, move |plic, _, id| {
-                                    crate::dbg!(plic.disable_interrupt(crate::platform::current_plic_context(), id));
+                                    plic.disable_interrupt(crate::platform::current_plic_context(), id);
                                     let task = TASKS.get(current_tid).unwrap();
                                     let mut task = task.lock();
 

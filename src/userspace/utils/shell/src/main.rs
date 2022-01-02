@@ -23,7 +23,7 @@ fn main() {
     let mut history: VecDeque<String> = VecDeque::new();
     let mut history_index = None;
     let mut curr_history: Option<&str> = None;
-    let mut channels: Vec<IpcChannel> = Vec::new();
+    let channels: Vec<IpcChannel> = Vec::new();
 
     loop {
         print!("vanadinite> ");
@@ -164,7 +164,7 @@ fn main() {
             "where_main" => println!("main is at: {:#p}", main as *mut u8),
             "read_channels" => {
                 for channel in &channels {
-                    if let Ok(msg) = channel.read() {
+                    if let Ok((msg, _)) = channel.read_with_all_caps() {
                         match core::str::from_utf8(msg.as_bytes()) {
                             Err(_) => println!("A message! Contents: {:?}", msg.as_bytes()),
                             Ok(s) => println!("A message! It says: {}", s),

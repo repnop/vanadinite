@@ -38,16 +38,15 @@ fn main() {
     let mut devicemgr = std::ipc::IpcChannel::new(devicemgr);
 
     let msg = json::to_bytes(&WantedCompatible { compatible: vec![String::from("ns16550"), String::from("ns16550a")] });
-    devicemgr.send_bytes(&msg).unwrap();
+    devicemgr.send_bytes(&msg, &[]).unwrap();
 
-    let uart_cap = devicemgr.receive_capability().unwrap();
-    let uart_info = librust::syscalls::io::query_mmio_cap(uart_cap).unwrap();
+    let (_message, caps) = devicemgr.read_with_all_caps().unwrap();
+    let uart_info = librust::syscalls::io::query_mmio_cap(caps[0].cptr).unwrap();
 
     let uart = unsafe { &*(uart_info.address() as *mut _ as *const Uart16550) };
     uart.init();
 
-    let response = devicemgr.read().unwrap();
-    let devices: Devices = json::deserialize(response.as_bytes()).unwrap();
+    // let devices: Devices = json::deserialize(message.as_bytes()).unwrap();
 
     // uart.write_str("Got the following devices from devicemgr:\n");
     // for device in devices.devices.iter() {
@@ -74,7 +73,7 @@ fn main() {
         };
 
         let msg = std::ipc::IpcChannel::new(cptr);
-        let msg = msg.read().unwrap();
+        let (msg, _) = msg.read_with_all_caps().unwrap();
 
         for b in msg.as_bytes() {
             uart.write(*b);

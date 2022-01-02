@@ -21,7 +21,7 @@ impl CapabilityPtr {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
-pub struct CapabilityRights(u8);
+pub struct CapabilityRights(usize);
 
 impl CapabilityRights {
     pub const READ: Self = Self(1);
@@ -31,15 +31,15 @@ impl CapabilityRights {
 }
 
 impl CapabilityRights {
-    pub fn new(value: u8) -> Self {
+    pub fn new(value: usize) -> Self {
         Self(value & 0xF)
     }
 
     pub fn is_superset(self, other: Self) -> bool {
-        (self.0 | !other.0) == u8::MAX
+        (self.0 | !other.0) == usize::MAX
     }
 
-    pub fn value(self) -> u8 {
+    pub fn value(self) -> usize {
         self.0
     }
 }
@@ -63,5 +63,24 @@ impl core::ops::BitAnd for CapabilityRights {
 
     fn bitand(self, rhs: Self) -> Self::Output {
         (self.0 & rhs.0) == rhs.0
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct Capability {
+    pub cptr: CapabilityPtr,
+    pub rights: CapabilityRights,
+}
+
+impl Capability {
+    pub fn new(cptr: CapabilityPtr, rights: CapabilityRights) -> Self {
+        Self { cptr, rights }
+    }
+}
+
+impl Default for Capability {
+    fn default() -> Self {
+        Self { cptr: CapabilityPtr::new(0), rights: CapabilityRights::new(0) }
     }
 }

@@ -13,7 +13,7 @@ impl core::fmt::Write for Stdout {
             Some(stdio) => crate::ipc::IpcChannel::new(stdio),
             None => return Ok(()),
         };
-        let _ = stdio.send_bytes(s);
+        let _ = stdio.send_bytes(s, &[]);
         // let _ = librust::syscalls::print(s.as_bytes());
         Ok(())
     }

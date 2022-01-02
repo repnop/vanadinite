@@ -7,7 +7,11 @@
 
 #![feature(drain_filter)]
 
-use librust::{capabilities::CapabilityRights, message::KernelNotification, syscalls::ReadMessage};
+use librust::{
+    capabilities::{Capability, CapabilityRights},
+    message::KernelNotification,
+    syscalls::ReadMessage,
+};
 use std::ipc::IpcChannel;
 use virtio::DeviceType;
 
@@ -52,13 +56,13 @@ json::derive! {
 fn main() {
     let devicemgr_cptr = std::env::lookup_capability("devicemgr").unwrap();
     let mut devicemgr = IpcChannel::new(devicemgr_cptr);
-    devicemgr.send_bytes(&json::to_bytes(&WantedCompatible { compatible: vec!["virtio,mmio".into()] })).unwrap();
+    devicemgr.send_bytes(&json::to_bytes(&WantedCompatible { compatible: vec!["virtio,mmio".into()] }), &[]).unwrap();
 
-    let devices: Devices = json::deserialize(devicemgr.read().unwrap().as_bytes()).unwrap();
+    let (message, capabilities) = devicemgr.read_with_all_caps().unwrap();
+    let devices: Devices = json::deserialize(message.as_bytes()).unwrap();
     let mut virtio_devices = Vec::new();
 
-    for device in devices.devices {
-        let mmio_cap = devicemgr.receive_capability().unwrap();
+    for (device, Capability { cptr: mmio_cap, .. }) in devices.devices.into_iter().zip(capabilities) {
         let info = librust::syscalls::io::query_mmio_cap(mmio_cap).unwrap();
 
         let header = unsafe { &*(info.address() as *const virtio::VirtIoHeader) };
@@ -79,22 +83,24 @@ fn main() {
         };
 
         let mut channel = IpcChannel::new(cptr);
-        let msg = channel.read().unwrap();
+        let (msg, _) = channel.read_with_all_caps().unwrap();
         let dev_type = json::deserialize::<VirtIoDeviceRequest>(msg.as_bytes()).unwrap().ty;
 
         // println!("[virtiomgr] Got request for device type: {:?}", DeviceType::from_u32(dev_type));
 
         let devices: Vec<_> = virtio_devices.drain_filter(|device| device.2 as u32 == dev_type).collect();
-        channel
-            .send_bytes(&json::to_bytes(&VirtIoDeviceResponse {
-                devices: devices.iter().map(|dev| dev.4.clone()).collect(),
-            }))
-            .unwrap();
+        let caps: Vec<_> = devices
+            .iter()
+            .map(|(cap, _, _, _, _)| {
+                Capability::new(*cap, CapabilityRights::READ | CapabilityRights::WRITE | CapabilityRights::GRANT)
+            })
+            .collect();
 
-        for device in devices {
-            channel
-                .send_capability(device.0, CapabilityRights::READ | CapabilityRights::WRITE | CapabilityRights::GRANT)
-                .unwrap();
-        }
+        channel
+            .send_bytes(
+                &json::to_bytes(&VirtIoDeviceResponse { devices: devices.iter().map(|dev| dev.4.clone()).collect() }),
+                &caps,
+            )
+            .unwrap();
     }
 }

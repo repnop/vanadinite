@@ -194,6 +194,14 @@ impl<Mode: UserPtrMode, T> RawUserSlice<Mode, T> {
             Err((addr, InvalidRegion::InvalidPermissions)) => Err((addr, InvalidUserPtr::InvalidAccess)),
         }
     }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl<T> RawUserSlice<Read, T> {
@@ -207,6 +215,8 @@ impl<T> RawUserSlice<ReadWrite, T> {
         Self { addr, len, typë: PhantomData, mode: PhantomData }
     }
 }
+
+unsafe impl<Mode: UserPtrMode, T> Send for RawUserSlice<Mode, T> {}
 
 #[derive(Debug)]
 pub struct ValidatedUserSlice<Mode: UserPtrMode, T> {

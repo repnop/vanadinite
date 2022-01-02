@@ -7,7 +7,12 @@
 
 mod drivers;
 
-use librust::{capabilities::CapabilityPtr, mem::DmaRegion, message::KernelNotification, syscalls::ReadMessage};
+use librust::{
+    capabilities::{Capability, CapabilityPtr},
+    mem::DmaRegion,
+    message::KernelNotification,
+    syscalls::ReadMessage,
+};
 use std::ipc::IpcChannel;
 
 json::derive! {
@@ -43,12 +48,14 @@ fn main() {
     let mut block_devices = Vec::new();
     let mut virtiomgr = IpcChannel::new(std::env::lookup_capability("virtiomgr").unwrap());
 
-    virtiomgr.send_bytes(&json::to_bytes(&VirtIoDeviceRequest { ty: virtio::DeviceType::BlockDevice as u32 })).unwrap();
+    virtiomgr
+        .send_bytes(&json::to_bytes(&VirtIoDeviceRequest { ty: virtio::DeviceType::BlockDevice as u32 }), &[])
+        .unwrap();
     // println!("[filesystem] Sent device request");
-    let response: VirtIoDeviceResponse = json::deserialize(virtiomgr.read().unwrap().as_bytes()).unwrap();
+    let (message, capabilities) = virtiomgr.read_with_all_caps().unwrap();
+    let response: VirtIoDeviceResponse = json::deserialize(message.as_bytes()).unwrap();
 
-    for device in response.devices {
-        let mmio_cap = virtiomgr.receive_capability().unwrap();
+    for (Capability { cptr: mmio_cap, .. }, device) in capabilities.into_iter().zip(response.devices) {
         let info = librust::syscalls::io::query_mmio_cap(mmio_cap).unwrap();
 
         // println!("[filesystem] Got a VirtIO block device!");

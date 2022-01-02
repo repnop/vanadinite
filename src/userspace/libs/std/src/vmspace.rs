@@ -8,7 +8,7 @@
 use core::marker::PhantomData;
 
 use librust::{
-    capabilities::{CapabilityPtr, CapabilityRights},
+    capabilities::{Capability, CapabilityPtr, CapabilityRights},
     error::KError,
     message::SyscallResult,
     syscalls::{
@@ -59,15 +59,13 @@ impl Vmspace {
         for (name, cap, rights) in self.caps_to_send {
             let mut message = channel.new_message(name.len()).unwrap();
             message.write(name.as_bytes());
-            message.send().unwrap();
-
-            channel.send_capability(cap, rights).unwrap();
+            message.send(&[Capability::new(cap, rights)]).unwrap();
         }
 
         const DONE: &str = "done";
         let mut message = channel.new_message(DONE.len()).unwrap();
         message.write(DONE.as_bytes());
-        message.send().unwrap();
+        message.send(&[]).unwrap();
 
         Ok((tid, cptr))
     }

@@ -1,3 +1,7 @@
+use librust::capabilities::Capability;
+
+use crate::ipc::ReadChannelMessage;
+
 #[no_mangle]
 unsafe extern "C" fn _start(argc: isize, argv: *const *const u8, a2: usize) -> ! {
     extern "C" {
@@ -29,9 +33,10 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize 
 
     let mut map = crate::env::CAP_MAP.write();
     let channel = crate::ipc::IpcChannel::new(librust::capabilities::CapabilityPtr::new(0));
+    let mut cap = [Capability::default()];
 
     // FIXME: Wowie is this some awful code!
-    while let Ok(msg) = channel.read() {
+    while let Ok(ReadChannelMessage { message: msg, .. }) = channel.read(&mut cap[..]) {
         let _ = librust::syscalls::receive_message();
         let name = match core::str::from_utf8(msg.as_bytes()) {
             Ok(name) => name,
@@ -42,12 +47,7 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize 
             break;
         }
 
-        let cap = match channel.receive_capability() {
-            Ok(cap) => cap,
-            Err(_) => break,
-        };
-
-        map.insert(name.into(), cap);
+        map.insert(name.into(), cap[0].cptr);
     }
 
     map.insert("parent".into(), librust::capabilities::CapabilityPtr::new(0));

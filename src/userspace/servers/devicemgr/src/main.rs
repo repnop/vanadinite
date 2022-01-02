@@ -5,9 +5,11 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(lang_items)]
-
-use librust::{capabilities::CapabilityRights, message::KernelNotification, syscalls::ReadMessage};
+use librust::{
+    capabilities::{Capability, CapabilityRights},
+    message::KernelNotification,
+    syscalls::ReadMessage,
+};
 use std::ipc::IpcChannel;
 
 json::derive! {
@@ -66,8 +68,8 @@ fn main() {
         };
 
         let mut channel = IpcChannel::new(cptr);
-        let msg = channel.read().unwrap();
-        let compatible = json::deserialize::<WantedCompatible>(msg.as_bytes()).unwrap().compatible;
+        let (message, _) = channel.read_with_all_caps().unwrap();
+        let compatible = json::deserialize::<WantedCompatible>(message.as_bytes()).unwrap().compatible;
 
         let all_compatible = fdt
             .all_nodes()
@@ -80,10 +82,13 @@ fn main() {
             .collect::<Vec<_>>();
 
         match all_compatible.len() {
-            0 => drop(channel.send_bytes({
-                json::serialize(&mut buffer, &Devices { devices: vec![] });
-                &buffer
-            })),
+            0 => drop(channel.send_bytes(
+                {
+                    json::serialize(&mut buffer, &Devices { devices: vec![] });
+                    &buffer
+                },
+                &[],
+            )),
             _ => {
                 let devices = Devices {
                     devices: all_compatible
@@ -96,22 +101,17 @@ fn main() {
                         .collect(),
                 };
 
-                channel
-                    .send_bytes({
-                        json::serialize(&mut buffer, &devices);
-                        &buffer
-                    })
-                    .unwrap();
-
+                let mut caps = Vec::with_capacity(devices.devices.len());
                 for device in all_compatible {
                     let cptr = librust::syscalls::io::claim_device(device.name).unwrap();
-                    channel
-                        .send_capability(
-                            cptr,
-                            CapabilityRights::READ | CapabilityRights::WRITE | CapabilityRights::GRANT,
-                        )
-                        .unwrap();
+                    caps.push(Capability::new(
+                        cptr,
+                        CapabilityRights::READ | CapabilityRights::WRITE | CapabilityRights::GRANT,
+                    ));
                 }
+
+                json::serialize(&mut buffer, &devices);
+                channel.send_bytes(&buffer, &caps[..]).unwrap();
             }
         }
     }

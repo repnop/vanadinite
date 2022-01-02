@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use librust::{
-    capabilities::{CapabilityPtr, CapabilityRights},
+    capabilities::{Capability, CapabilityPtr},
     error::KError,
     message::SyscallResult,
     syscalls::channel::{self, ChannelMessage},
@@ -33,51 +33,61 @@ impl IpcChannel {
         Ok(NewMessage { channel: self, message, cursor: 0 })
     }
 
-    pub fn send_bytes<T: AsRef<[u8]>>(&mut self, msg: T) -> Result<(), KError> {
+    pub fn send_bytes<T: AsRef<[u8]>>(&mut self, msg: T, caps: &[Capability]) -> Result<(), KError> {
         let msg = msg.as_ref();
         let mut chan_msg = self.new_message(msg.len())?;
         chan_msg.write(msg);
-        chan_msg.send()
+        chan_msg.send(caps)
     }
 
     // FIXME: use a real error
     #[allow(clippy::result_unit_err)]
-    pub fn read(&self) -> Result<Message, KError> {
-        match channel::read_message(self.cptr) {
-            SyscallResult::Ok(m) => Ok(Message(self.cptr, m)),
+    pub fn read(&self, cap_buffer: &mut [Capability]) -> Result<ReadChannelMessage, KError> {
+        match channel::read_message(self.cptr, cap_buffer) {
+            SyscallResult::Ok((m, caps_read, caps_left)) => {
+                Ok(ReadChannelMessage { message: Message(self.cptr, m), caps_read, caps_left })
+            }
             SyscallResult::Err(e) => Err(e),
         }
     }
 
-    fn send(&mut self, msg: ChannelMessage, written_len: usize) -> Result<(), KError> {
-        if let SyscallResult::Err(e) = channel::send_message(self.cptr, msg.id, written_len) {
+    pub fn read_with_all_caps(&self) -> Result<(Message, Vec<Capability>), KError> {
+        let mut caps = Vec::new();
+        let ReadChannelMessage { message, caps_left, .. } = self.read(&mut caps[..])?;
+
+        if caps_left > 0 {
+            caps.resize(caps_left, Capability::default());
+            self.read(&mut caps[..])?;
+        }
+
+        Ok((message, caps))
+    }
+
+    fn send(&mut self, msg: ChannelMessage, written_len: usize, caps: &[Capability]) -> Result<(), KError> {
+        if let SyscallResult::Err(e) = channel::send_message(self.cptr, msg.id, written_len, caps) {
             return Err(e);
         }
 
         // FIXME: check for failure
         Ok(())
     }
+}
 
-    pub fn send_capability(&self, cptr: CapabilityPtr, rights: CapabilityRights) -> Result<(), KError> {
-        match channel::send_capability(self.cptr, cptr, rights) {
-            SyscallResult::Ok(_) => Ok(()),
-            SyscallResult::Err(e) => Err(e),
-        }
-    }
-
-    pub fn receive_capability(&self) -> Result<CapabilityPtr, KError> {
-        match channel::receive_capability(self.cptr) {
-            SyscallResult::Ok(cap) => Ok(cap),
-            SyscallResult::Err(e) => Err(e),
-        }
-    }
+pub struct ReadChannelMessage {
+    pub message: Message,
+    pub caps_read: usize,
+    pub caps_left: usize,
 }
 
 pub struct Message(CapabilityPtr, ChannelMessage);
 
 impl Message {
     pub fn as_bytes(&self) -> &[u8] {
-        unsafe { core::slice::from_raw_parts(self.1.ptr, self.1.len) }
+        if !self.1.ptr.is_null() {
+            unsafe { core::slice::from_raw_parts(self.1.ptr, self.1.len) }
+        } else {
+            &[]
+        }
     }
 }
 
@@ -100,8 +110,8 @@ pub struct NewMessage<'a> {
 }
 
 impl NewMessage<'_> {
-    pub fn send(self) -> Result<(), KError> {
-        self.channel.send(self.message, self.cursor)
+    pub fn send(self, caps: &[Capability]) -> Result<(), KError> {
+        self.channel.send(self.message, self.cursor, caps)
     }
 
     pub fn write(&mut self, buffer: &[u8]) {
