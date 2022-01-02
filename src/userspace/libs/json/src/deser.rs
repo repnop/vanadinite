@@ -210,7 +210,7 @@ impl<'a> Deserializer<'a> for crate::parser::Parser<'a> {
 
     fn deserialize_list<F>(&mut self, mut item_callback: F) -> Result<(), ParseError>
     where
-        F: FnMut(&mut Self) -> Result<(), ParseError>
+        F: FnMut(&mut Self) -> Result<(), ParseError>,
     {
         self.parse::<parser::LeftBracket>().unwrap();
 
@@ -320,7 +320,12 @@ impl Deserialize for usize {
 impl<T: Deserialize> Deserialize for alloc::vec::Vec<T> {
     fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
         let mut this = alloc::vec::Vec::new();
-        deserializer.deserialize_list(|deserializer| Ok(this.push(T::deserialize(deserializer)?)))?;
+
+        deserializer.deserialize_list(|deserializer| {
+            this.push(T::deserialize(deserializer)?);
+            Ok(())
+        })?;
+
         Ok(this)
     }
 }
