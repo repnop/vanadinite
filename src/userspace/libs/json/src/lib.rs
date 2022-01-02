@@ -4,8 +4,6 @@ extern crate alloc;
 pub mod deser;
 pub mod parser;
 
-use parser::ParseError;
-
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use core::ops::{Deref, Index};
 
@@ -41,25 +39,25 @@ macro_rules! derive {
 
     (@deser struct $name:ident { $($field:ident: $t:ty),+ $(,)? }) => {
         impl $crate::deser::Deserialize for $name {
-            fn deserialize<'a, D: $crate::deser::Deserializer<'a>>(deserializer: &mut D) -> Self {
+            fn deserialize<'a, D: $crate::deser::Deserializer<'a>>(deserializer: &mut D) -> Result<Self, $crate::deser::DeserializeError> {
                 $(
                     let mut $field: Option<$t> = Option::None;
                 )+
 
                 deserializer.deserialize_object(|name, deserializer| {
-                    match name {
+                    Ok(match name {
                         $(
-                            stringify!($field) => $field = Some(<$t>::deserialize(deserializer)),
+                            stringify!($field) => $field = Some(<$t>::deserialize(deserializer)?),
                         )+
                         #[allow(unreachable_pattern)]
-                        _ => core::mem::drop(deserializer.deserialize_value()),
-                    }
-                });
+                        _ => core::mem::drop(deserializer.deserialize_value()?),
+                    })
+                })?;
 
 
-                Self {
-                    $($field: $field.expect(concat!("field ", stringify!($field), " was not present during deserialization"))),+
-                }
+                Ok(Self {
+                    $($field: $field.ok_or($crate::deser::DeserializeError::MissingField(concat!("field ", stringify!($field), " was not present during deserialization")))?),+
+                })
             }
         }
     };
@@ -158,12 +156,6 @@ pub enum Value {
     Object(Object),
     String(String),
     Null,
-}
-
-impl deser::Deserialize for Value {
-    fn deserialize<'a, D: deser::Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
-        deserializer.deserialize_value()
-    }
 }
 
 impl<'a> parser::Parseable<'a> for Value {
@@ -304,6 +296,6 @@ pub fn serialize<Sr: deser::Serializer, S: deser::Serialize<Sr>>(serializer: &mu
     data.serialize(serializer)
 }
 
-pub fn deserialize<D: deser::Deserialize>(bytes: &[u8]) -> Result<D, parser::ParseError> {
+pub fn deserialize<D: deser::Deserialize>(bytes: &[u8]) -> Result<D, deser::DeserializeError> {
     D::deserialize(&mut parser::Parser::new(bytes))
 }

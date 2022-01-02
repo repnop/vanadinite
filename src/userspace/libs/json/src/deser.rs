@@ -170,28 +170,62 @@ impl<S: Serializer, T: Serialize<S>> Serialize<S> for alloc::vec::Vec<T> {
     }
 }
 
+impl<S: Serializer, T: Serialize<S>> Serialize<S> for Option<T> {
+    fn serialize(&self, serializer: &mut S) {
+        match self {
+            Some(t) => t.serialize(serializer),
+            None => serializer.serialize_null(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum DeserializeError {
+    ParseError(ParseError),
+    MissingField(&'static str),
+}
+
+impl From<ParseError> for DeserializeError {
+    fn from(e: ParseError) -> Self {
+        Self::ParseError(e)
+    }
+}
+
+impl From<core::num::ParseIntError> for DeserializeError {
+    fn from(_: core::num::ParseIntError) -> Self {
+        Self::ParseError(ParseError::IntegerValueTooLarge)
+    }
+}
+
+impl From<core::num::TryFromIntError> for DeserializeError {
+    fn from(_: core::num::TryFromIntError) -> Self {
+        Self::ParseError(ParseError::IntegerValueTooLarge)
+    }
+}
+
 use crate::parser;
 pub trait Deserializer<'a> {
-    fn deserialize_value(&mut self) -> Result<crate::Value, ParseError>;
-    fn deserialize_object<F>(&mut self, member_callback: F) -> Result<(), ParseError>
+    fn deserialize_value(&mut self) -> Result<crate::Value, DeserializeError>;
+    fn deserialize_object<F>(&mut self, member_callback: F) -> Result<(), DeserializeError>
     where
-        F: FnMut(&str, &mut Self) -> Result<(), ParseError>;
-    fn deserialize_list<F>(&mut self, item_callback: F) -> Result<(), ParseError>
+        F: FnMut(&str, &mut Self) -> Result<(), DeserializeError>;
+    fn deserialize_list<F>(&mut self, item_callback: F) -> Result<(), DeserializeError>
     where
-        F: FnMut(&mut Self) -> Result<(), ParseError>;
-    fn deserialize_number(&mut self) -> Result<i64, ParseError>;
-    fn deserialize_null(&mut self) -> Result<(), ParseError>;
-    fn deserialize_str(&mut self) -> Result<&'a str, ParseError>;
+        F: FnMut(&mut Self) -> Result<(), DeserializeError>;
+    fn deserialize_number(&mut self) -> Result<i64, DeserializeError>;
+    fn deserialize_null(&mut self) -> Result<(), DeserializeError>;
+    fn deserialize_str(&mut self) -> Result<&'a str, DeserializeError>;
+    fn try_deserialize<T: Deserialize>(&mut self) -> Option<T>;
 }
 
 impl<'a> Deserializer<'a> for crate::parser::Parser<'a> {
-    fn deserialize_value(&mut self) -> Result<crate::Value, ParseError> {
-        self.parse::<crate::Value>()
+    fn deserialize_value(&mut self) -> Result<crate::Value, DeserializeError> {
+        Ok(self.parse::<crate::Value>()?)
     }
 
-    fn deserialize_object<F>(&mut self, mut member_callback: F) -> Result<(), ParseError>
+    fn deserialize_object<F>(&mut self, mut member_callback: F) -> Result<(), DeserializeError>
     where
-        F: FnMut(&str, &mut Self) -> Result<(), ParseError>,
+        F: FnMut(&str, &mut Self) -> Result<(), DeserializeError>,
     {
         self.parse::<parser::LeftBrace>()?;
 
@@ -208,9 +242,9 @@ impl<'a> Deserializer<'a> for crate::parser::Parser<'a> {
         Ok(())
     }
 
-    fn deserialize_list<F>(&mut self, mut item_callback: F) -> Result<(), ParseError>
+    fn deserialize_list<F>(&mut self, mut item_callback: F) -> Result<(), DeserializeError>
     where
-        F: FnMut(&mut Self) -> Result<(), ParseError>,
+        F: FnMut(&mut Self) -> Result<(), DeserializeError>,
     {
         self.parse::<parser::LeftBracket>().unwrap();
 
@@ -227,11 +261,11 @@ impl<'a> Deserializer<'a> for crate::parser::Parser<'a> {
         Ok(())
     }
 
-    fn deserialize_number(&mut self) -> Result<i64, ParseError> {
-        self.parse::<i64>()
+    fn deserialize_number(&mut self) -> Result<i64, DeserializeError> {
+        Ok(self.parse::<i64>()?)
     }
 
-    fn deserialize_null(&mut self) -> Result<(), ParseError> {
+    fn deserialize_null(&mut self) -> Result<(), DeserializeError> {
         self.skip_whitespace();
         self.eat('n')?;
         self.eat('u')?;
@@ -241,84 +275,94 @@ impl<'a> Deserializer<'a> for crate::parser::Parser<'a> {
         Ok(())
     }
 
-    #[track_caller]
-    fn deserialize_str(&mut self) -> Result<&'a str, ParseError> {
-        self.parse::<&str>()
+    fn deserialize_str(&mut self) -> Result<&'a str, DeserializeError> {
+        Ok(self.parse::<&str>()?)
+    }
+
+    fn try_deserialize<T: Deserialize>(&mut self) -> Option<T> {
+        let current_state = self.state;
+        match T::deserialize(self) {
+            Ok(t) => Some(t),
+            Err(_) => {
+                self.state = current_state;
+                None
+            }
+        }
     }
 }
 
 pub trait Deserialize: Sized {
-    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError>;
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError>;
 }
 
 impl Deserialize for alloc::string::String {
-    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         Ok(deserializer.deserialize_str()?.into())
     }
 }
 
 impl Deserialize for i64 {
-    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         deserializer.deserialize_number()
     }
 }
 
 impl Deserialize for i32 {
-    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         Ok(i32::try_from(deserializer.deserialize_number()?)?)
     }
 }
 
 impl Deserialize for i16 {
-    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         Ok(Self::try_from(deserializer.deserialize_number()?)?)
     }
 }
 
 impl Deserialize for i8 {
-    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         Ok(Self::try_from(deserializer.deserialize_number()?)?)
     }
 }
 
 impl Deserialize for isize {
-    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         Ok(Self::try_from(deserializer.deserialize_number()?)?)
     }
 }
 
 impl Deserialize for u64 {
-    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         Ok(Self::try_from(deserializer.deserialize_number()?)?)
     }
 }
 
 impl Deserialize for u32 {
-    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         Ok(Self::try_from(deserializer.deserialize_number()?)?)
     }
 }
 
 impl Deserialize for u16 {
-    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         Ok(Self::try_from(deserializer.deserialize_number()?)?)
     }
 }
 
 impl Deserialize for u8 {
-    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         Ok(Self::try_from(deserializer.deserialize_number()?)?)
     }
 }
 
 impl Deserialize for usize {
-    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         Ok(Self::try_from(deserializer.deserialize_number()?)?)
     }
 }
 
 impl<T: Deserialize> Deserialize for alloc::vec::Vec<T> {
-    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, ParseError> {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         let mut this = alloc::vec::Vec::new();
 
         deserializer.deserialize_list(|deserializer| {
@@ -327,5 +371,23 @@ impl<T: Deserialize> Deserialize for alloc::vec::Vec<T> {
         })?;
 
         Ok(this)
+    }
+}
+
+impl<T: Deserialize> Deserialize for Option<T> {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
+        match deserializer.try_deserialize::<T>() {
+            Some(t) => Ok(Some(t)),
+            None => {
+                deserializer.deserialize_null()?;
+                Ok(None)
+            }
+        }
+    }
+}
+
+impl Deserialize for crate::Value {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
+        deserializer.deserialize_value()
     }
 }
