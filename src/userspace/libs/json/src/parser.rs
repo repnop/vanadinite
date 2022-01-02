@@ -95,6 +95,12 @@ pub enum ParseError {
     UnexpectedEof,
 }
 
+impl From<core::num::TryFromIntError> for ParseError {
+    fn from(_: core::num::TryFromIntError) -> Self {
+        Self::IntegerValueTooLarge
+    }
+}
+
 pub trait Parseable<'a>: Sized {
     fn parse(parser: &mut Parser<'a>) -> Result<Self, ParseError>;
 }
