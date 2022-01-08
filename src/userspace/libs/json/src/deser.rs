@@ -183,6 +183,7 @@ impl<S: Serializer, T: Serialize<S>> Serialize<S> for Option<T> {
 pub enum DeserializeError {
     ParseError(ParseError),
     MissingField(&'static str),
+    UnknownVariantValue,
 }
 
 impl From<ParseError> for DeserializeError {
@@ -230,6 +231,7 @@ impl<'a> Deserializer<'a> for crate::parser::Parser<'a> {
         self.parse::<parser::LeftBrace>()?;
 
         while let Some((name, _)) = self.parse_or_rewind::<(&str, parser::Colon)>() {
+            self.skip_whitespace();
             member_callback(name, self)?;
 
             if self.parse::<Option<parser::Comma>>()?.is_none() {
@@ -293,6 +295,11 @@ impl<'a> Deserializer<'a> for crate::parser::Parser<'a> {
 
 pub trait Deserialize: Sized {
     fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError>;
+
+    #[doc(hidden)]
+    fn init() -> Option<Self> {
+        None
+    }
 }
 
 impl Deserialize for alloc::string::String {
@@ -375,6 +382,10 @@ impl<T: Deserialize> Deserialize for alloc::vec::Vec<T> {
 }
 
 impl<T: Deserialize> Deserialize for Option<T> {
+    fn init() -> Option<Self> {
+        Some(None)
+    }
+
     fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         match deserializer.try_deserialize::<T>() {
             Some(t) => Ok(Some(t)),
