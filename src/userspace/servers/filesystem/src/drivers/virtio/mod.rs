@@ -125,7 +125,7 @@ impl BlockDevice {
         // same order relative to RAM read/writes
         librust::mem::fence(librust::mem::FenceMode::Write);
 
-        self.device.header.queue_notify.notify();
+        self.device.header.queue_notify.notify(0);
     }
 
     pub fn queue_read(&mut self, sector: u64) {

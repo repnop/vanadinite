@@ -47,6 +47,11 @@ impl PhysicalAddress {
     pub fn as_mut_ptr(self) -> *mut u8 {
         self.0 as *mut u8
     }
+
+    #[must_use]
+    pub fn offset(self, offset: usize) -> Self {
+        Self(self.0 + offset)
+    }
 }
 
 impl core::fmt::Debug for PhysicalAddress {

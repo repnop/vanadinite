@@ -67,7 +67,10 @@ fn main() {
 
         let header = unsafe { &*(info.address() as *const virtio::VirtIoHeader) };
         let dev_type = header.device_type().unwrap();
-        // println!("[virtiomgr] We have a VirtIO {:?} device: {:?}", dev_type, device);
+
+        if !matches!(dev_type, DeviceType::Reserved) {
+            println!("[virtiomgr] We have a VirtIO {:?} device: {:?}", dev_type, device);
+        }
 
         virtio_devices.push((mmio_cap, info, dev_type, header, device));
     }

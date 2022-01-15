@@ -92,8 +92,6 @@ pub fn run(options: RunOptions) -> Result<()> {
 
     let enable_virtio_block_device = match (options.vanadinite_options.platform, &options.drive_file) {
         (Platform::Virt, Some(path)) => vec![
-            String::from("-global"),
-            String::from("virtio-mmio.force-legacy=false"),
             String::from("-drive"),
             format!("file={},if=none,format=raw,id=hd", path.display()),
             String::from("-device"),
@@ -115,16 +113,7 @@ pub fn run(options: RunOptions) -> Result<()> {
                 Some(path) => vec![
                     String::from("-d"),
                     String::from("guest_errors,\
-                                    trace:virtio_blk_req_complete,\
-                                    trace:virtio_blk_rw_complete,\
-                                    trace:virtio_blk_handle_write,\
-                                    trace:virtio_blk_handle_read,\
-                                    trace:virtio_blk_submit_multireq,\
-                                    trace:virtio_mmio_read,\
-                                    trace:virtio_notify,\
-                                    trace:virtio_notify_irqfd,\
-                                    trace:virtio_queue_notify,\
-                                    trace:virtio_set_status"),
+                                    trace:virtio*"),
                     String::from("-D"),
                     format!("{}", path.display()),
                     String::from("-monitor"), String::from("stdio"),
@@ -133,13 +122,17 @@ pub fn run(options: RunOptions) -> Result<()> {
             };
 
             cmd!("
-                qemu-system-riscv64
+                ./qemu-system-riscv64
                     -machine {platform}
                     -cpu rv64
                     -smp {cpu_count}
                     -m {ram}M
                     -append {kernel_args}
+                    -global virtio-mmio.force-legacy=false
                     {enable_virtio_block_device...}
+                    -netdev user,id=net1
+                    -device virtio-net-device,netdev=net1
+                    -object filter-dump,id=f1,netdev=net1,file=nettraffic.dat
                     -bios {sbi_firmware}
                     -kernel src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite
                     {debug_log...}

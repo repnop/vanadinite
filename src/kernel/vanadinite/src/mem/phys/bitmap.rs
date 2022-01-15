@@ -132,7 +132,7 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
         match align_to {
             PageSize::Megapage => self.alloc_contiguous(align_to, 1),
             PageSize::Kilopage => {
-                log::debug!("attempting to allocate a single page");
+                log::trace!("attempting to allocate a single page");
                 if let Some((index, entry)) = self.bitmap_slice().iter_mut().enumerate().find(|(_, e)| **e != u64::MAX)
                 {
                     let bit_index = entry.trailing_ones() as usize;
@@ -142,7 +142,7 @@ unsafe impl PhysicalMemoryAllocator for BitmapAllocator {
 
                     if page_ptr <= self.mem_end {
                         *entry |= 1 << bit_index;
-                        log::debug!("Allocated page at: {:#p}", page_ptr);
+                        log::trace!("Allocated page at: {:#p}", page_ptr);
                         return Some(PhysicalPage::from_ptr(page_ptr));
                     }
                 }

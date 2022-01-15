@@ -70,16 +70,16 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
         let mut prev_node: Option<*mut FreeListNode> = None;
         let mut node = head;
 
-        log::debug!("FreeListAllocator::alloc: head={:?}", &*head);
+        log::trace!("FreeListAllocator::alloc: head={:?}", &*head);
 
         loop {
-            log::debug!("FreeListAllocator::alloc: checking node, node={:?}", &*node);
+            log::trace!("FreeListAllocator::alloc: checking node, node={:?}", &*node);
             // if the node's size is large enough to fit another header + at
             // least 8 bytes, we can split it
             let enough_for_split = (*node).size >= size + FreeListNode::struct_size() + 8;
 
             if (*node).size >= size && !enough_for_split {
-                log::debug!("FreeListAllocator::alloc: reusing node, but its not big enough to split");
+                log::trace!("FreeListAllocator::alloc: reusing node, but its not big enough to split");
 
                 match prev_node {
                     Some(prev_node) => (*prev_node).next = (*node).next,
@@ -90,11 +90,11 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
             }
 
             if (*node).size >= size && enough_for_split {
-                log::debug!("FreeListAllocator::alloc: reusing node and splitting");
+                log::trace!("FreeListAllocator::alloc: reusing node and splitting");
 
                 let new_node = (&mut *node).split(size);
 
-                log::debug!(
+                log::trace!(
                     "FreeListAllocator::alloc: created new node, current node={:?}, new node={:?}",
                     &*node,
                     &*new_node.as_ptr()
@@ -103,7 +103,7 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
                 match prev_node {
                     Some(prev_node) => (*prev_node).next = Some(new_node),
                     None => {
-                        log::debug!("Setting head to {:?}", &*new_node.as_ptr());
+                        log::trace!("Setting head to {:?}", &*new_node.as_ptr());
                         this.head = Some(new_node);
                     }
                 }

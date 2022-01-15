@@ -50,12 +50,6 @@ impl VirtIoBlockDevice {
             return Err(VirtIoDeviceError::FeaturesNotRecognized);
         }
 
-        self.header.status.set_flag(StatusFlag::DriverOk);
-
-        if self.header.status.failed() {
-            return Err(VirtIoDeviceError::DeviceError);
-        }
-
         self.header.queue_select.write(queue_select);
         self.header.queue_size.write(queue.queue_size());
         self.header.queue_descriptor.set(queue.descriptors.physical_address());
@@ -63,6 +57,12 @@ impl VirtIoBlockDevice {
         self.header.queue_used.set(queue.used.physical_address());
 
         self.header.queue_ready.ready();
+
+        self.header.status.set_flag(StatusFlag::DriverOk);
+
+        if self.header.status.failed() {
+            return Err(VirtIoDeviceError::DeviceError);
+        }
 
         Ok(())
     }

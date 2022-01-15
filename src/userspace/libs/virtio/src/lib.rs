@@ -5,6 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+pub mod devices;
 pub mod splitqueue;
 
 pub use registers::StatusFlag;
@@ -178,8 +179,8 @@ mod registers {
     pub struct QueueNotify(Volatile<u32, Write>);
 
     impl QueueNotify {
-        pub fn notify(&self) {
-            self.0.write(0);
+        pub fn notify(&self, queue: u32) {
+            self.0.write(queue);
         }
     }
 

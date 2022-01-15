@@ -37,6 +37,10 @@ static INIT_ORDER: &str = r#"{
             "name": "filesystem",
             "caps": ["virtiomgr", "stdio"],
         },
+        {
+            "name": "network",
+            "caps": ["virtiomgr", "stdio"],
+        },
     ]
 }"#;
 

@@ -112,7 +112,7 @@ impl UniquePhysicalRegion {
             let mut pages = Vec::with_capacity(n_pages);
 
             for _ in 0..n_pages {
-                log::debug!("Allocating page for sparse region");
+                log::trace!("Allocating page for sparse region");
                 pages.push(allocator.alloc(page_size).expect("couldn't alloc sparse region"));
             }
 

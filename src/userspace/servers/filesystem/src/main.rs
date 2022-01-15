@@ -55,6 +55,10 @@ fn main() {
     let (message, capabilities) = virtiomgr.read_with_all_caps().unwrap();
     let response: VirtIoDeviceResponse = json::deserialize(message.as_bytes()).unwrap();
 
+    if response.devices.is_empty() {
+        return;
+    }
+
     for (Capability { cptr: mmio_cap, .. }, device) in capabilities.into_iter().zip(response.devices) {
         let info = librust::syscalls::io::query_mmio_cap(mmio_cap).unwrap();
 

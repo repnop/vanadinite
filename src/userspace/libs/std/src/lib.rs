@@ -44,7 +44,7 @@ macro_rules! println {
 macro_rules! dbg {
     ($e:expr) => {{
         let e = $e;
-        $crate::println!("{} = {:?}", stringify!($e), e);
+        $crate::println!("[{}:{}] {} = {:?}", file!(), line!(), stringify!($e), e);
         $e
     }};
 }

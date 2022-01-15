@@ -16,6 +16,6 @@ pub mod rust_2021 {
         vec::Vec,
     };
     pub use core::prelude::rust_2021::*;
-    pub use core::{assert, assert_eq, assert_ne, panic, todo, unreachable};
+    pub use core::{assert, assert_eq, assert_ne, matches, panic, todo, unreachable};
     pub use librust::{task::Tid, taskgroup::TaskGroupShareable};
 }
