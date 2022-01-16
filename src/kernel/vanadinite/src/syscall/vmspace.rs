@@ -5,6 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use core::num::NonZeroUsize;
 use crate::{
     capabilities::{Capability, CapabilityResource, CapabilitySpace},
     mem::{
@@ -23,6 +24,7 @@ use librust::{
     capabilities::CapabilityRights,
     error::{AccessError, KError},
     syscalls::{allocation::MemoryPermissions, channel::ChannelId, vmspace::VmspaceObjectId},
+    task::Tid,
 };
 
 use super::SyscallOutcome;
@@ -173,6 +175,7 @@ pub fn spawn_vmspace(
     log::debug!("Memory map:\n{:#?}", object.memory_manager.address_map_debug(None));
 
     let mut new_task = Task {
+        tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),
         name: alloc::string::String::from(task_name).into_boxed_str(),
         context: Context {
             pc,

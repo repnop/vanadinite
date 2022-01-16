@@ -69,7 +69,10 @@ fn main() {
     let init_order: InitOrder = json::deserialize(INIT_ORDER.as_bytes()).unwrap();
 
     for server in init_order.servers {
-        let file = tar.file(&server.name).unwrap();
+        let file = match tar.file(&server.name) {
+            Some(file) => file,
+            None => panic!("couldn't find file for {:?}", server.name),
+        };
         let (mut space, mut env) = loadelf::load_elf(&server.name, &loadelf::Elf::new(file.contents).unwrap()).unwrap();
 
         for cap in server.caps {

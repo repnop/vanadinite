@@ -305,24 +305,28 @@ pub unsafe extern "C" fn stvec_trap_shim() -> ! {
         csrci sstatus, 2
         csrrw s0, sscratch, s0
 
-        sd sp, 16(s0)
-        sd tp, 24(s0)
+        sd sp, 24(s0)
+        sd tp, 32(s0)
+        sd gp, 40(s0)
 
         ld sp, 0(s0)
         ld tp, 8(s0)
+        ld gp, 16(s0)
 
         addi sp, sp, -248
 
         sd x1, 0(sp)
 
         # push original sp
-        ld x1, 16(s0)
+        ld x1, 24(s0)
         sd x1, 8(sp)
 
-        sd x3, 16(sp)
+        # store original gp
+        ld x1, 40(s0)
+        sd x1, 16(sp)
 
         # store original tp
-        ld x1, 24(s0)
+        ld x1, 32(s0)
         sd x1, 24(sp)
 
         sd x5, 32(sp)
@@ -410,7 +414,7 @@ pub unsafe extern "C" fn stvec_trap_shim() -> ! {
 
         sc.d zero, zero, 0(sp)
         csrr sp, sscratch
-        ld sp, 16(sp)
+        ld sp, 24(sp)
 
         # gtfo
         sret

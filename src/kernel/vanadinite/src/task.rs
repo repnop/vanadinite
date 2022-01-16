@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use core::num::NonZeroUsize;
+
 use crate::{
     capabilities::CapabilitySpace,
     mem::{
@@ -38,8 +40,10 @@ use librust::{
 pub struct ThreadControlBlock {
     pub kernel_stack: *mut u8,
     pub kernel_thread_local: *mut u8,
+    pub kernel_global_ptr: *mut u8,
     pub saved_sp: usize,
     pub saved_tp: usize,
+    pub saved_gp: usize,
     pub kernel_stack_size: usize,
 }
 
@@ -48,8 +52,10 @@ impl ThreadControlBlock {
         Self {
             kernel_stack: core::ptr::null_mut(),
             kernel_thread_local: core::ptr::null_mut(),
+            kernel_global_ptr: core::ptr::null_mut(),
             saved_sp: 0,
             saved_tp: 0,
+            saved_gp: 0,
             kernel_stack_size: 0,
         }
     }
@@ -103,6 +109,7 @@ impl MessageQueue {
 }
 
 pub struct Task {
+    pub tid: Tid,
     pub name: Box<str>,
     pub context: Context,
     pub memory_manager: MemoryManager,
@@ -363,6 +370,7 @@ impl Task {
         };
 
         Self {
+            tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),
             name: Box::from(name),
             context,
             memory_manager,
