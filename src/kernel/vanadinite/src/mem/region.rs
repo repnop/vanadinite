@@ -91,7 +91,7 @@ impl UniquePhysicalRegion {
 
     #[track_caller]
     pub fn alloc_contiguous(page_size: PageSize, n_pages: usize) -> Self {
-        log::debug!("Allocating page for contiguous region");
+        // log::trace!("Allocating page for contiguous region");
         let mut lock = PHYSICAL_MEMORY_ALLOCATOR.lock();
 
         let kind = PhysicalRegionKind::Contiguous(unsafe {
@@ -112,7 +112,7 @@ impl UniquePhysicalRegion {
             let mut pages = Vec::with_capacity(n_pages);
 
             for _ in 0..n_pages {
-                log::trace!("Allocating page for sparse region");
+                // log::trace!("Allocating page for sparse region");
                 pages.push(allocator.alloc(page_size).expect("couldn't alloc sparse region"));
             }
 
@@ -140,9 +140,11 @@ impl UniquePhysicalRegion {
 
     pub fn copy_data_into(&mut self, data: &[u8]) {
         for (phys_addr, data) in self.physical_addresses().zip(data.chunks(self.page_size.to_byte_size())) {
-            let copy_to = unsafe {
-                core::slice::from_raw_parts_mut(phys2virt(phys_addr).as_mut_ptr(), self.page_size.to_byte_size())
-            };
+            let virt_addr = phys2virt(phys_addr).as_mut_ptr();
+
+            log::trace!("copy_data_into: phys_addr={:#p} virt_addr={:#p} len={}", phys_addr, virt_addr, data.len());
+
+            let copy_to = unsafe { core::slice::from_raw_parts_mut(virt_addr, self.page_size.to_byte_size()) };
 
             copy_to[..data.len()].copy_from_slice(data);
         }
@@ -150,9 +152,11 @@ impl UniquePhysicalRegion {
 
     pub fn zero(&mut self) {
         for phys_addr in self.physical_addresses() {
-            let copy_to = unsafe {
-                core::slice::from_raw_parts_mut(phys2virt(phys_addr).as_mut_ptr(), self.page_size.to_byte_size())
-            };
+            let virt_addr = phys2virt(phys_addr).as_mut_ptr();
+
+            log::trace!("zero: phys_addr={:#p} virt_addr={:#p}", phys_addr, virt_addr);
+
+            let copy_to = unsafe { core::slice::from_raw_parts_mut(virt_addr, self.page_size.to_byte_size()) };
 
             copy_to.fill(0);
         }

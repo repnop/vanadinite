@@ -124,9 +124,11 @@ pub fn build(target: BuildTarget) -> Result<()> {
         BuildTarget::Vanadinite(build_opts) => {
             let features = format!("platform.{} {}", build_opts.platform, build_opts.kernel_features);
 
+            let opt_level = if build_opts.debug_build { "--profile=dev" } else { "--release" };
+            let opt_level = &[opt_level][..];
             let (subcmd, test) = match build_opts.test {
                 true => ("rustc", &["--", "--test"][..]),
-                false => ("build", &["--release"][..]),
+                false => ("build", opt_level),
             };
 
             let _dir = pushd("./src/kernel");

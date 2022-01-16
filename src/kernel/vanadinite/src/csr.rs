@@ -166,7 +166,7 @@ pub mod satp {
         unsafe { asm!("csrr {}, satp", out(reg) value) };
 
         let asid = ((value >> 44) & 0xFFFF) as u16;
-        let root_page_table = PhysicalAddress::new(value << 12);
+        let root_page_table = PhysicalAddress::new((value & ((1 << 44) - 1)) << 12);
         let mode = match value >> 60 {
             0 => SatpMode::Bare,
             8 => SatpMode::Sv39,

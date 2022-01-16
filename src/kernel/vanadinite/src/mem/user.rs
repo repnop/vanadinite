@@ -199,6 +199,10 @@ impl<Mode: UserPtrMode, T> RawUserSlice<Mode, T> {
         self.len
     }
 
+    pub fn addr(&self) -> VirtualAddress {
+        self.addr
+    }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

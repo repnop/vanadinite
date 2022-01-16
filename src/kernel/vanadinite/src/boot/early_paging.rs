@@ -174,8 +174,8 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let gp: usize;
     core::arch::asm!("lla {}, __global_pointer$", out(reg) gp);
 
-    let new_sp = (tmp_stack_end - phys_load) + page_offset_value;
-    let new_gp = (gp - phys_load) + page_offset_value;
+    let new_sp = kernel_section_p2v(PhysicalAddress::new(tmp_stack_end)).as_usize();
+    let new_gp = kernel_section_p2v(PhysicalAddress::new(gp)).as_usize();
 
     #[cfg(not(test))]
     let kmain = crate::kmain as *const u8;

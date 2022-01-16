@@ -41,6 +41,10 @@ fn main() {
     devicemgr.send_bytes(&msg, &[]).unwrap();
 
     let (_message, caps) = devicemgr.read_with_all_caps().unwrap();
+    if caps.is_empty() {
+        return;
+    }
+
     let uart_info = librust::syscalls::io::query_mmio_cap(caps[0].cptr).unwrap();
 
     let uart = unsafe { &*(uart_info.address() as *mut _ as *const Uart16550) };

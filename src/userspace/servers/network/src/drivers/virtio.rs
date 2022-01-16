@@ -9,43 +9,43 @@ use std::collections::BTreeMap;
 
 use librust::mem::{DmaElement, DmaRegion};
 use virtio::{
-    devices::net::{GsoType, HeaderFlags, LinkStatus, NetDeviceFeatures, NetDeviceFeaturesSplit},
+    devices::net::{
+        GsoType, HeaderFlags, LinkStatus, NetDeviceFeatures, NetDeviceFeaturesSplit, VirtIoNetHeaderRx,
+        VirtIoNetHeaderTx,
+    },
     splitqueue::{DescriptorFlags, SplitVirtqueue, SplitqueueIndex, VirtqueueDescriptor},
     StatusFlag, VirtIoDeviceError,
 };
 
-type VirtIoNetHeader = virtio::devices::net::VirtIoNetHeader<MAX_PACKET_LENGTH>;
-
 const MAX_PACKET_LENGTH: usize = 1500; //65550;
-const HEADER_LENGTH: usize = core::mem::size_of::<virtio::devices::net::VirtIoNetHeader<0>>();
 
 pub struct VirtIoNetDevice {
     device: &'static virtio::devices::net::VirtIoNetDevice,
     receive_queue: SplitVirtqueue,
     transmit_queue: SplitVirtqueue,
-    rx_data_buffer: DataBuffer,
+    rx_data_buffer: RxDataBuffer,
     rx_buffer_map: BTreeMap<SplitqueueIndex<VirtqueueDescriptor>, usize>,
-    tx_data_buffer: DataBuffer,
+    tx_data_buffer: TxDataBuffer,
     tx_buffer_map: BTreeMap<SplitqueueIndex<VirtqueueDescriptor>, usize>,
 }
 
 impl VirtIoNetDevice {
     pub fn new(device: &'static virtio::devices::net::VirtIoNetDevice) -> Result<Self, VirtIoDeviceError> {
-        let mut rx_data_buffer = DataBuffer::new(8);
+        let mut rx_data_buffer = RxDataBuffer::new(64);
         let mut rx_buffer_map = BTreeMap::new();
-        let tx_data_buffer = DataBuffer::new(8);
+        let tx_data_buffer = TxDataBuffer::new(64);
         let tx_buffer_map = BTreeMap::new();
-        let mut receive_queue = SplitVirtqueue::new(8).unwrap();
-        let transmit_queue = SplitVirtqueue::new(8).unwrap();
+        let mut receive_queue = SplitVirtqueue::new(64).unwrap();
+        let transmit_queue = SplitVirtqueue::new(64).unwrap();
 
-        for _ in 0..4 {
+        for _ in 0..receive_queue.queue_size() / 2 {
             let descriptor = receive_queue.alloc_descriptor().unwrap();
             let (index, buffer) = rx_data_buffer.alloc().unwrap();
             receive_queue.descriptors.write(
                 descriptor,
                 VirtqueueDescriptor {
                     address: buffer.physical_address(),
-                    length: MAX_PACKET_LENGTH as u32 + HEADER_LENGTH as u32,
+                    length: core::mem::size_of_val(buffer.get()) as u32,
                     flags: DescriptorFlags::WRITE,
                     next: SplitqueueIndex::new(0),
                 },
@@ -145,12 +145,13 @@ impl VirtIoNetDevice {
             return Err(VirtIoDeviceError::DeviceError);
         }
 
-        // device.header.queue_notify.notify(1);
+        device.header.queue_notify.notify(0);
 
         Ok(Self { device, receive_queue, transmit_queue, rx_data_buffer, rx_buffer_map, tx_data_buffer, tx_buffer_map })
     }
 
     pub fn send_raw(&mut self, data: &[u8]) {
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
         let (index, mut buffer) = self.tx_data_buffer.alloc().unwrap();
         let header = buffer.get_mut();
 
@@ -159,7 +160,6 @@ impl VirtIoNetDevice {
         header.gso_size = 0;
         header.gso_type = GsoType::NONE;
         header.header_len = 0;
-        header.num_buffers = 0;
         header.checksum_offset = 0;
         header.checksum_start = 0;
 
@@ -168,7 +168,7 @@ impl VirtIoNetDevice {
             descr,
             VirtqueueDescriptor {
                 address: buffer.physical_address(),
-                length: HEADER_LENGTH as u32 + data.len() as u32,
+                length: core::mem::size_of_val(header) as u32,
                 flags: DescriptorFlags::NONE,
                 next: SplitqueueIndex::new(0),
             },
@@ -179,7 +179,6 @@ impl VirtIoNetDevice {
         librust::mem::fence(librust::mem::FenceMode::Write);
 
         self.device.header.queue_notify.notify(1);
-        println!("notified tx queue");
     }
 
     pub fn mac_address(&self) -> [u8; 6] {
@@ -195,6 +194,14 @@ impl VirtIoNetDevice {
     // }
 
     pub fn recv(&mut self) {
+        self.device.header.interrupt_ack.acknowledge_buffer_used();
+
+        if let Some(used) = self.transmit_queue.used.pop() {
+            let descr = SplitqueueIndex::new(used.start_index as u16);
+            let index = self.tx_buffer_map.remove(&descr).unwrap();
+            self.tx_data_buffer.dealloc(index);
+        }
+
         if let Some(used) = self.receive_queue.used.pop() {
             let descr = SplitqueueIndex::new(used.start_index as u16);
             let size = self.receive_queue.descriptors.read(descr).length as usize;
@@ -206,12 +213,12 @@ impl VirtIoNetDevice {
     }
 }
 
-struct DataBuffer {
-    buffer: DmaRegion<[VirtIoNetHeader]>,
+struct TxDataBuffer {
+    buffer: DmaRegion<[VirtIoNetHeaderTx<MAX_PACKET_LENGTH>]>,
     free_indices: VecDeque<u16>,
 }
 
-impl DataBuffer {
+impl TxDataBuffer {
     fn new(len: usize) -> Self {
         Self {
             buffer: unsafe { DmaRegion::zeroed_many(len).unwrap().assume_init() },
@@ -219,7 +226,7 @@ impl DataBuffer {
         }
     }
 
-    fn alloc(&mut self) -> Option<(usize, DmaElement<'_, VirtIoNetHeader>)> {
+    fn alloc(&mut self) -> Option<(usize, DmaElement<'_, VirtIoNetHeaderTx<MAX_PACKET_LENGTH>>)> {
         let index = self.free_indices.pop_front()? as usize;
         Some((index, self.buffer.get(index).unwrap()))
     }
@@ -230,7 +237,36 @@ impl DataBuffer {
         self.free_indices.push_back(index);
     }
 
-    fn get(&self, index: usize) -> Option<DmaElement<'_, VirtIoNetHeader>> {
+    fn get(&mut self, index: usize) -> Option<DmaElement<'_, VirtIoNetHeaderTx<MAX_PACKET_LENGTH>>> {
+        self.buffer.get(index)
+    }
+}
+
+struct RxDataBuffer {
+    buffer: DmaRegion<[VirtIoNetHeaderRx<MAX_PACKET_LENGTH>]>,
+    free_indices: VecDeque<u16>,
+}
+
+impl RxDataBuffer {
+    fn new(len: usize) -> Self {
+        Self {
+            buffer: unsafe { DmaRegion::zeroed_many(len).unwrap().assume_init() },
+            free_indices: (0..len as u16).collect(),
+        }
+    }
+
+    fn alloc(&mut self) -> Option<(usize, DmaElement<'_, VirtIoNetHeaderRx<MAX_PACKET_LENGTH>>)> {
+        let index = self.free_indices.pop_front()? as usize;
+        Some((index, self.buffer.get(index).unwrap()))
+    }
+
+    fn dealloc(&mut self, index: usize) {
+        let index = u16::try_from(index).expect("invalid index supplied");
+        assert!(!self.free_indices.contains(&index));
+        self.free_indices.push_back(index);
+    }
+
+    fn get(&mut self, index: usize) -> Option<DmaElement<'_, VirtIoNetHeaderRx<MAX_PACKET_LENGTH>>> {
         self.buffer.get(index)
     }
 }

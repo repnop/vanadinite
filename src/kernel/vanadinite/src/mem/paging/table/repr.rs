@@ -301,8 +301,13 @@ impl PhysicalAddress {
         PhysicalAddress(addr)
     }
 
+    #[must_use]
+    #[track_caller]
     pub fn offset(self, bytes: usize) -> Self {
-        Self(self.0 + bytes)
+        match self.0.checked_add(bytes) {
+            Some(value) => Self(value),
+            None => panic!("physical address wrapped overflow: {:#p} + {:#x}", self, bytes),
+        }
     }
 
     pub fn from_ptr<T>(ptr: *const T) -> Self {

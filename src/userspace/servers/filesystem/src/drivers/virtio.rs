@@ -5,16 +5,13 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-mod block_device;
-
-pub use block_device::VirtIoBlockDevice;
-
-use block_device::{Command, CommandError, CommandKind, CommandStatus};
 use librust::mem::{DmaElement, DmaRegion, PhysicalAddress};
 use std::collections::BTreeMap;
+use virtio::devices::block::{Command, CommandError, CommandKind, CommandStatus};
 use virtio::{
+    devices::block::VirtIoBlockDevice,
     splitqueue::{DescriptorFlags, SplitVirtqueue, SplitqueueIndex, VirtqueueDescriptor},
-    VirtIoDeviceError,
+    StatusFlag, VirtIoDeviceError,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -56,7 +53,38 @@ impl BlockDevice {
         let command_buffer = CommandBuffer::new(512);
         let data_buffer = DataBuffer::new(512);
 
-        device.init(&queue, 0)?;
+        device.header.status.reset();
+
+        device.header.status.set_flag(StatusFlag::Acknowledge);
+        device.header.status.set_flag(StatusFlag::Driver);
+
+        // TODO: maybe use feature bits at some point
+        let _ = device.header.features();
+
+        device.header.driver_features_select.write(0);
+        device.header.device_features_select.write(0);
+
+        device.header.driver_features.write(0);
+
+        device.header.status.set_flag(StatusFlag::FeaturesOk);
+
+        if !device.header.status.is_set(StatusFlag::FeaturesOk) {
+            return Err(VirtIoDeviceError::FeaturesNotRecognized);
+        }
+
+        device.header.queue_select.write(0);
+        device.header.queue_size.write(queue.queue_size());
+        device.header.queue_descriptor.set(queue.descriptors.physical_address());
+        device.header.queue_available.set(queue.available.physical_address());
+        device.header.queue_used.set(queue.used.physical_address());
+
+        device.header.queue_ready.ready();
+
+        device.header.status.set_flag(StatusFlag::DriverOk);
+
+        if device.header.status.failed() {
+            return Err(VirtIoDeviceError::DeviceError);
+        }
 
         Ok(Self { device, queue, command_buffer, data_buffer, issued_commands: BTreeMap::new() })
     }
@@ -168,6 +196,8 @@ impl BlockDevice {
     }
 }
 
+// TODO: command and data buffers can probably be merged?
+
 struct CommandBuffer {
     buffer: DmaRegion<[Command]>,
     free_indices: VecDeque<u16>,
@@ -192,7 +222,7 @@ impl CommandBuffer {
         self.free_indices.push_back(index);
     }
 
-    fn get(&self, index: usize) -> Option<DmaElement<'_, Command>> {
+    fn get(&mut self, index: usize) -> Option<DmaElement<'_, Command>> {
         self.buffer.get(index)
     }
 }
@@ -221,7 +251,7 @@ impl DataBuffer {
         self.free_indices.push_back(index);
     }
 
-    fn get(&self, index: usize) -> Option<DmaElement<'_, [u8; 512]>> {
+    fn get(&mut self, index: usize) -> Option<DmaElement<'_, [u8; 512]>> {
         self.buffer.get(index)
     }
 }

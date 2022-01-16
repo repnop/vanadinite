@@ -65,10 +65,12 @@ pub fn alloc_kernel_stack(size: usize) -> *mut u8 {
     phys2virt(phys_start.as_phys_address().offset(total_pages * 4096)).as_mut_ptr()
 }
 
+#[track_caller]
 pub fn phys2virt(phys: PhysicalAddress) -> VirtualAddress {
-    VirtualAddress::new(phys.as_usize() + PHYSICAL_OFFSET.load(Ordering::Relaxed))
+    VirtualAddress::new(phys.offset(PHYSICAL_OFFSET.load(Ordering::Relaxed)).as_usize())
 }
 
+#[track_caller]
 pub fn virt2phys(virt: VirtualAddress) -> PhysicalAddress {
     PhysicalAddress::new(virt.as_usize() - PHYSICAL_OFFSET.load(Ordering::Relaxed))
 }

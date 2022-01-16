@@ -301,7 +301,19 @@ impl core::ops::BitAnd for GsoType {
 
 #[derive(Debug, Clone)]
 #[repr(C)]
-pub struct VirtIoNetHeader<const N: usize> {
+pub struct VirtIoNetHeaderTx<const N: usize> {
+    pub flags: HeaderFlags,
+    pub gso_type: GsoType,
+    pub header_len: u16,
+    pub gso_size: u16,
+    pub checksum_start: u16,
+    pub checksum_offset: u16,
+    pub data: [u8; N],
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct VirtIoNetHeaderRx<const N: usize> {
     pub flags: HeaderFlags,
     pub gso_type: GsoType,
     pub header_len: u16,
@@ -314,7 +326,7 @@ pub struct VirtIoNetHeader<const N: usize> {
 
 #[derive(Debug, Clone)]
 #[repr(C)]
-pub struct VirtIoNetHeaderHashReport<const N: usize> {
+pub struct VirtIoNetHeaderTxHashReport<const N: usize> {
     pub flags: HeaderFlags,
     pub gso_type: GsoType,
     pub header_len: u16,

@@ -70,6 +70,7 @@ impl Default for RunOptions {
                 platform: Platform::Virt,
                 kernel_features: String::new(),
                 test: false,
+                debug_build: false,
             },
             with: Simulator::Qemu,
             sbi: SbiImpl::OpenSbi,
@@ -100,6 +101,10 @@ pub fn run(options: RunOptions) -> Result<()> {
         _ => vec![],
     };
 
+    let kernel_path = match options.vanadinite_options.debug_build {
+        true => "src/kernel/target/riscv64gc-unknown-none-elf/debug/vanadinite",
+        false => "src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite",
+    };
     let sbi_firmware = match (options.sbi, options.with) {
         (SbiImpl::OpenSbi, Simulator::Qemu) => "build/opensbi-riscv64-generic-fw_jump.elf",
         (SbiImpl::OpenSbi, Simulator::Spike) => "build/opensbi-riscv64-generic-fw_payload.elf",
@@ -109,6 +114,10 @@ pub fn run(options: RunOptions) -> Result<()> {
     #[rustfmt::skip]
     match options.with {
         Simulator::Qemu => {
+            let debug = match options.debug {
+                true => vec![String::from("-s"), String::from("-S")],
+                false => vec![],
+            };
             let debug_log = match &options.debug_log {
                 Some(path) => vec![
                     String::from("-d"),
@@ -122,7 +131,7 @@ pub fn run(options: RunOptions) -> Result<()> {
             };
 
             cmd!("
-                ./qemu-system-riscv64
+                qemu-system-riscv64
                     -machine {platform}
                     -cpu rv64
                     -smp {cpu_count}
@@ -134,7 +143,8 @@ pub fn run(options: RunOptions) -> Result<()> {
                     -device virtio-net-device,netdev=net1
                     -object filter-dump,id=f1,netdev=net1,file=nettraffic.dat
                     -bios {sbi_firmware}
-                    -kernel src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite
+                    -kernel {kernel_path}
+                    {debug...}
                     {debug_log...}
             ").run()?;
         }

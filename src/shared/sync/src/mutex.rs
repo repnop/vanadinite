@@ -43,6 +43,16 @@ impl<T: Send, D: DeadlockDetection> SpinMutex<T, D> {
         SpinMutexGuard { lock: self }
     }
 
+    pub fn try_lock(&self) -> Option<SpinMutexGuard<'_, T, D>> {
+        match self.lock.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed) {
+            Ok(_) => {
+                self.deadlock_metadata.store(D::gather_metadata(), Ordering::Release);
+                Some(SpinMutexGuard { lock: self })
+            }
+            Err(_) => None,
+        }
+    }
+
     #[track_caller]
     fn acquire_lock(&self) {
         let mut spin_check_count = 100;

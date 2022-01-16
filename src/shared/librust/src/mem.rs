@@ -92,7 +92,7 @@ impl<T: Sized> DmaRegion<[MaybeUninit<T>]> {
 }
 
 impl<T: Sized> DmaRegion<[T]> {
-    pub fn get(&self, index: usize) -> Option<DmaElement<'_, T>> {
+    pub fn get(&mut self, index: usize) -> Option<DmaElement<'_, T>> {
         if index < self.virt.len() {
             Some(DmaElement {
                 phys: PhysicalAddress::new(self.phys.0 + core::mem::size_of::<T>() * index),

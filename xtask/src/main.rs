@@ -53,6 +53,9 @@ pub struct VanadiniteBuildOptions {
 
     #[clap(skip)]
     test: bool,
+
+    #[clap(long)]
+    debug_build: bool,
 }
 
 #[derive(Clap, Clone, Copy)]

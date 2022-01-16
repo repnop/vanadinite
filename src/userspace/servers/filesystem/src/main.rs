@@ -9,7 +9,6 @@ mod drivers;
 
 use librust::{
     capabilities::{Capability, CapabilityPtr},
-    mem::DmaRegion,
     message::KernelNotification,
     syscalls::ReadMessage,
 };
@@ -68,7 +67,7 @@ fn main() {
             mmio_cap,
             interrupts: device.interrupts,
             device: drivers::virtio::BlockDevice::new(unsafe {
-                &*(info.address() as *const drivers::virtio::VirtIoBlockDevice)
+                &*(info.address() as *const virtio::devices::block::VirtIoBlockDevice)
             })
             .unwrap(),
         });
