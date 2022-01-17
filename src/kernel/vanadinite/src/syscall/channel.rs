@@ -15,7 +15,7 @@ use crate::{
         region::{MemoryRegion, PhysicalRegion},
         user::{self, RawUserSlice},
     },
-    scheduler::{Scheduler, WakeToken, CURRENT_TASK, SCHEDULER, TASKS},
+    scheduler::{Scheduler, WakeToken, SCHEDULER, TASKS},
     task::Task,
     utils::{self, Units},
     HART_ID,
@@ -205,7 +205,7 @@ pub fn send_message(
     len: usize,
     caps: RawUserSlice<user::Read, librust::capabilities::Capability>,
 ) -> SyscallOutcome {
-    let current_tid = CURRENT_TASK.get().unwrap();
+    let current_tid = task.tid;
     let channel_id = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::WRITE =>
@@ -302,8 +302,8 @@ pub fn read_message(
     match receiver.pop_front() {
         None => {
             log::debug!("Registering wake for channel::read_message");
-            channel.receiver.register_wake(WakeToken::new(CURRENT_TASK.get().unwrap(), move |task| {
-                log::debug!("Waking task for channel::read_message!");
+            channel.receiver.register_wake(WakeToken::new(task.tid, move |task| {
+                log::info!("Waking task {:?} (TID: {:?}) for channel::read_message!", task.name, task.tid.value());
                 let res = read_message(task, cptr, cap_buffer);
                 match res {
                     SyscallOutcome::Processed(message) => super::apply_message(
@@ -394,7 +394,7 @@ fn transfer_capability(
     cptr_to_send: CapabilityPtr,
     rights: CapabilityRights,
 ) -> Result<CapabilityPtr, KError> {
-    let current_tid = CURRENT_TASK.get().unwrap();
+    let current_tid = task.tid;
     let cap = match task.cspace.resolve(cptr) {
         Some(cap) => cap,
         None => return Err(KError::InvalidArgument(0)),

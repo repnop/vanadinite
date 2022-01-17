@@ -69,7 +69,7 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> usize {
                 }
                 (_, SyscallOutcome::Err(e)) => report_error(e, &mut frame.registers),
                 (_, SyscallOutcome::Block) => {
-                    let tid = CURRENT_TASK.get().unwrap();
+                    let tid = task.tid;
                     log::debug!("Blocking task {:?}", task.name);
                     task.context.gp_regs = frame.registers;
 
@@ -97,7 +97,8 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> usize {
                 } else {
                     log::debug!("Adding message to task (tid: {}): {:?}", recipient.value(), message);
 
-                    task.message_queue.push(Sender::new(CURRENT_TASK.get().unwrap().value()), message);
+                    let sender = Sender::new(task.tid.value());
+                    task.message_queue.push(sender, message);
                     apply_message(false, Sender::kernel(), (), &mut frame.registers);
                 }
             }
@@ -139,7 +140,7 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
             }
             None => {
                 log::debug!("Registering wake for read_message");
-                task.message_queue.register_wake(WakeToken::new(CURRENT_TASK.get().unwrap(), |task| {
+                task.message_queue.register_wake(WakeToken::new(task.tid, |task| {
                     log::debug!("Waking task for read_message");
                     task.state = TaskState::Running;
                     let (sender, message) = task.message_queue.pop().expect("woken but no messages in queue?");
@@ -154,7 +155,7 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
             AllocationOptions::new(syscall_req.arguments[1]),
             MemoryPermissions::new(syscall_req.arguments[2]),
         ),
-        Syscall::GetTid => SyscallOutcome::processed(CURRENT_TASK.get().unwrap().value()),
+        Syscall::GetTid => SyscallOutcome::processed(task.tid.value()),
         Syscall::CreateChannelMessage => {
             channel::create_message(task, CapabilityPtr::new(syscall_req.arguments[0]), syscall_req.arguments[1])
         }
@@ -242,7 +243,7 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
                     // FIXME: what about multiple regions?
                     match node.reg().into_iter().flatten().next() {
                         Some(fdt::standard_nodes::MemoryRegion { size: Some(len), starting_address }) => {
-                            claimed.upgrade().insert(node_path.into(), CURRENT_TASK.get().unwrap());
+                            claimed.upgrade().insert(node_path.into(), task.tid);
                             let map_to = unsafe {
                                 task.memory_manager.map_mmio_device(
                                     PhysicalAddress::from_ptr(starting_address),
@@ -259,7 +260,7 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
                                 rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
                             });
 
-                            let current_tid = CURRENT_TASK.get().unwrap();
+                            let current_tid = task.tid;
                             let interrupts = node.interrupts().into_iter().flatten();
 
                             let plic = PLIC.lock();

@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use core::num::NonZeroUsize;
+
 use crate::{
     capabilities::{Capability, CapabilityResource, CapabilitySpace},
     mem::{
@@ -13,7 +14,7 @@ use crate::{
         paging::{flags, PageSize, VirtualAddress},
         user::RawUserSlice,
     },
-    scheduler::{Scheduler, CURRENT_TASK, SCHEDULER},
+    scheduler::{Scheduler, SCHEDULER},
     syscall::channel::UserspaceChannel,
     task::{Context, MessageQueue, Task},
     trap::GeneralRegisters,
@@ -138,7 +139,7 @@ pub fn spawn_vmspace(
     sp: usize,
     tp: usize,
 ) -> SyscallOutcome {
-    let current_tid = CURRENT_TASK.get().unwrap();
+    let current_tid = task.tid;
 
     let object = match task.vmspace_objects.remove(&id) {
         Some(map) => map,

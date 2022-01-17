@@ -58,8 +58,9 @@ impl TaskList {
         Self { map: SpinRwLock::new(BTreeMap::new()), next_id: AtomicUsize::new(1) }
     }
 
-    pub fn insert(&self, task: Task) -> (Tid, Arc<SpinMutex<Task, SameHartDeadlockDetection>>) {
+    pub fn insert(&self, mut task: Task) -> (Tid, Arc<SpinMutex<Task, SameHartDeadlockDetection>>) {
         let tid = Tid::new(NonZeroUsize::new(self.next_id.load(Ordering::Acquire)).unwrap());
+        task.tid = tid;
         let task: Arc<SpinMutex<Task, SameHartDeadlockDetection>> = Arc::new(SpinMutex::new(task));
         // FIXME: reuse older pids at some point
         let _ = self.map.write().insert(tid, Arc::clone(&task));
