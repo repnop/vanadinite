@@ -303,7 +303,7 @@ pub fn read_message(
         None => {
             log::debug!("Registering wake for channel::read_message");
             channel.receiver.register_wake(WakeToken::new(task.tid, move |task| {
-                log::info!("Waking task {:?} (TID: {:?}) for channel::read_message!", task.name, task.tid.value());
+                log::debug!("Waking task {:?} (TID: {:?}) for channel::read_message!", task.name, task.tid.value());
                 let res = read_message(task, cptr, cap_buffer);
                 match res {
                     SyscallOutcome::Processed(message) => super::apply_message(

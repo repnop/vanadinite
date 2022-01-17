@@ -34,54 +34,93 @@ impl VirtIoBlockDevice {
         self.capacity.read()
     }
 
+    /// # Safety
+    /// This is only safe to call if the device supports the
+    /// [`BlockDeviceFeatures::SIZE_MAX`] feature
     pub unsafe fn size_max(&self) -> u32 {
         self.size_max.read()
     }
 
+    /// # Safety
+    /// This is only safe to call if the device supports the
+    /// [`BlockDeviceFeatures::SEGMENT_MAX`] feature
     pub unsafe fn segment_max(&self) -> u32 {
         self.segment_max.read()
     }
 
+    /// # Safety
+    /// This is only safe to call if the device supports the
+    /// [`BlockDeviceFeatures::GEOMETRY`] feature
     pub unsafe fn geometry(&self) -> Geometry {
         self.geometry.read()
     }
 
+    /// # Safety
+    /// This is only safe to call if the device supports the
+    /// [`BlockDeviceFeatures::BLOCK_SIZE`] feature
     pub unsafe fn block_size(&self) -> u32 {
         self.block_size.read()
     }
 
+    /// # Safety
+    /// This is only safe to call if the device supports the
+    /// [`BlockDeviceFeatures::TOPOLOGY`] feature
     pub unsafe fn block_topology(&self) -> BlockTopology {
         self.block_topology.read()
     }
 
+    /// # Safety
+    /// This is only safe to call if the device supports the
+    /// [`BlockDeviceFeatures::CONFIG_WRITE_CACHE_TOGGLE`] feature
     pub unsafe fn writeback(&self) -> &Volatile<u8, ReadWrite> {
         &self.writeback
     }
 
+    /// # Safety
+    /// This is only safe to call if the device supports the
+    /// [`BlockDeviceFeatures::MULTIQUEUE`] feature
     pub unsafe fn num_queues(&self) -> &Volatile<u16, ReadWrite> {
         &self.num_queues
     }
 
+    /// # Safety
+    /// This is only safe to call if the device supports the
+    /// [`BlockDeviceFeatures::DISCARD`] feature
     pub unsafe fn max_discard_sectors(&self) -> u32 {
         self.max_discard_sectors.read()
     }
 
+    /// # Safety
+    /// This is only safe to call if the device supports the
+    /// [`BlockDeviceFeatures::DISCARD`] feature
     pub unsafe fn max_discard_segments(&self) -> u32 {
         self.max_discard_segments.read()
     }
 
+    /// # Safety
+    /// This is only safe to call if the device supports the
+    /// [`BlockDeviceFeatures::DISCARD`] feature
     pub unsafe fn discard_sector_alignment(&self) -> u32 {
         self.discard_sector_alignment.read()
     }
 
+    /// # Safety
+    /// This is only safe to call if the device supports the
+    /// [`BlockDeviceFeatures::WRITE_ZEROES`] feature
     pub unsafe fn max_write_zeroes_sectors(&self) -> u32 {
         self.max_write_zeroes_sectors.read()
     }
 
+    /// # Safety
+    /// This is only safe to call if the device supports the
+    /// [`BlockDeviceFeatures::WRITE_ZEROES`] feature
     pub unsafe fn max_write_zeroes_segments(&self) -> u32 {
         self.max_write_zeroes_segments.read()
     }
 
+    /// # Safety
+    /// This is only safe to call if the device supports the
+    /// [`BlockDeviceFeatures::WRITE_ZEROES`] feature
     pub unsafe fn write_zeroes_may_unmap(&self) -> u8 {
         self.write_zeroes_may_unmap.read()
     }

@@ -13,7 +13,7 @@ use crate::{
         paging::{flags, VirtualAddress},
         region::MemoryRegion,
     },
-    scheduler::{Scheduler, SCHEDULER, TASKS},
+    scheduler::{Scheduler, SCHEDULER},
     syscall,
     task::TaskState,
 };

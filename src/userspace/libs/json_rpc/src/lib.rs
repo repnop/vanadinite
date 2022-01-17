@@ -4,6 +4,7 @@ use json::deser::{Deserialize, Serialize, Serializer};
 
 extern crate alloc;
 
+#[macro_export]
 macro_rules! rpc {
     ($service:ident, { $(fn $f:ident($($arg:ident: $t:ty),*)? $(-> $ret:ty)?);+ }) => {
         trait $service {

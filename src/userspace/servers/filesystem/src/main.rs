@@ -38,7 +38,9 @@ json::derive! {
 }
 
 struct BlockDevice {
+    #[allow(dead_code)]
     mmio_cap: CapabilityPtr,
+    #[allow(dead_code)]
     interrupts: Vec<usize>,
     device: drivers::virtio::BlockDevice,
 }

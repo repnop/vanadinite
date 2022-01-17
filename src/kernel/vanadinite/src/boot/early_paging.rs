@@ -42,7 +42,7 @@ pub static BOOTSTRAP_SATP: AtomicUsize = AtomicUsize::new(0);
 /// # Safety
 /// no
 #[no_mangle]
-pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load: usize) -> ! {
+pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8) -> ! {
     let fdt_struct: Fdt<'static> = match fdt::Fdt::from_ptr(fdt) {
         Ok(fdt) => fdt,
         Err(e) => crate::platform::exit(crate::platform::ExitStatus::Error(&e)),
@@ -50,7 +50,6 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     let fdt_size = fdt_struct.total_size() as u64;
 
-    let page_offset_value = kernel_patching::page_offset();
     // These are physical addresses before paging is enabled
     let kernel_start = kernel_patching::kernel_start() as usize;
     let kernel_end = kernel_patching::kernel_end() as usize;

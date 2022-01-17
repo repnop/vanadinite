@@ -8,13 +8,12 @@
 pub mod round_robin;
 
 use crate::{
-    cpu_local, csr,
+    csr,
     task::{Context, Task},
     utils::{ticks_per_us, SameHartDeadlockDetection},
 };
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc};
 use core::{
-    cell::Cell,
     num::NonZeroUsize,
     sync::atomic::{AtomicUsize, Ordering},
 };
