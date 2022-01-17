@@ -90,35 +90,36 @@ impl Scheduler for RoundRobinScheduler {
         match to_run {
             Some(queued_task) => {
                 *active = Some(Arc::clone(&queued_task.task));
-                let mut task = queued_task.task.lock();
-                // let task = Arc::clone(&queued_task.task);
-                // let mut task = task.lock();
-                // let token = queued_task.token.take();
+                let task = Arc::clone(&queued_task.task);
+                let mut task = task.lock();
+                let token = queued_task.token.take();
 
-                // // Drop queue lock here in case the wake needs the scheduler for some reason?
-                // drop(queue_lock);
+                // Drop queue lock here in case the wake needs the scheduler for some reason?
+                drop(queue_lock);
 
-                if let Some(token) = queued_task.token.take() {
+                let root_page_table = task.memory_manager.table_phys_address();
+                let tid = task.tid;
+
+                // FIXME: We need to switch page tables before doing work on the
+                // wake token, but this feels kinda shitty, maybe find a way to
+                // do waking that doesn't need it?
+                csr::satp::write(Satp { mode: SATP_MODE, asid: tid.value() as u16, root_page_table });
+                mem::sfence(None, None);
+
+                if let Some(token) = token {
                     (token.work)(&mut task);
                 }
 
-                let root_page_table = task.memory_manager.table_phys_address();
                 let context = task.context.clone();
-                let tid = queued_task.tid;
 
                 log::debug!("Scheduling {:?}, pc: {:#p}", task.name, task.context.pc as *mut u8);
-
-                // !! RELEASE LOCKS BEFORE CONTEXT SWITCHING !!
-                drop(task);
-                drop(queue_lock);
-
                 sbi::timer::set_timer(
                     csr::time::read() + ticks_per_us(10_000, crate::TIMER_FREQ.load(Ordering::Relaxed)),
                 )
                 .unwrap();
 
-                csr::satp::write(Satp { mode: SATP_MODE, asid: tid.value() as u16, root_page_table });
-                mem::sfence(None, None);
+                // !! RELEASE LOCKS BEFORE CONTEXT SWITCHING !!
+                drop(task);
 
                 unsafe { super::return_to_usermode(&context) }
             }
