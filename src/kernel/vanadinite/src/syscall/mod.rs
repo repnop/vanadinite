@@ -19,7 +19,7 @@ use crate::{
         user::RawUserSlice,
     },
     platform::FDT,
-    scheduler::{Scheduler, WakeToken, CURRENT_TASK, SCHEDULER, TASKS},
+    scheduler::{Scheduler, WakeToken, SCHEDULER, TASKS},
     task::{Task, TaskState},
     trap::{GeneralRegisters, TrapFrame},
     HART_ID,
@@ -57,7 +57,7 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> usize {
     log::trace!("Handling syscall..");
 
     let (recipient, message) = get_message(frame);
-    let task_lock = TASKS.active_on_cpu().unwrap();
+    let task_lock = SCHEDULER.active_on_cpu().unwrap();
     let mut task_lock = task_lock.lock();
     let task = &mut *task_lock;
 

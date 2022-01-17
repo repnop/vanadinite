@@ -7,7 +7,7 @@
 
 use core::sync::atomic::Ordering;
 
-use super::{Scheduler, Task, Tid, WakeToken, CURRENT_TASK, TASKS};
+use super::{Scheduler, Task, Tid, WakeToken, TASKS};
 use crate::{
     csr::{self, satp::Satp},
     mem::{self, paging::SATP_MODE},
@@ -15,17 +15,24 @@ use crate::{
     utils::{ticks_per_us, SameHartDeadlockDetection},
 };
 use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
-use sync::{Lazy, SpinMutex};
+use sync::Lazy;
+
+type SpinMutex<T> = sync::SpinMutex<T, SameHartDeadlockDetection>;
 
 struct QueuedTask {
     tid: Tid,
-    task: Arc<SpinMutex<Task, SameHartDeadlockDetection>>,
+    task: Arc<SpinMutex<Task>>,
     token: Option<WakeToken>,
 }
 
+struct Queue {
+    active: Option<Arc<SpinMutex<Task>>>,
+    queue: VecDeque<QueuedTask>,
+}
+
 pub struct RoundRobinScheduler {
-    blocked: Lazy<SpinMutex<VecDeque<QueuedTask>, SameHartDeadlockDetection>>,
-    queues: Lazy<Vec<SpinMutex<VecDeque<QueuedTask>, SameHartDeadlockDetection>>>,
+    blocked: Lazy<SpinMutex<VecDeque<QueuedTask>>>,
+    queues: Lazy<Vec<SpinMutex<Queue>>>,
 }
 
 impl RoundRobinScheduler {
@@ -37,7 +44,7 @@ impl RoundRobinScheduler {
                 let mut v = Vec::with_capacity(n_cpus);
 
                 for _ in 0..n_cpus {
-                    v.push(SpinMutex::new(VecDeque::with_capacity(16)));
+                    v.push(SpinMutex::new(Queue { active: None, queue: VecDeque::with_capacity(16) }));
                 }
 
                 v
@@ -45,7 +52,7 @@ impl RoundRobinScheduler {
         }
     }
 
-    fn current_queue(&self) -> &SpinMutex<VecDeque<QueuedTask>, SameHartDeadlockDetection> {
+    fn current_queue(&self) -> &SpinMutex<Queue> {
         let current_hart = crate::HART_ID.get();
         &self.queues[current_hart]
     }
@@ -54,10 +61,11 @@ impl RoundRobinScheduler {
 impl Scheduler for RoundRobinScheduler {
     fn schedule(&self) -> ! {
         log::debug!("Starting scheduling");
-        let mut queue = self.current_queue().lock();
+        let mut queue_lock = self.current_queue().lock();
+        let Queue { ref mut active, ref mut queue } = &mut *queue_lock;
         let queue_len = queue.len();
 
-        if queue.len() > 1 {
+        if queue_len > 1 {
             queue.rotate_left(1);
         }
 
@@ -81,7 +89,14 @@ impl Scheduler for RoundRobinScheduler {
 
         match to_run {
             Some(queued_task) => {
+                *active = Some(Arc::clone(&queued_task.task));
                 let mut task = queued_task.task.lock();
+                // let task = Arc::clone(&queued_task.task);
+                // let mut task = task.lock();
+                // let token = queued_task.token.take();
+
+                // // Drop queue lock here in case the wake needs the scheduler for some reason?
+                // drop(queue_lock);
 
                 if let Some(token) = queued_task.token.take() {
                     (token.work)(&mut task);
@@ -91,13 +106,11 @@ impl Scheduler for RoundRobinScheduler {
                 let context = task.context.clone();
                 let tid = queued_task.tid;
 
-                CURRENT_TASK.set(Some(queued_task.tid));
-
                 log::debug!("Scheduling {:?}, pc: {:#p}", task.name, task.context.pc as *mut u8);
 
                 // !! RELEASE LOCKS BEFORE CONTEXT SWITCHING !!
                 drop(task);
-                drop(queue);
+                drop(queue_lock);
 
                 sbi::timer::set_timer(
                     csr::time::read() + ticks_per_us(10_000, crate::TIMER_FREQ.load(Ordering::Relaxed)),
@@ -110,13 +123,13 @@ impl Scheduler for RoundRobinScheduler {
                 unsafe { super::return_to_usermode(&context) }
             }
             None => {
+                *active = None;
                 // !! RELEASE LOCK BEFORE CONTEXT SWITCHING !!
-                drop(queue);
+                drop(queue_lock);
 
                 log::debug!("No work to do, sleeping :(");
 
                 mem::sfence(None, None);
-                CURRENT_TASK.set(None);
 
                 super::sleep()
             }
@@ -127,8 +140,8 @@ impl Scheduler for RoundRobinScheduler {
         let (tid, task) = TASKS.insert(task);
 
         log::debug!("Trying to enqueue task");
-        let selected = self.queues.iter().min_by_key(|queue| queue.lock().len()).unwrap_or(&self.queues[0]);
-        selected.lock().push_back(QueuedTask { tid, task, token: None });
+        let selected = self.queues.iter().min_by_key(|queue| queue.lock().queue.len()).unwrap_or(&self.queues[0]);
+        selected.lock().queue.push_back(QueuedTask { tid, task, token: None });
         log::debug!("Enqueued task");
 
         tid
@@ -136,15 +149,15 @@ impl Scheduler for RoundRobinScheduler {
 
     fn dequeue(&self, tid: Tid) {
         let mut queue = self.current_queue().lock();
-        if let Some(index) = queue.iter().position(|t| t.tid == tid) {
-            queue.remove(index);
+        if let Some(index) = queue.queue.iter().position(|t| t.tid == tid) {
+            queue.queue.remove(index);
         }
     }
 
     fn block(&self, tid: Tid) {
         let mut queue = self.current_queue().lock();
-        let index = queue.iter().position(|t| t.tid == tid).expect("blocking task not on current hart");
-        let task = queue.remove(index).unwrap();
+        let index = queue.queue.iter().position(|t| t.tid == tid).expect("blocking task not on current hart");
+        let task = queue.queue.remove(index).unwrap();
         self.blocked.lock().push_back(task);
     }
 
@@ -157,7 +170,12 @@ impl Scheduler for RoundRobinScheduler {
 
         task.token = Some(token);
 
-        let selected = self.queues.iter().min_by_key(|queue| queue.lock().len()).unwrap_or(&self.queues[0]);
-        selected.lock().push_back(task);
+        let selected = self.queues.iter().min_by_key(|queue| queue.lock().queue.len()).unwrap_or(&self.queues[0]);
+        selected.lock().queue.push_back(task);
+    }
+
+    #[track_caller]
+    fn active_on_cpu(&self) -> Option<Arc<SpinMutex<Task>>> {
+        self.current_queue().lock().active.clone()
     }
 }

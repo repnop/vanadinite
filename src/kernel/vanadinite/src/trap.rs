@@ -13,7 +13,7 @@ use crate::{
         paging::{flags, VirtualAddress},
         region::MemoryRegion,
     },
-    scheduler::{Scheduler, CURRENT_TASK, SCHEDULER, TASKS},
+    scheduler::{Scheduler, SCHEDULER, TASKS},
     syscall,
     task::TaskState,
 };
@@ -190,8 +190,7 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
     let trap_kind = Trap::from_cause(scause);
     match trap_kind {
         Trap::SupervisorTimerInterrupt => {
-            if CURRENT_TASK.get().is_some() {
-                let lock = TASKS.active_on_cpu().unwrap();
+            if let Some(lock) = SCHEDULER.active_on_cpu() {
                 let mut lock = lock.lock();
 
                 lock.context.pc = sepc;
@@ -222,12 +221,24 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
             sepc
         }
         Trap::LoadPageFault | Trap::StorePageFault | Trap::InstructionPageFault => {
+            let sepc = VirtualAddress::new(sepc);
             let stval = VirtualAddress::new(stval);
-            match stval.is_kernel_region() {
+            match sepc.is_kernel_region() {
                 // We should always have marked memory regions up front from the initial mapping
-                true => panic!("[KERNEL BUG] {:?}: Region not marked as A/D for kernel region?", trap_kind),
+                true => {
+                    let active = SCHEDULER.active_on_cpu().unwrap();
+
+                    match active.try_lock() {
+                        Some(active) => log::error!(
+                            "Process memory map during error:\n{:#?}",
+                            active.memory_manager.address_map_debug(Some(stval))
+                        ),
+                        None => log::error!("Deadlock would have occurred for process map printing"),
+                    }
+                    panic!("[KERNEL BUG] {:?} @ pc={:#p}: stval={:#p} regs={:x?}", trap_kind, sepc, stval, regs);
+                }
                 false => {
-                    let active_task_lock = TASKS.active_on_cpu().unwrap();
+                    let active_task_lock = SCHEDULER.active_on_cpu().unwrap();
                     let mut active_task = active_task_lock.lock();
                     let memory_manager = &mut active_task.memory_manager;
 
@@ -264,7 +275,7 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                     match valid {
                         true => {
                             crate::mem::sfence(Some(stval), None);
-                            sepc
+                            sepc.as_usize()
                         }
                         false => {
                             log::error!(
@@ -272,7 +283,7 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                                 active_task.name,
                                 trap_kind,
                                 stval,
-                                VirtualAddress::new(sepc),
+                                sepc,
                             );
                             log::error!(
                                 "Memory map:\n{:#?}",

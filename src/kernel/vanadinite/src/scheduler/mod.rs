@@ -86,17 +86,6 @@ impl TaskList {
     pub fn get(&self, tid: Tid) -> Option<Arc<SpinMutex<Task, SameHartDeadlockDetection>>> {
         self.map.read().get(&tid).cloned()
     }
-
-    pub fn active_on_cpu(&self) -> Option<Arc<SpinMutex<Task, SameHartDeadlockDetection>>> {
-        match CURRENT_TASK.get() {
-            Some(tid) => self.get(tid),
-            None => None,
-        }
-    }
-}
-
-cpu_local! {
-    pub static CURRENT_TASK: Cell<Option<Tid>> = Cell::new(None);
 }
 
 pub trait Scheduler: Send {
@@ -105,6 +94,7 @@ pub trait Scheduler: Send {
     fn dequeue(&self, tid: Tid);
     fn block(&self, tid: Tid);
     fn unblock(&self, token: WakeToken);
+    fn active_on_cpu(&self) -> Option<Arc<SpinMutex<Task, SameHartDeadlockDetection>>>;
 }
 
 fn sleep() -> ! {
