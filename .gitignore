@@ -13,3 +13,5 @@ spike
 todo.txt
 *.bin
 build/
+corpus/
+artifacts/

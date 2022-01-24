@@ -88,7 +88,7 @@ pub fn build(target: BuildTarget) -> Result<()> {
             rm_rf(&init_tar)?;
 
             let _dir = pushd("src/userspace")?;
-            cmd!("cargo build --release --workspace").run()?;
+            cmd!("cargo build --release --workspace --target riscv64gc-unknown-none-elf").run()?;
 
             let out = fs::File::create(init_tar)?;
             let mut archive = Builder::new(out);

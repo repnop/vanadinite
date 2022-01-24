@@ -1,8 +1,15 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2022 The vanadinite developers
+//
+// This Source Code Form is subject to the terms of the Mozilla Public License,
+// v. 2.0. If a copy of the MPL was not distributed with this file, You can
+// obtain one at https://mozilla.org/MPL/2.0/.
+
 #![no_std]
 
-use json::deser::{Deserialize, Serialize, Serializer};
-
 extern crate alloc;
+
+use json::deser::{Deserialize, Serialize, Serializer};
 
 #[macro_export]
 macro_rules! rpc {

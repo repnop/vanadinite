@@ -141,7 +141,7 @@ pub fn run(options: RunOptions) -> Result<()> {
                     {enable_virtio_block_device...}
                     -netdev user,id=net1
                     -device virtio-net-device,netdev=net1
-                    -object filter-dump,id=f1,netdev=net1,file=nettraffic.dat
+                    -object filter-dump,id=f1,netdev=net1,file=testing_files/nettraffic.dat
                     -bios {sbi_firmware}
                     -kernel {kernel_path}
                     {debug...}

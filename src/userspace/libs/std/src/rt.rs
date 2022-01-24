@@ -1,6 +1,12 @@
-use librust::capabilities::Capability;
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2022 The vanadinite developers
+//
+// This Source Code Form is subject to the terms of the Mozilla Public License,
+// v. 2.0. If a copy of the MPL was not distributed with this file, You can
+// obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::ipc::ReadChannelMessage;
+use librust::capabilities::Capability;
 
 #[no_mangle]
 unsafe extern "C" fn _start(argc: isize, argv: *const *const u8, a2: usize) -> ! {
