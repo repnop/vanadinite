@@ -1,5 +1,7 @@
 [build]
 target = "riscv64gc-unknown-none-elf"
+
+[target.riscv64gc-unknown-none-elf]
 rustflags = ["-C", "code-model=small", "-C", "relocation-model=pic", "-C", "link-arg=-znognustack", "-C", "link-arg=--pie", "-C", "link-arg=--no-dynamic-linker", "-C", "link-arg=--apply-dynamic-relocs"]
 
 [unstable]

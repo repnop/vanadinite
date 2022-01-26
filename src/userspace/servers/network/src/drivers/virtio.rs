@@ -150,12 +150,13 @@ impl VirtIoNetDevice {
         Ok(Self { device, receive_queue, transmit_queue, rx_data_buffer, rx_buffer_map, tx_data_buffer, tx_buffer_map })
     }
 
-    pub fn send_raw(&mut self, data: &[u8]) {
+    pub fn send_raw(&mut self, f: impl FnOnce(&mut [u8]) -> usize) {
         core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
         let (index, mut buffer) = self.tx_data_buffer.alloc().unwrap();
         let header = buffer.get_mut();
 
-        header.data[..data.len()].copy_from_slice(data);
+        let written = f(&mut header.data[..]);
+
         header.flags = HeaderFlags::NONE;
         header.gso_size = 0;
         header.gso_type = GsoType::NONE;
@@ -163,12 +164,14 @@ impl VirtIoNetDevice {
         header.checksum_offset = 0;
         header.checksum_start = 0;
 
+        println!("total data len={}", (core::mem::size_of::<VirtIoNetHeaderTx<0>>() + written));
+
         let descr = self.transmit_queue.alloc_descriptor().unwrap();
         self.transmit_queue.descriptors.write(
             descr,
             VirtqueueDescriptor {
                 address: buffer.physical_address(),
-                length: core::mem::size_of_val(header) as u32,
+                length: (core::mem::size_of::<VirtIoNetHeaderTx<0>>() + written) as u32,
                 flags: DescriptorFlags::NONE,
                 next: SplitqueueIndex::new(0),
             },

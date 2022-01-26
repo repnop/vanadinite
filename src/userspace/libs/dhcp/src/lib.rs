@@ -10,7 +10,7 @@
 pub mod options;
 
 use alchemy::PackedStruct;
-use endian::BigEndianU32;
+use netstack::ipv4::IpV4Address;
 
 alchemy::derive! {
     #[derive(Debug, Clone, Copy)]
@@ -20,6 +20,8 @@ alchemy::derive! {
         pub hardware_address: HardwareAddress,
         pub hardware_ops: ZeroField,
         pub transaction_id: TransactionId,
+        pub secs: Seconds,
+        pub flags: Flags,
         pub client_ip_address: IpV4Address,
         pub your_ip_address: IpV4Address,
         pub next_server_ip_address: IpV4Address,
@@ -92,7 +94,7 @@ alchemy::derive! {
 }
 
 impl TransactionId {
-    pub fn new(n: BigEndianU32) -> Self {
+    pub fn new(n: u32) -> Self {
         Self(n.to_be_bytes())
     }
 
@@ -102,18 +104,34 @@ impl TransactionId {
 }
 
 alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[derive(Debug, Clone, Copy)]
     #[repr(transparent)]
-    pub struct IpV4Address([u8; 4]);
+    pub struct Seconds([u8; 2]);
 }
 
-impl IpV4Address {
-    pub fn new(a: u8, b: u8, c: u8, d: u8) -> Self {
-        Self([a, b, c, d])
+impl Seconds {
+    pub fn new(n: u16) -> Self {
+        Self(n.to_be_bytes())
     }
 
-    pub fn to_bytes(self) -> [u8; 4] {
-        self.0
+    pub fn get(self) -> u16 {
+        u16::from_be_bytes(self.0)
+    }
+}
+
+alchemy::derive! {
+    #[derive(Debug, Clone, Copy)]
+    #[repr(transparent)]
+    pub struct Flags([u8; 2]);
+}
+
+impl Flags {
+    pub fn new(n: u16) -> Self {
+        Self(n.to_be_bytes())
+    }
+
+    pub fn get(self) -> u16 {
+        u16::from_be_bytes(self.0)
     }
 }
 
@@ -125,11 +143,11 @@ alchemy::derive! {
 
 impl MagicCookie {
     pub fn new() -> Self {
-        Self(BigEndianU32::from_ne(0x63825363).to_be_bytes())
+        Self([0x63, 0x82, 0x53, 0x63])
     }
 
     pub fn is_valid(self) -> bool {
-        u32::from_be_bytes(self.0) == 0x63825363
+        self.0 == [0x63, 0x82, 0x53, 0x63]
     }
 }
 
@@ -142,6 +160,7 @@ impl Default for MagicCookie {
 pub enum DhcpOption<'a> {
     DomainNameServer(options::DomainNameServerList<'a>),
     DhcpMessageType(options::DhcpMessageType),
+    EndOfOptions,
 }
 
 impl DhcpOption<'_> {
@@ -149,6 +168,7 @@ impl DhcpOption<'_> {
         match self {
             DhcpOption::DomainNameServer(_) => 6,
             Self::DhcpMessageType(_) => 53,
+            Self::EndOfOptions => 255,
         }
     }
 }
@@ -200,17 +220,22 @@ impl<'a> DhcpMessageBuilder<'a> {
             DhcpOption::DhcpMessageType(mtype) => {
                 self.push_bytes(&[option_id, 1, mtype.0])?;
             }
+            DhcpOption::EndOfOptions => {
+                self.push_bytes(&[option_id])?;
+            }
         }
 
         Ok(())
     }
 
     pub fn push_option(&mut self, option: DhcpOption<'_>) {
-        self.try_push_option(option).expect("failed to push ")
+        self.try_push_option(option).expect("failed to push DHCP option")
     }
 
     #[must_use]
-    pub fn finish(self) -> usize {
+    pub fn finish(mut self) -> usize {
+        self.push_option(DhcpOption::EndOfOptions);
+
         self.message.magic_cookie = MagicCookie::new();
         self.message.hardware_ops = ZeroField::new();
 
@@ -224,6 +249,7 @@ impl<'a> DhcpMessageBuilder<'a> {
 
         let (pushing, rest) = core::mem::take(&mut self.options).split_at_mut(bytes.len());
         pushing.copy_from_slice(bytes);
+
         self.options = rest;
         self.used_space += bytes.len();
 

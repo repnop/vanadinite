@@ -167,6 +167,17 @@ pub unsafe trait PackedStruct: OnlyValidBitPatterns {
         unsafe { core::slice::from_raw_parts(this.as_ptr().cast(), num_us) }
     }
 
+    fn try_cast_slice<U: PackedStruct>(this: &[Self]) -> Result<&[U], TryCastError> {
+        let address = this.as_ptr() as usize;
+        match address % core::mem::align_of::<U>() == 0 {
+            true => {
+                let num_us = this.len() * core::mem::size_of::<Self>() / core::mem::size_of::<U>();
+                Ok(unsafe { core::slice::from_raw_parts(this.as_ptr().cast(), num_us) })
+            }
+            false => Err(TryCastError::Underaligned),
+        }
+    }
+
     fn bytes_of_slice(this: &[Self]) -> &[u8] {
         unsafe { core::slice::from_raw_parts(this.as_ptr().cast(), this.len() * core::mem::size_of::<Self>()) }
     }

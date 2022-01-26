@@ -1,5 +1,5 @@
 [package]
-name = "dhcp"
+name = "netstack"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,5 +7,4 @@ edition = "2021"
 
 [dependencies]
 alchemy = { path = "../alchemy" }
-netstack = { path = "../netstack" }
-std = { path = "../std" }
+endian = { path = "../endian" }
