@@ -7,12 +7,12 @@
 
 use crate::{Result, VanadiniteBuildOptions};
 use anyhow::Context;
-use clap::Clap;
+use clap::{ArgEnum, Subcommand};
 use std::fs;
 use tar::{Builder, Header};
 use xshell::{cmd, cp, mkdir_p, pushd, pushenv, rm_rf};
 
-#[derive(Clap, Clone, Copy)]
+#[derive(ArgEnum, Clone, Copy)]
 #[clap(rename_all = "snake_case")]
 pub enum Platform {
     Virt,
@@ -28,7 +28,7 @@ impl std::fmt::Display for Platform {
     }
 }
 
-#[derive(Clap)]
+#[derive(Subcommand)]
 #[clap(rename_all = "snake_case")]
 pub enum BuildTarget {
     /// The `vanadinite` kernel

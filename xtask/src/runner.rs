@@ -9,11 +9,11 @@ use crate::{
     build::{self, BuildTarget, Platform},
     Result, SbiImpl, Simulator, VanadiniteBuildOptions,
 };
-use clap::{ArgSettings, Clap};
+use clap::Parser;
 use std::path::PathBuf;
 use xshell::cmd;
 
-#[derive(Clap)]
+#[derive(Parser)]
 pub struct RunOptions {
     /// Number of CPUs
     #[clap(long, default_value = "4")]
@@ -32,7 +32,7 @@ pub struct RunOptions {
     drive_file: Option<PathBuf>,
 
     /// Arguments passed to the kernel
-    #[clap(setting = ArgSettings::AllowEmptyValues)]
+    //#[clap(setting = clap::ArgSettings::AllowEmptyValues)]
     #[clap(long, default_value = "")]
     kernel_args: String,
 

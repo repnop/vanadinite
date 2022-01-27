@@ -9,27 +9,33 @@ pub mod build;
 pub mod runner;
 
 use build::{BuildTarget, Platform};
-use clap::{AppSettings, ArgSettings, Clap};
+use clap::{AppSettings, ArgEnum, Parser};
 use runner::RunOptions;
 use std::sync::{atomic::AtomicBool, Arc};
 use xshell::{pushd, rm_rf};
 
 pub type Result<T> = anyhow::Result<T>;
 
-#[derive(Clap)]
-#[clap(rename_all = "snake_case", setting = AppSettings::DisableVersion, setting = AppSettings::VersionlessSubcommands)]
+#[derive(Parser)]
+#[clap(rename_all = "snake_case", setting = AppSettings::DisableVersionFlag)]
 enum Arguments {
     /// Build the various components needed to work with `vanadinite`
-    Build(BuildTarget),
+    Build {
+        #[clap(subcommand)]
+        target: BuildTarget,
+    },
     /// Clean all or specific components
-    Clean(CleanTarget),
+    Clean {
+        #[clap(arg_enum)]
+        target: CleanTarget,
+    },
     /// Run `vanadinite`
     Run(RunOptions),
     /// Test `vanadinite`
     Test(RunOptions),
 }
 
-#[derive(Clap)]
+#[derive(ArgEnum, Clone, Copy)]
 enum CleanTarget {
     All,
     #[clap(name = "opensbi")]
@@ -40,14 +46,14 @@ enum CleanTarget {
     Vanadium,
 }
 
-#[derive(Clap, Clone)]
+#[derive(Parser, Clone)]
 pub struct VanadiniteBuildOptions {
     /// The platform to target for the `vanadinite` build
     #[clap(arg_enum, long, default_value = "virt")]
     platform: Platform,
 
     /// Extra kernel features to enable, space separated
-    #[clap(setting = ArgSettings::AllowEmptyValues)]
+    //#[clap(setting = ArgSettings::AllowEmptyValues)]
     #[clap(long, default_value = "")]
     kernel_features: String,
 
@@ -58,7 +64,7 @@ pub struct VanadiniteBuildOptions {
     debug_build: bool,
 }
 
-#[derive(Clap, Clone, Copy)]
+#[derive(ArgEnum, Clone, Copy)]
 #[clap(rename_all = "snake_case")]
 pub enum Simulator {
     /// The RISC-V ISA simulator Spike
@@ -66,7 +72,7 @@ pub enum Simulator {
     Qemu,
 }
 
-#[derive(Clap, Clone, Copy)]
+#[derive(ArgEnum, Clone, Copy)]
 #[clap(rename_all = "snake_case")]
 pub enum SbiImpl {
     /// The RISC-V reference SBI implementation
@@ -83,8 +89,8 @@ fn main() -> Result<()> {
     signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&_sig)).unwrap();
 
     match args {
-        Arguments::Build(target) => build::build(target)?,
-        Arguments::Clean(target) => clean(target)?,
+        Arguments::Build { target } => build::build(target)?,
+        Arguments::Clean { target } => clean(target)?,
         Arguments::Run(target) => runner::run(target)?,
         Arguments::Test(target) => runner::test(target)?,
     }
