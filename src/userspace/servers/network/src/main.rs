@@ -93,10 +93,10 @@ fn main() {
         ipv4_hdr.ttl = 255;
         ipv4_hdr.protocol = Protocol::UDP;
         ipv4_hdr.source_ip = IpV4Address::new(0, 0, 0, 0);
-        ipv4_hdr.destination_ip = IpV4Address::new(0, 0, 0, 0);
+        ipv4_hdr.destination_ip = IpV4Address::new(255, 255, 255, 255);
 
         udp_hdr.destination_port = Port::new(67);
-        udp_hdr.source_port = Port::new(1337);
+        udp_hdr.source_port = Port::new(68);
         udp_hdr.checksum.zero();
 
         dhcp_message.message.operation = DhcpOperation::BOOT_REQUEST;
@@ -115,24 +115,23 @@ fn main() {
         dhcp_message.message.boot_file_name = [0; 128];
 
         dhcp_message.push_option(DhcpOption::DhcpMessageType(DhcpMessageType::DISCOVER));
+        dhcp_message.push_option(DhcpOption::ParameterRequestList(&[DhcpOption::DOMAIN_NAME_SERVER]));
         //dhcp_message.push_option(DhcpOption::DomainNameServer(DomainNameServerList::new(&[])));
 
         let dhcp_len = dhcp_message.finish();
 
-        println!("UDP payload: {:?}", payload);
-
         println!("dhcp_len={dhcp_len}, size_of::<DhcpMessage>()={}", size_of::<DhcpMessage>());
 
-        udp_hdr.len = Length16::new(dhcp_len as u16);
+        udp_hdr.len = Length16::new((dhcp_len + size_of::<UdpHeader>()) as u16);
         ipv4_hdr.len = Length16::new((size_of::<IpV4Header>() + size_of::<UdpHeader>() + dhcp_len) as u16);
         ipv4_hdr.generate_checksum();
 
         let total_len = size_of::<EthernetHeader>() + size_of::<IpV4Header>() + size_of::<UdpHeader>() + dhcp_len;
 
-        let (data, fcs) = data.split_at_mut(total_len);
-        Fcs::try_from_mut_byte_slice(fcs).unwrap().generate(data);
+        //let (data, fcs) = data.split_at_mut(total_len);
+        //Fcs::try_from_mut_byte_slice(fcs).unwrap().generate(data);
 
-        total_len + 4
+        total_len // + 4
     });
 
     loop {

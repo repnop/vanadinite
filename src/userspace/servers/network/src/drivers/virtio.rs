@@ -40,12 +40,15 @@ impl VirtIoNetDevice {
 
         for _ in 0..receive_queue.queue_size() / 2 {
             let descriptor = receive_queue.alloc_descriptor().unwrap();
-            let (index, buffer) = rx_data_buffer.alloc().unwrap();
+            let (index, mut buffer) = rx_data_buffer.alloc().unwrap();
+
+            buffer.get_mut().num_buffers = 1;
+
             receive_queue.descriptors.write(
                 descriptor,
                 VirtqueueDescriptor {
                     address: buffer.physical_address(),
-                    length: core::mem::size_of_val(buffer.get()) as u32,
+                    length: core::mem::size_of::<VirtIoNetHeaderRx<MAX_PACKET_LENGTH>>() as u32,
                     flags: DescriptorFlags::WRITE,
                     next: SplitqueueIndex::new(0),
                 },
@@ -207,11 +210,13 @@ impl VirtIoNetDevice {
 
         if let Some(used) = self.receive_queue.used.pop() {
             let descr = SplitqueueIndex::new(used.start_index as u16);
-            let size = self.receive_queue.descriptors.read(descr).length as usize;
+            let data_len = self.receive_queue.descriptors.read(descr).length as usize
+                - core::mem::size_of::<VirtIoNetHeaderRx<0>>();
             let index = *self.rx_buffer_map.get(&descr).unwrap();
             let buffer = self.rx_data_buffer.get(index).unwrap();
+            let buffer = buffer.get();
 
-            println!("{:?}", &buffer.get().data[..size]);
+            println!("{:?}", &buffer.data[..data_len]);
         }
     }
 }

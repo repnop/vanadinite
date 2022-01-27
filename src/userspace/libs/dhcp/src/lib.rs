@@ -160,15 +160,22 @@ impl Default for MagicCookie {
 pub enum DhcpOption<'a> {
     DomainNameServer(options::DomainNameServerList<'a>),
     DhcpMessageType(options::DhcpMessageType),
+    ParameterRequestList(&'a [u8]),
     EndOfOptions,
 }
 
 impl DhcpOption<'_> {
+    pub const DOMAIN_NAME_SERVER: u8 = 6;
+    pub const DHCP_MESSAGE_TYPE: u8 = 53;
+    pub const PARAMETER_REQUEST_LIST: u8 = 55;
+    pub const END_OF_OPTIONS: u8 = 255;
+
     pub fn option_id(&self) -> u8 {
         match self {
-            DhcpOption::DomainNameServer(_) => 6,
-            Self::DhcpMessageType(_) => 53,
-            Self::EndOfOptions => 255,
+            DhcpOption::DomainNameServer(_) => Self::DOMAIN_NAME_SERVER,
+            Self::DhcpMessageType(_) => Self::DHCP_MESSAGE_TYPE,
+            Self::ParameterRequestList(_) => Self::PARAMETER_REQUEST_LIST,
+            Self::EndOfOptions => Self::END_OF_OPTIONS,
         }
     }
 }
@@ -219,6 +226,11 @@ impl<'a> DhcpMessageBuilder<'a> {
             }
             DhcpOption::DhcpMessageType(mtype) => {
                 self.push_bytes(&[option_id, 1, mtype.0])?;
+            }
+            DhcpOption::ParameterRequestList(options) => {
+                let options_len = u8::try_from(options.len()).map_err(|_| TryPushOptionError::OptionValueTooLong)?;
+                self.push_bytes(&[option_id, options_len])?;
+                self.push_bytes(options)?;
             }
             DhcpOption::EndOfOptions => {
                 self.push_bytes(&[option_id])?;
