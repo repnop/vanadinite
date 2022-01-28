@@ -5,19 +5,10 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+mod dhcp_helpers;
 mod drivers;
-
-use alchemy::PackedStruct;
-use dhcp::{
-    options::DhcpMessageType, DhcpMessageBuilder, DhcpOperation, DhcpOption, HardwareAddress, Seconds, TransactionId,
-    ZeroField,
-};
 use librust::{capabilities::Capability, message::KernelNotification, syscalls::ReadMessage};
-use netstack::{
-    ipv4::{IpV4Address, IpV4Socket},
-    MacAddress,
-};
-use std::ipc::IpcChannel;
+use std::{collections::BTreeMap, ipc::IpcChannel};
 
 use crate::drivers::NetworkDriver;
 
@@ -45,6 +36,34 @@ json::derive! {
     }
 }
 
+pub type Action = Box<dyn for<'a> FnOnce(&mut PortAction, &'a [u8])>;
+
+pub enum PortActionCallResult {
+    StillValid,
+    ClosePort,
+}
+
+pub struct PortAction {
+    pub action: Option<Action>,
+}
+
+impl PortAction {
+    pub fn new(action: Action) -> Self {
+        Self { action: Some(action) }
+    }
+
+    pub fn run(&mut self, data: &[u8]) -> PortActionCallResult {
+        if let Some(action) = self.action.take() {
+            action(self, data);
+        }
+
+        match &self.action {
+            Some(_) => PortActionCallResult::StillValid,
+            None => PortActionCallResult::ClosePort,
+        }
+    }
+}
+
 fn main() {
     let mut virtiomgr = IpcChannel::new(std::env::lookup_capability("virtiomgr").unwrap());
 
@@ -59,50 +78,27 @@ fn main() {
         return;
     }
 
-    let (Capability { cptr: mmio_cap, .. }, _) = (capabilities[0], &response.devices[0]);
+    let (Capability { cptr: mmio_cap, .. }, device) = (capabilities[0], &response.devices[0]);
     let info = librust::syscalls::io::query_mmio_cap(mmio_cap).unwrap();
 
-    let mut net_device = drivers::virtio::VirtIoNetDevice::new(unsafe {
+    let net_device = drivers::virtio::VirtIoNetDevice::new(unsafe {
         &*(info.address() as *const virtio::devices::net::VirtIoNetDevice)
     })
     .unwrap();
 
-    println!("Our MAC address: {}", net_device.mac_address());
-    println!("Link status = {:?}", net_device.link_status());
-    // println!("Max MTU = {}", net_device.max_mtu());
+    let mut network_devices: BTreeMap<usize, Box<dyn NetworkDriver>> = BTreeMap::new();
+    assert_eq!(device.interrupts.len(), 1);
+    network_devices.insert(device.interrupts[0], Box::new(net_device));
 
-    let mac = net_device.mac_address();
+    let mut ports: BTreeMap<u16, PortAction> = BTreeMap::new();
 
-    net_device
-        .tx_udp4(
-            IpV4Socket::new(IpV4Address::new(0, 0, 0, 0), 68),
-            (MacAddress::new([0xFF; 6]), IpV4Socket::new(IpV4Address::new(255, 255, 255, 255), 67)),
-            &|data| {
-                let mut dhcp_message = DhcpMessageBuilder::from_slice(data).ok()?;
+    let mut dhcp_port: u16 = 68;
 
-                dhcp_message.message.operation = DhcpOperation::BOOT_REQUEST;
-                dhcp_message.message.hardware_address = HardwareAddress::TEN_MEGABIT_ETHERNET;
-                dhcp_message.message.hardware_ops = ZeroField::new();
-                dhcp_message.message.transaction_id = TransactionId::new(0);
-                dhcp_message.message.secs = Seconds::new(0);
-                dhcp_message.message.flags = dhcp::Flags::new(0);
-                dhcp_message.message.client_ip_address = IpV4Address::new(0, 0, 0, 0);
-                dhcp_message.message.your_ip_address = IpV4Address::new(0, 0, 0, 0);
-                dhcp_message.message.next_server_ip_address = IpV4Address::new(0, 0, 0, 0);
-                dhcp_message.message.relay_agent_ip_address = IpV4Address::new(0, 0, 0, 0);
-                dhcp_message.message.client_hardware_address = [0; 16];
-                dhcp_message.message.client_hardware_address[..6].copy_from_slice(mac.as_bytes());
-                dhcp_message.message.server_name = [0; 64];
-                dhcp_message.message.boot_file_name = [0; 128];
-
-                dhcp_message.push_option(DhcpOption::DhcpMessageType(DhcpMessageType::DISCOVER));
-                dhcp_message.push_option(DhcpOption::ParameterRequestList(&[DhcpOption::DOMAIN_NAME_SERVER]));
-                //dhcp_message.push_option(DhcpOption::DomainNameServer(DomainNameServerList::new(&[])));
-
-                Some(dhcp_message.finish())
-            },
-        )
-        .unwrap();
+    for net_device in network_devices.values_mut() {
+        let mac = net_device.mac();
+        ports.insert(dhcp_port, dhcp_helpers::dhcp_discover(mac, &mut **net_device));
+        dhcp_port += 1;
+    }
 
     loop {
         let id = loop {
@@ -113,8 +109,14 @@ fn main() {
                 _ => continue,
             }
         };
-        println!("Got interrupt!");
-        net_device.process_interrupt(id).unwrap();
+
+        if let Some(net_device) = network_devices.get_mut(&id) {
+            if let Ok(Some(packet)) = net_device.process_interrupt(id) {
+                // TODO: figure out port type and trigger `PortAction`
+                println!("{:?}", packet);
+            }
+        }
+
         librust::syscalls::io::complete_interrupt(id).unwrap();
     }
 }
