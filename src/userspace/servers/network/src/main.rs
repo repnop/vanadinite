@@ -9,17 +9,17 @@ mod drivers;
 
 use alchemy::PackedStruct;
 use dhcp::{
-    options::{DhcpMessageType, DomainNameServerList},
-    DhcpMessage, DhcpMessageBuilder, DhcpOperation, DhcpOption, HardwareAddress, Seconds, TransactionId, ZeroField,
+    options::DhcpMessageType, DhcpMessageBuilder, DhcpOperation, DhcpOption, HardwareAddress, Seconds, TransactionId,
+    ZeroField,
 };
 use librust::{capabilities::Capability, message::KernelNotification, syscalls::ReadMessage};
 use netstack::{
-    ethernet::{EthernetHeader, Fcs},
-    ipv4::{DscpEcn, Flag, FlagsFragmentOffset, Identification, IpV4Address, IpV4Header, Protocol, VersionIhl},
-    udp::{Port, UdpHeader},
-    Length16,
+    ipv4::{IpV4Address, IpV4Socket},
+    MacAddress,
 };
 use std::ipc::IpcChannel;
+
+use crate::drivers::NetworkDriver;
 
 json::derive! {
     #[derive(Debug, Clone)]
@@ -67,72 +67,42 @@ fn main() {
     })
     .unwrap();
 
-    println!("Our MAC address: {}", net_device.mac_address().map(|n| format!("{:0>2X}", n)).join(":"));
+    println!("Our MAC address: {}", net_device.mac_address());
     println!("Link status = {:?}", net_device.link_status());
     // println!("Max MTU = {}", net_device.max_mtu());
 
     let mac = net_device.mac_address();
 
-    net_device.send_raw(|data| {
-        use core::mem::size_of;
+    net_device
+        .tx_udp4(
+            IpV4Socket::new(IpV4Address::new(0, 0, 0, 0), 68),
+            (MacAddress::new([0xFF; 6]), IpV4Socket::new(IpV4Address::new(255, 255, 255, 255), 67)),
+            &|data| {
+                let mut dhcp_message = DhcpMessageBuilder::from_slice(data).ok()?;
 
-        let (eth_hdr, payload, _) = EthernetHeader::split_slice_mut(data).unwrap();
-        let (ipv4_hdr, payload) = IpV4Header::split_slice_mut(payload).unwrap();
-        let (udp_hdr, payload) = UdpHeader::split_slice_mut(payload).unwrap();
-        let mut dhcp_message = DhcpMessageBuilder::from_slice(&mut *payload).unwrap();
+                dhcp_message.message.operation = DhcpOperation::BOOT_REQUEST;
+                dhcp_message.message.hardware_address = HardwareAddress::TEN_MEGABIT_ETHERNET;
+                dhcp_message.message.hardware_ops = ZeroField::new();
+                dhcp_message.message.transaction_id = TransactionId::new(0);
+                dhcp_message.message.secs = Seconds::new(0);
+                dhcp_message.message.flags = dhcp::Flags::new(0);
+                dhcp_message.message.client_ip_address = IpV4Address::new(0, 0, 0, 0);
+                dhcp_message.message.your_ip_address = IpV4Address::new(0, 0, 0, 0);
+                dhcp_message.message.next_server_ip_address = IpV4Address::new(0, 0, 0, 0);
+                dhcp_message.message.relay_agent_ip_address = IpV4Address::new(0, 0, 0, 0);
+                dhcp_message.message.client_hardware_address = [0; 16];
+                dhcp_message.message.client_hardware_address[..6].copy_from_slice(mac.as_bytes());
+                dhcp_message.message.server_name = [0; 64];
+                dhcp_message.message.boot_file_name = [0; 128];
 
-        // Broadcast MAC
-        eth_hdr.destination_mac = [0xFF; 6];
-        eth_hdr.source_mac = mac;
-        eth_hdr.frame_type = EthernetHeader::IPV4_FRAME;
+                dhcp_message.push_option(DhcpOption::DhcpMessageType(DhcpMessageType::DISCOVER));
+                dhcp_message.push_option(DhcpOption::ParameterRequestList(&[DhcpOption::DOMAIN_NAME_SERVER]));
+                //dhcp_message.push_option(DhcpOption::DomainNameServer(DomainNameServerList::new(&[])));
 
-        ipv4_hdr.version_ihl = VersionIhl::new();
-        ipv4_hdr.dscp_ecn = DscpEcn::new();
-        ipv4_hdr.identification = Identification::new();
-        ipv4_hdr.flags_fragment_offset = FlagsFragmentOffset::new(Flag::NONE, 0);
-        ipv4_hdr.ttl = 255;
-        ipv4_hdr.protocol = Protocol::UDP;
-        ipv4_hdr.source_ip = IpV4Address::new(0, 0, 0, 0);
-        ipv4_hdr.destination_ip = IpV4Address::new(255, 255, 255, 255);
-
-        udp_hdr.destination_port = Port::new(67);
-        udp_hdr.source_port = Port::new(68);
-        udp_hdr.checksum.zero();
-
-        dhcp_message.message.operation = DhcpOperation::BOOT_REQUEST;
-        dhcp_message.message.hardware_address = HardwareAddress::TEN_MEGABIT_ETHERNET;
-        dhcp_message.message.hardware_ops = ZeroField::new();
-        dhcp_message.message.transaction_id = TransactionId::new(0);
-        dhcp_message.message.secs = Seconds::new(0);
-        dhcp_message.message.flags = dhcp::Flags::new(0);
-        dhcp_message.message.client_ip_address = IpV4Address::new(0, 0, 0, 0);
-        dhcp_message.message.your_ip_address = IpV4Address::new(0, 0, 0, 0);
-        dhcp_message.message.next_server_ip_address = IpV4Address::new(0, 0, 0, 0);
-        dhcp_message.message.relay_agent_ip_address = IpV4Address::new(0, 0, 0, 0);
-        dhcp_message.message.client_hardware_address = [0; 16];
-        dhcp_message.message.client_hardware_address[..6].copy_from_slice(&mac[..]);
-        dhcp_message.message.server_name = [0; 64];
-        dhcp_message.message.boot_file_name = [0; 128];
-
-        dhcp_message.push_option(DhcpOption::DhcpMessageType(DhcpMessageType::DISCOVER));
-        dhcp_message.push_option(DhcpOption::ParameterRequestList(&[DhcpOption::DOMAIN_NAME_SERVER]));
-        //dhcp_message.push_option(DhcpOption::DomainNameServer(DomainNameServerList::new(&[])));
-
-        let dhcp_len = dhcp_message.finish();
-
-        println!("dhcp_len={dhcp_len}, size_of::<DhcpMessage>()={}", size_of::<DhcpMessage>());
-
-        udp_hdr.len = Length16::new((dhcp_len + size_of::<UdpHeader>()) as u16);
-        ipv4_hdr.len = Length16::new((size_of::<IpV4Header>() + size_of::<UdpHeader>() + dhcp_len) as u16);
-        ipv4_hdr.generate_checksum();
-
-        let total_len = size_of::<EthernetHeader>() + size_of::<IpV4Header>() + size_of::<UdpHeader>() + dhcp_len;
-
-        //let (data, fcs) = data.split_at_mut(total_len);
-        //Fcs::try_from_mut_byte_slice(fcs).unwrap().generate(data);
-
-        total_len // + 4
-    });
+                Some(dhcp_message.finish())
+            },
+        )
+        .unwrap();
 
     loop {
         let id = loop {
@@ -144,7 +114,7 @@ fn main() {
             }
         };
         println!("Got interrupt!");
-        net_device.recv();
+        net_device.process_interrupt(id).unwrap();
         librust::syscalls::io::complete_interrupt(id).unwrap();
     }
 }

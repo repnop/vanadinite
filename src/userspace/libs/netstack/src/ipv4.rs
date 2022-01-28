@@ -8,6 +8,18 @@
 use crate::{BufferTooSmall, Length16};
 use alchemy::PackedStruct;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IpV4Socket {
+    pub ip: IpV4Address,
+    pub port: u16,
+}
+
+impl IpV4Socket {
+    pub fn new(ip: IpV4Address, port: u16) -> Self {
+        Self { ip, port }
+    }
+}
+
 alchemy::derive! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     #[repr(transparent)]

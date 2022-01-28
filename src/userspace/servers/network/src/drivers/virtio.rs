@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 
 use librust::mem::{DmaElement, DmaRegion};
+use netstack::MacAddress;
 use virtio::{
     devices::net::{
         GsoType, HeaderFlags, LinkStatus, NetDeviceFeatures, NetDeviceFeaturesSplit, VirtIoNetHeaderRx,
@@ -16,6 +17,8 @@ use virtio::{
     splitqueue::{DescriptorFlags, SplitVirtqueue, SplitqueueIndex, VirtqueueDescriptor},
     StatusFlag, VirtIoDeviceError,
 };
+
+use crate::drivers::DriverError;
 
 const MAX_PACKET_LENGTH: usize = 1500; //65550;
 
@@ -153,71 +156,12 @@ impl VirtIoNetDevice {
         Ok(Self { device, receive_queue, transmit_queue, rx_data_buffer, rx_buffer_map, tx_data_buffer, tx_buffer_map })
     }
 
-    pub fn send_raw(&mut self, f: impl FnOnce(&mut [u8]) -> usize) {
-        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
-        let (index, mut buffer) = self.tx_data_buffer.alloc().unwrap();
-        let header = buffer.get_mut();
-
-        let written = f(&mut header.data[..]);
-
-        header.flags = HeaderFlags::NONE;
-        header.gso_size = 0;
-        header.gso_type = GsoType::NONE;
-        header.header_len = 0;
-        header.checksum_offset = 0;
-        header.checksum_start = 0;
-
-        println!("total data len={}", (core::mem::size_of::<VirtIoNetHeaderTx<0>>() + written));
-
-        let descr = self.transmit_queue.alloc_descriptor().unwrap();
-        self.transmit_queue.descriptors.write(
-            descr,
-            VirtqueueDescriptor {
-                address: buffer.physical_address(),
-                length: (core::mem::size_of::<VirtIoNetHeaderTx<0>>() + written) as u32,
-                flags: DescriptorFlags::NONE,
-                next: SplitqueueIndex::new(0),
-            },
-        );
-        self.transmit_queue.available.push(descr);
-        self.tx_buffer_map.insert(descr, index);
-
-        librust::mem::fence(librust::mem::FenceMode::Write);
-
-        self.device.header.queue_notify.notify(1);
-    }
-
-    pub fn mac_address(&self) -> [u8; 6] {
-        self.device.mac.read()
+    pub fn mac_address(&self) -> MacAddress {
+        MacAddress::new(self.device.mac.read())
     }
 
     pub fn link_status(&self) -> LinkStatus {
         unsafe { self.device.link_status() }
-    }
-
-    // pub fn max_mtu(&self) -> u16 {
-    //     unsafe { self.device.mtu() }
-    // }
-
-    pub fn recv(&mut self) {
-        self.device.header.interrupt_ack.acknowledge_buffer_used();
-
-        if let Some(used) = self.transmit_queue.used.pop() {
-            let descr = SplitqueueIndex::new(used.start_index as u16);
-            let index = self.tx_buffer_map.remove(&descr).unwrap();
-            self.tx_data_buffer.dealloc(index);
-        }
-
-        if let Some(used) = self.receive_queue.used.pop() {
-            let descr = SplitqueueIndex::new(used.start_index as u16);
-            let data_len = self.receive_queue.descriptors.read(descr).length as usize
-                - core::mem::size_of::<VirtIoNetHeaderRx<0>>();
-            let index = *self.rx_buffer_map.get(&descr).unwrap();
-            let buffer = self.rx_data_buffer.get(index).unwrap();
-            let buffer = buffer.get();
-
-            println!("{:?}", &buffer.data[..data_len]);
-        }
     }
 }
 
@@ -276,5 +220,67 @@ impl RxDataBuffer {
 
     fn get(&mut self, index: usize) -> Option<DmaElement<'_, VirtIoNetHeaderRx<MAX_PACKET_LENGTH>>> {
         self.buffer.get(index)
+    }
+}
+
+impl super::NetworkDriver for VirtIoNetDevice {
+    fn mac(&self) -> netstack::MacAddress {
+        self.mac_address()
+    }
+
+    fn process_interrupt(&mut self, _: usize) -> Result<Option<&[u8]>, super::DriverError> {
+        self.device.header.interrupt_ack.acknowledge_buffer_used();
+
+        if let Some(used) = self.transmit_queue.used.pop() {
+            let descr = SplitqueueIndex::new(used.start_index as u16);
+            let index = self.tx_buffer_map.remove(&descr).unwrap();
+            self.tx_data_buffer.dealloc(index);
+        }
+
+        if let Some(used) = self.receive_queue.used.pop() {
+            let descr = SplitqueueIndex::new(used.start_index as u16);
+            let data_len = self.receive_queue.descriptors.read(descr).length as usize
+                - core::mem::size_of::<VirtIoNetHeaderRx<0>>();
+            let index = *self.rx_buffer_map.get(&descr).unwrap();
+            let buffer = self.rx_data_buffer.get(index).unwrap();
+            let buffer = buffer.get();
+
+            return Ok(Some(&buffer.data[..data_len]));
+        }
+
+        Ok(None)
+    }
+
+    fn tx_raw(&mut self, f: &dyn Fn(&mut [u8]) -> Option<usize>) -> Result<(), super::DriverError> {
+        let (index, mut buffer) = self.tx_data_buffer.alloc().unwrap();
+        let header = buffer.get_mut();
+
+        let written = f(&mut header.data[..]).ok_or(DriverError::DataTooLong)?;
+
+        header.flags = HeaderFlags::NONE;
+        header.gso_size = 0;
+        header.gso_type = GsoType::NONE;
+        header.header_len = 0;
+        header.checksum_offset = 0;
+        header.checksum_start = 0;
+
+        let descr = self.transmit_queue.alloc_descriptor().unwrap();
+        self.transmit_queue.descriptors.write(
+            descr,
+            VirtqueueDescriptor {
+                address: buffer.physical_address(),
+                length: (core::mem::size_of::<VirtIoNetHeaderTx<0>>() + written) as u32,
+                flags: DescriptorFlags::NONE,
+                next: SplitqueueIndex::new(0),
+            },
+        );
+        self.transmit_queue.available.push(descr);
+        self.tx_buffer_map.insert(descr, index);
+
+        librust::mem::fence(librust::mem::FenceMode::Write);
+
+        self.device.header.queue_notify.notify(1);
+
+        Ok(())
     }
 }

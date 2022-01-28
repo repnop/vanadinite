@@ -5,15 +5,15 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::BufferTooSmall;
+use crate::{BufferTooSmall, MacAddress};
 use alchemy::PackedStruct;
 
 alchemy::derive! {
     #[derive(Debug, Clone, Copy)]
     #[repr(C)]
     pub struct EthernetHeader {
-        pub destination_mac: [u8; 6],
-        pub source_mac: [u8; 6],
+        pub destination_mac: MacAddress,
+        pub source_mac: MacAddress,
         pub frame_type: [u8; 2],
     }
 }
