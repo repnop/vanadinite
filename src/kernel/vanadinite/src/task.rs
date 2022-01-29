@@ -298,7 +298,7 @@ impl Task {
         let sp = memory_manager
             .alloc_guarded_region(RegionDescription {
                 size: PageSize::Kilopage,
-                len: 4,
+                len: 16,
                 contiguous: false,
                 flags: USER | READ | WRITE | VALID,
                 fill: FillOption::Unitialized,
