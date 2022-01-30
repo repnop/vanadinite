@@ -46,7 +46,6 @@ pub trait NetworkDriver {
 
             let payload_size = data(payload)?;
 
-            // Broadcast MAC
             eth_hdr.destination_mac = destination.0;
             eth_hdr.source_mac = mac;
             eth_hdr.frame_type = EthernetHeader::IPV4_FRAME;

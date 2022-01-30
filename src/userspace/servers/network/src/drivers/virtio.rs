@@ -48,7 +48,7 @@ impl VirtIoNetDevice {
             let descriptor = receive_queue.alloc_descriptor().unwrap();
             let (index, mut buffer) = rx_data_buffer.alloc().unwrap();
 
-            buffer.get_mut().num_buffers = 1;
+            // buffer.get_mut().num_buffers = 1;
 
             receive_queue.descriptors.write(
                 descriptor,

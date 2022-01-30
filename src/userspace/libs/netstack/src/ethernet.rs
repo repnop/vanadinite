@@ -30,11 +30,7 @@ impl EthernetHeader {
 
         let (header, payload_and_fcs) = slice.split_array_ref::<{ core::mem::size_of::<EthernetHeader>() }>();
         let (payload, fcs) = payload_and_fcs.rsplit_array_ref::<{ core::mem::size_of::<Fcs>() }>();
-        Ok((
-            EthernetHeader::from_bytes_ref::<{ core::mem::size_of::<EthernetHeader>() }>(header),
-            payload,
-            Fcs::from_bytes_ref::<{ core::mem::size_of::<Fcs>() }>(fcs),
-        ))
+        Ok((EthernetHeader::from_bytes_ref(header), payload, Fcs::from_bytes_ref(fcs)))
     }
 
     pub fn split_slice_mut(slice: &mut [u8]) -> Result<(&mut EthernetHeader, &mut [u8], &mut Fcs), BufferTooSmall> {
@@ -44,11 +40,7 @@ impl EthernetHeader {
 
         let (header, payload_and_fcs) = slice.split_array_mut::<{ core::mem::size_of::<EthernetHeader>() }>();
         let (payload, fcs) = payload_and_fcs.rsplit_array_mut::<{ core::mem::size_of::<Fcs>() }>();
-        Ok((
-            EthernetHeader::from_bytes_mut::<{ core::mem::size_of::<EthernetHeader>() }>(header),
-            payload,
-            Fcs::from_bytes_mut::<{ core::mem::size_of::<Fcs>() }>(fcs),
-        ))
+        Ok((EthernetHeader::from_bytes_mut(header), payload, Fcs::from_bytes_mut(fcs)))
     }
 }
 

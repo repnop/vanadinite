@@ -47,3 +47,19 @@ impl<'a> DomainNameServerList<'a> {
         self.0.iter().copied()
     }
 }
+
+alchemy::derive! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[repr(transparent)]
+    pub struct DhcpServerIdentifier(super::IpV4Address);
+}
+
+impl DhcpServerIdentifier {
+    pub fn new(ip: super::IpV4Address) -> Self {
+        Self(ip)
+    }
+
+    pub fn ip(self) -> super::IpV4Address {
+        self.0
+    }
+}

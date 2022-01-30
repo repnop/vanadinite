@@ -160,6 +160,7 @@ impl Default for MagicCookie {
 pub enum DhcpOption<'a> {
     DomainNameServer(options::DomainNameServerList<'a>),
     DhcpMessageType(options::DhcpMessageType),
+    DhcpServerIdentifier(options::DhcpServerIdentifier),
     ParameterRequestList(&'a [u8]),
     EndOfOptions,
 }
@@ -167,6 +168,7 @@ pub enum DhcpOption<'a> {
 impl DhcpOption<'_> {
     pub const DOMAIN_NAME_SERVER: u8 = 6;
     pub const DHCP_MESSAGE_TYPE: u8 = 53;
+    pub const DHCP_SERVER_IDENTIFIER: u8 = 54;
     pub const PARAMETER_REQUEST_LIST: u8 = 55;
     pub const END_OF_OPTIONS: u8 = 255;
 
@@ -174,6 +176,7 @@ impl DhcpOption<'_> {
         match self {
             DhcpOption::DomainNameServer(_) => Self::DOMAIN_NAME_SERVER,
             Self::DhcpMessageType(_) => Self::DHCP_MESSAGE_TYPE,
+            Self::DhcpServerIdentifier(_) => Self::DHCP_SERVER_IDENTIFIER,
             Self::ParameterRequestList(_) => Self::PARAMETER_REQUEST_LIST,
             Self::EndOfOptions => Self::END_OF_OPTIONS,
         }
@@ -232,6 +235,10 @@ impl<'a> DhcpMessageBuilder<'a> {
                 self.push_bytes(&[option_id, options_len])?;
                 self.push_bytes(options)?;
             }
+            DhcpOption::DhcpServerIdentifier(identifier) => {
+                self.push_bytes(&[option_id, 4])?;
+                self.push_bytes(identifier.ip().as_bytes())?;
+            }
             DhcpOption::EndOfOptions => {
                 self.push_bytes(&[option_id])?;
             }
@@ -269,8 +276,99 @@ impl<'a> DhcpMessageBuilder<'a> {
     }
 }
 
+impl core::ops::Deref for DhcpMessageBuilder<'_> {
+    type Target = DhcpMessage;
+    fn deref(&self) -> &Self::Target {
+        self.message
+    }
+}
+
+impl core::ops::DerefMut for DhcpMessageBuilder<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.message
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum TryPushOptionError {
     BufferTooShort,
     OptionValueTooLong,
+}
+
+pub struct DhcpMessageParser<'a> {
+    pub message: &'a DhcpMessage,
+    options: &'a [u8],
+}
+
+impl<'a> DhcpMessageParser<'a> {
+    pub fn from_slice(slice: &'a [u8]) -> Result<Self, alchemy::TryCastError> {
+        if slice.len() < core::mem::size_of::<DhcpMessage>() {
+            return Err(alchemy::TryCastError::NotLongEnough);
+        }
+
+        let (message, options) = slice.split_array_ref::<{ core::mem::size_of::<DhcpMessage>() }>();
+
+        Ok(Self { message: DhcpMessage::from_bytes_ref::<{ core::mem::size_of::<DhcpMessage>() }>(message), options })
+    }
+
+    pub fn message_type(&self) -> Result<options::DhcpMessageType, MalformedPacket> {
+        self.options()
+            .find_map(|option| match option {
+                Ok(DhcpOption::DhcpMessageType(message_type)) => Some(message_type),
+                _ => None,
+            })
+            .ok_or(MalformedPacket::MissingDhcpMessageType)
+    }
+
+    pub fn find_option<T>(&self, f: impl FnMut(DhcpOption<'_>) -> Option<T>) -> Option<T> {
+        self.options().filter_map(|o| o.ok()).find_map(f)
+    }
+
+    pub fn options(&self) -> impl Iterator<Item = Result<DhcpOption<'_>, MalformedPacket>> + '_ {
+        let mut done = false;
+        let mut data = self.options;
+
+        core::iter::from_fn(move || {
+            if done || data.is_empty() {
+                return None;
+            }
+
+            let option_id = data[0];
+
+            #[allow(clippy::wildcard_in_or_patterns)]
+            match option_id {
+                DhcpOption::DHCP_MESSAGE_TYPE => {
+                    let message_type = data[2];
+                    data = &data[3..];
+                    Some(Ok(DhcpOption::DhcpMessageType(options::DhcpMessageType::new(message_type))))
+                }
+                DhcpOption::DHCP_SERVER_IDENTIFIER => {
+                    let ip = match IpV4Address::try_from_byte_slice(&data[2..6]) {
+                        Ok(ip) => *ip,
+                        Err(_) => {
+                            done = true;
+                            return Some(Err(MalformedPacket::MalformedOption(option_id)));
+                        }
+                    };
+                    Some(Ok(DhcpOption::DhcpServerIdentifier(options::DhcpServerIdentifier::new(ip))))
+                }
+                DhcpOption::END_OF_OPTIONS | _ => {
+                    done = true;
+                    None
+                }
+            }
+        })
+    }
+}
+
+impl core::ops::Deref for DhcpMessageParser<'_> {
+    type Target = DhcpMessage;
+    fn deref(&self) -> &Self::Target {
+        self.message
+    }
+}
+
+pub enum MalformedPacket {
+    MissingDhcpMessageType,
+    MalformedOption(u8),
 }

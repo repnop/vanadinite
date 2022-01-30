@@ -6,19 +6,23 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 #![no_std]
-#![feature(generic_arg_infer, split_array, array_chunks)]
+#![allow(incomplete_features)]
+#![feature(generic_arg_infer, generic_const_exprs, split_array, array_chunks)]
 
+pub mod arp;
 pub mod ethernet;
 pub mod ipv4;
 pub mod udp;
 
 alchemy::derive! {
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     #[repr(transparent)]
     pub struct MacAddress([u8; 6]);
 }
 
 impl MacAddress {
+    pub const BROADCAST: Self = Self([0xFF; 6]);
+
     pub fn new(bytes: [u8; 6]) -> Self {
         Self(bytes)
     }

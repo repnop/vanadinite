@@ -36,6 +36,18 @@ impl IpV4Address {
     }
 }
 
+impl From<[u8; 4]> for IpV4Address {
+    fn from(b: [u8; 4]) -> Self {
+        Self::new(b[0], b[1], b[2], b[3])
+    }
+}
+
+impl core::fmt::Display for IpV4Address {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}.{}.{}.{}", self.0[0], self.0[1], self.0[2], self.0[3])
+    }
+}
+
 alchemy::derive! {
     #[derive(Debug, Clone, Copy)]
     #[repr(C)]
@@ -60,7 +72,7 @@ impl IpV4Header {
         }
 
         let (header, payload) = slice.split_array_ref::<{ core::mem::size_of::<Self>() }>();
-        Ok((Self::from_bytes_ref::<{ core::mem::size_of::<Self>() }>(header), payload))
+        Ok((Self::from_bytes_ref(header), payload))
     }
 
     pub fn split_slice_mut(slice: &mut [u8]) -> Result<(&mut IpV4Header, &mut [u8]), BufferTooSmall> {
@@ -69,7 +81,7 @@ impl IpV4Header {
         }
 
         let (header, payload) = slice.split_array_mut::<{ core::mem::size_of::<Self>() }>();
-        Ok((Self::from_bytes_mut::<{ core::mem::size_of::<Self>() }>(header), payload))
+        Ok((Self::from_bytes_mut(header), payload))
     }
 
     pub fn generate_checksum(&mut self) {

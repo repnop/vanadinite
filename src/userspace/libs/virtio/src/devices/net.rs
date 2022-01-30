@@ -327,7 +327,6 @@ pub struct VirtIoNetHeaderRx<const N: usize> {
     pub gso_size: u16,
     pub checksum_start: u16,
     pub checksum_offset: u16,
-    pub num_buffers: u16,
     pub data: [u8; N],
 }
 
