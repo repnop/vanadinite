@@ -22,6 +22,9 @@ use crate::drivers::DriverError;
 
 const MAX_PACKET_LENGTH: usize = 1500; //65550;
 
+unsafe impl Send for VirtIoNetDevice {}
+unsafe impl Sync for VirtIoNetDevice {}
+
 pub struct VirtIoNetDevice {
     device: &'static virtio::devices::net::VirtIoNetDevice,
     receive_queue: SplitVirtqueue,
@@ -127,8 +130,6 @@ impl VirtIoNetDevice {
 
         librust::mem::fence(librust::mem::FenceMode::Write);
 
-        println!("Pre tx queue");
-
         // Transmit Queue
         device.header.queue_select.write(1);
         librust::mem::fence(librust::mem::FenceMode::Write);
@@ -140,8 +141,6 @@ impl VirtIoNetDevice {
         device.header.queue_ready.ready();
 
         librust::mem::fence(librust::mem::FenceMode::Write);
-
-        println!("Post tx queue");
 
         device.header.status.set_flag(StatusFlag::DriverOk);
 
@@ -241,7 +240,11 @@ impl super::NetworkDriver for VirtIoNetDevice {
             let descr = SplitqueueIndex::new(used.start_index as u16);
             let data_len = self.receive_queue.descriptors.read(descr).length as usize
                 - core::mem::size_of::<VirtIoNetHeaderRx<0>>();
-            let index = *self.rx_buffer_map.get(&descr).unwrap();
+            let index = self.rx_buffer_map.remove(&descr).unwrap();
+            // Free index so we have it whenever the caller is done with it
+            // TODO: need to add it back to the available queue
+            self.rx_data_buffer.dealloc(index);
+
             let buffer = self.rx_data_buffer.get(index).unwrap();
             let buffer = buffer.get();
 

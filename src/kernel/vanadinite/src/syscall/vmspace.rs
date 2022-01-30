@@ -113,6 +113,7 @@ pub fn alloc_vmspace_object(
         },
     );
 
+    // log::info!("Mapping region at {:#p} for task {}", at.start, task.name);
     let range = task.memory_manager.apply_shared_region(
         None,
         flags::USER | flags::VALID | flags::READ | flags::WRITE,

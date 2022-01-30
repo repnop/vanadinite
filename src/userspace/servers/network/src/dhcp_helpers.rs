@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{drivers::NetworkDriver, PortAction};
+use crate::drivers::NetworkDriver;
 use alchemy::PackedStruct;
 use dhcp::{
     options::DhcpMessageType, DhcpMessageBuilder, DhcpOperation, DhcpOption, HardwareAddress, Seconds, TransactionId,
@@ -16,7 +16,7 @@ use netstack::{
     MacAddress,
 };
 
-pub fn dhcp_discover(mac: MacAddress, net_device: &mut dyn NetworkDriver) -> PortAction {
+pub fn get_ip(mac: MacAddress, net_device: &mut dyn NetworkDriver) {
     net_device
         .tx_udp4(
             IpV4Socket::new(IpV4Address::new(0, 0, 0, 0), 68),
@@ -47,8 +47,6 @@ pub fn dhcp_discover(mac: MacAddress, net_device: &mut dyn NetworkDriver) -> Por
             },
         )
         .unwrap();
-
-    PortAction::new(Box::new(move |action, data| {}))
 }
 
 pub fn dhcp_lease() {}

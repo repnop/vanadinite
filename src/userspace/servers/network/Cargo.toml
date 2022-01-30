@@ -11,6 +11,8 @@ dhcp = { path = "../../libs/dhcp" }
 librust = { path = "../../../shared/librust" }
 json = { path = "../../libs/json" }
 netstack = { path = "../../libs/netstack" }
+present = { path = "../../libs/present" }
 std = { path = "../../libs/std" }
+sync = { path = "../../../shared/sync" }
 virtio = { path = "../../libs/virtio" }
 volatile = { path = "../../../shared/volatile" }

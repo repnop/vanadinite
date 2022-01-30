@@ -19,7 +19,10 @@ pub mod heap;
 pub mod io;
 pub mod ipc;
 pub mod prelude;
+pub mod rc;
 pub mod rt;
+pub mod sync;
+pub mod task;
 mod task_local;
 pub mod vmspace;
 

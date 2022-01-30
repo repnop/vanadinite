@@ -210,6 +210,17 @@ impl MemoryManager {
     ) -> Range<VirtualAddress> {
         let at = at.unwrap_or_else(|| self.find_free_region(region.page_size(), region.n_pages()));
 
+        // FIXME: I suspect there's a bug with the address map where its giving
+        // back a kilopage region inside of a megapage region, but need further
+        // testing to verify. This assert seems to make it go away, probably
+        // because the `time` CSR is used for the random offset.
+        assert!(
+            self.address_map.find(at).unwrap().is_unoccupied(),
+            "Page already mapped at {:#p}:\n{:#?}",
+            at,
+            self.address_map_debug(Some(at))
+        );
+
         let iter = region
             .physical_addresses()
             .enumerate()

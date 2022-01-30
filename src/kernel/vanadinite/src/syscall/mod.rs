@@ -171,6 +171,11 @@ fn do_syscall(task: &mut Task, msg: Message) -> (Sender, SyscallOutcome) {
             CapabilityPtr::new(syscall_req.arguments[0]),
             RawUserSlice::new(VirtualAddress::new(syscall_req.arguments[1]), syscall_req.arguments[2]),
         ),
+        Syscall::ReadChannelNonBlocking => channel::read_message_nb(
+            task,
+            CapabilityPtr::new(syscall_req.arguments[0]),
+            RawUserSlice::new(VirtualAddress::new(syscall_req.arguments[1]), syscall_req.arguments[2]),
+        ),
         Syscall::RetireChannelMessage => channel::retire_message(
             task,
             CapabilityPtr::new(syscall_req.arguments[0]),

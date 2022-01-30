@@ -67,7 +67,13 @@ impl PageTable {
             }
 
             match entry.kind() {
-                EntryKind::Leaf => panic!("man ionno, wtf"),
+                EntryKind::Leaf => {
+                    let entry = *entry;
+                    panic!(
+                        "already mapped page at a larger page size: from={:#p} to={:#p} flags={:?} size={:?} | current={:?} entry={:?} currently mapped: {:?}",
+                        from, to, flags, size, current, entry, self.resolve(to)
+                    )
+                }
                 EntryKind::Branch(paddr) => table = unsafe { &mut *(phys2virt(paddr).as_mut_ptr().cast()) },
                 EntryKind::NotValid => {
                     let new_subtable = Box::leak(Self::new_table());

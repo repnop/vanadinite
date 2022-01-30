@@ -368,6 +368,80 @@ pub fn read_message(
     }
 }
 
+pub fn read_message_nb(
+    task: &mut Task,
+    cptr: CapabilityPtr,
+    cap_buffer: RawUserSlice<user::ReadWrite, librust::capabilities::Capability>,
+) -> SyscallOutcome {
+    let channel_id = match task.cspace.resolve(cptr) {
+        Some(Capability { resource: CapabilityResource::Channel(channel), rights })
+            if *rights & CapabilityRights::READ =>
+        {
+            channel
+        }
+        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
+    };
+    let (_, channel) = task.channels.get_mut(channel_id).unwrap();
+
+    // TODO: need to be able to return more than just the first one FIXME: this
+    // probably needs the lock to make sure a message wasn't sent after the
+    // check but before the register
+
+    // FIXME: check for broken channel
+
+    let mut receiver = channel.receiver.inner.write();
+    match receiver.pop_front() {
+        None => SyscallOutcome::processed((0, 0, 0, 0, 0)),
+        Some(ChannelMessage { data, mut caps }) => {
+            let mut message_id = MessageId::new(0);
+            let mut region = VirtualAddress::new(0)..VirtualAddress::new(0);
+            let mut len = 0;
+
+            if let Some((mid, mregion, mlen)) = data {
+                message_id = mid;
+                len = mlen;
+
+                let mregion = match mregion {
+                    PhysicalRegion::Shared(region) => region,
+                    _ => unreachable!(),
+                };
+
+                // FIXME: make it so we can use any kind of physical region
+                region = task.memory_manager.apply_shared_region(
+                    None,
+                    flags::READ | flags::WRITE | flags::USER | flags::VALID,
+                    mregion,
+                    AddressRegionKind::Channel,
+                );
+            }
+
+            let (caps_written, caps_remaining) = match cap_buffer.len() {
+                0 => (0, caps.len()),
+                len => {
+                    let cap_slice = match unsafe { cap_buffer.validate(&task.memory_manager) } {
+                        Ok(cap_slice) => cap_slice,
+                        Err(_) => return SyscallOutcome::Err(KError::InvalidArgument(3)),
+                    };
+
+                    let n_caps_to_write = len.min(caps.len());
+                    let mut cap_slice = cap_slice.guarded();
+                    for (target, cap) in cap_slice.iter_mut().zip(caps.drain(..n_caps_to_write)) {
+                        *target = cap;
+                    }
+
+                    (n_caps_to_write, caps.len())
+                }
+            };
+
+            if caps_remaining != 0 {
+                receiver.push_front(ChannelMessage { data: None, caps });
+            }
+
+            SyscallOutcome::processed((message_id.value(), region.start.as_usize(), len, caps_written, caps_remaining))
+        }
+    }
+}
+
 pub fn retire_message(task: &mut Task, cptr: CapabilityPtr, message_id: MessageId) -> SyscallOutcome {
     let channel_id = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })

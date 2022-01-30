@@ -13,3 +13,6 @@ loadelf = { path = "../libs/loadelf" }
 fdt = "0.1.3"
 std = { path = "../libs/std" }
 tar = { path = "../libs/tar" }
+
+[profile.release]
+debug = true

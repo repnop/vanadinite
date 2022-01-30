@@ -92,6 +92,24 @@ impl PageTableEntry {
     }
 }
 
+impl core::fmt::Debug for PageTableEntry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "PageTableEntry(")?;
+        match self.kind() {
+            EntryKind::Leaf => {
+                write!(f, "Leaf, flags={:?}, ppn={:?}", self.flags(), self.ppn())?;
+            }
+            EntryKind::NotValid => {
+                write!(f, "NotValid")?;
+            }
+            EntryKind::Branch(next_level) => {
+                write!(f, "Branch, next_level={:#p}", next_level)?;
+            }
+        }
+        write!(f, ")")
+    }
+}
+
 pub enum EntryKind {
     NotValid,
     Leaf,

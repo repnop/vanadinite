@@ -20,6 +20,9 @@ pub struct ChannelMessage {
     pub len: usize,
 }
 
+unsafe impl Send for ChannelMessage {}
+unsafe impl Sync for ChannelMessage {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct ChannelId(usize);
@@ -103,6 +106,26 @@ pub fn read_message(
     .1
     .map(|(id, ptr, len, written_caps, caps_remaining)| {
         (ChannelMessage { id: MessageId::new(id), ptr: ptr as *mut u8, len }, written_caps, caps_remaining)
+    })
+}
+
+pub fn read_message_non_blocking(
+    cptr: CapabilityPtr,
+    cap_buffer: &mut [Capability],
+) -> SyscallResult<Option<(ChannelMessage, usize, usize)>, KError> {
+    syscall(
+        Recipient::kernel(),
+        SyscallRequest {
+            syscall: Syscall::ReadChannelNonBlocking,
+            arguments: [cptr.value(), cap_buffer.as_mut_ptr() as usize, cap_buffer.len(), 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        },
+    )
+    .1
+    .map(|vals| match vals {
+        (0, 0, 0, 0, 0) => None,
+        (id, ptr, len, written_caps, caps_remaining) => {
+            Some((ChannelMessage { id: MessageId::new(id), ptr: ptr as *mut u8, len }, written_caps, caps_remaining))
+        }
     })
 }
 

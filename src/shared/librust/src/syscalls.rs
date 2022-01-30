@@ -39,6 +39,7 @@ pub enum Syscall {
     QueryMemoryCapability = 20,
     CompleteInterrupt = 21,
     QueryMmioCapability = 22,
+    ReadChannelNonBlocking = 23,
 }
 
 impl Syscall {
@@ -62,12 +63,13 @@ impl Syscall {
             20 => Some(Self::QueryMemoryCapability),
             21 => Some(Self::CompleteInterrupt),
             22 => Some(Self::QueryMmioCapability),
+            23 => Some(Self::ReadChannelNonBlocking),
             _ => None,
         }
     }
 }
 
-#[inline]
+#[inline(never)]
 pub fn syscall<T: Into<Message>, U: From<Message>, E: From<Message>>(
     recipient: Recipient,
     args: T,

@@ -73,6 +73,7 @@ impl IpcChannel {
     }
 }
 
+#[derive(Debug)]
 pub struct ReadChannelMessage {
     pub message: Message,
     pub caps_read: usize,
@@ -82,6 +83,10 @@ pub struct ReadChannelMessage {
 pub struct Message(CapabilityPtr, ChannelMessage);
 
 impl Message {
+    pub unsafe fn new(cptr: CapabilityPtr, message: ChannelMessage) -> Self {
+        Self(cptr, message)
+    }
+
     pub fn as_bytes(&self) -> &[u8] {
         if !self.1.ptr.is_null() {
             unsafe { core::slice::from_raw_parts(self.1.ptr, self.1.len) }

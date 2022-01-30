@@ -53,3 +53,15 @@ impl DeadlockDetection for NoCheck {
         0
     }
 }
+
+pub struct Immediate;
+
+impl DeadlockDetection for Immediate {
+    fn would_deadlock(_: usize) -> bool {
+        true
+    }
+
+    fn gather_metadata() -> usize {
+        0
+    }
+}

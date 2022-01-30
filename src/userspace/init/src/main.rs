@@ -5,8 +5,6 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(naked_functions, start, lang_items)]
-
 use librust::{
     self,
     capabilities::{CapabilityPtr, CapabilityRights},
@@ -26,10 +24,6 @@ static INIT_ORDER: &str = r#"{
             "caps": ["devicemgr"],
         },
         {
-            "name": "servicemgr",
-            "caps": ["devicemgr", "stdio"],
-        },
-        {
             "name": "virtiomgr",
             "caps": ["devicemgr", "stdio"],
         },
@@ -40,6 +34,10 @@ static INIT_ORDER: &str = r#"{
         {
             "name": "network",
             "caps": ["virtiomgr", "stdio"],
+        },
+        {
+            "name": "servicemgr",
+            "caps": ["devicemgr", "stdio", "network"],
         },
     ]
 }"#;
@@ -69,10 +67,7 @@ fn main() {
     let init_order: InitOrder = json::deserialize(INIT_ORDER.as_bytes()).unwrap();
 
     for server in init_order.servers {
-        let file = match tar.file(&server.name) {
-            Some(file) => file,
-            None => panic!("couldn't find file for {:?}", server.name),
-        };
+        let file = tar.file(&server.name).unwrap();
         let (mut space, mut env) = loadelf::load_elf(&server.name, &loadelf::Elf::new(file.contents).unwrap()).unwrap();
 
         for cap in server.caps {

@@ -14,6 +14,7 @@ use librust::{
     message::SyscallResult,
     syscalls::allocation::{self, AllocationOptions, MemoryPermissions},
 };
+use sync::SpinMutex;
 
 #[derive(Clone, Copy)]
 pub struct TaskLocal(core::marker::PhantomData<*mut ()>);
@@ -26,17 +27,18 @@ impl TaskLocal {
 
 unsafe impl Allocator for TaskLocal {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, core::alloc::AllocError> {
-        TASK_LOCAL_ALLOCATOR.allocate(layout)
+        TASK_LOCAL_ALLOCATOR.lock().allocate(layout)
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        TASK_LOCAL_ALLOCATOR.deallocate(ptr, layout)
+        TASK_LOCAL_ALLOCATOR.lock().deallocate(ptr, layout)
     }
 }
 
-#[thread_local]
-static TASK_LOCAL_ALLOCATOR: TaskLocalAllocator = TaskLocalAllocator::new();
+// #[thread_local]
+static TASK_LOCAL_ALLOCATOR: SpinMutex<TaskLocalAllocator> = SpinMutex::new(TaskLocalAllocator::new());
 
+unsafe impl Send for TaskLocalAllocator {}
 struct TaskLocalAllocator {
     slabs: [(usize, Cell<*mut u8>); 16],
     // TODO: have a catch-all backup for allocations >32KiB
@@ -126,7 +128,7 @@ struct GlobalTaskLocalAllocator;
 
 unsafe impl GlobalAlloc for GlobalTaskLocalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        match TASK_LOCAL_ALLOCATOR.allocate(layout) {
+        match TASK_LOCAL_ALLOCATOR.lock().allocate(layout) {
             Ok(ptr) => ptr.as_ptr() as *mut u8,
             Err(_) => core::ptr::null_mut(),
         }
@@ -134,7 +136,7 @@ unsafe impl GlobalAlloc for GlobalTaskLocalAllocator {
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         if !ptr.is_null() {
-            TASK_LOCAL_ALLOCATOR.deallocate(NonNull::new_unchecked(ptr), layout)
+            TASK_LOCAL_ALLOCATOR.lock().deallocate(NonNull::new_unchecked(ptr), layout)
         }
     }
 }

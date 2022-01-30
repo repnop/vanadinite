@@ -37,6 +37,9 @@ pub fn complete_interrupt(interrupt_id: usize) -> SyscallResult<(), KError> {
     .1
 }
 
+unsafe impl Send for MmioCapabilityInfo {}
+unsafe impl Sync for MmioCapabilityInfo {}
+
 pub struct MmioCapabilityInfo {
     address: *mut u8,
     len: usize,
