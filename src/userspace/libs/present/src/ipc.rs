@@ -107,6 +107,12 @@ impl IpcChannel {
     }
 }
 
+impl Drop for IpcChannel {
+    fn drop(&mut self) {
+        EVENT_REGISTRY.unregister_interest(BlockType::IpcChannelMessage(self.0));
+    }
+}
+
 pub struct IpcRead<'a>(&'a IpcChannel, &'a mut [Capability]);
 
 impl<'a> Future for IpcRead<'a> {

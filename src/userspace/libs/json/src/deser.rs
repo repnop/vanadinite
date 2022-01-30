@@ -31,6 +31,13 @@ pub trait Serializer: Sized {
         self.write(b'}');
     }
 
+    fn serialize_bool(&mut self, b: bool) {
+        match b {
+            true => self.write_all(b"true"),
+            false => self.write_all(b"false"),
+        }
+    }
+
     fn serialize_number(&mut self, n: i64) {
         // FIXME: this is lazy but easy
         self.write_all(alloc::format!("{}", n).as_bytes());
@@ -108,6 +115,12 @@ impl<S: Serializer> Serialize<S> for alloc::string::String {
 impl<S: Serializer> Serialize<S> for str {
     fn serialize(&self, serializer: &mut S) {
         serializer.serialize_string(self);
+    }
+}
+
+impl<S: Serializer> Serialize<S> for bool {
+    fn serialize(&self, serializer: &mut S) {
+        serializer.serialize_bool(*self);
     }
 }
 
@@ -221,6 +234,7 @@ pub trait Deserializer<'a> {
     where
         F: FnMut(&mut Self) -> Result<(), DeserializeError>;
     fn deserialize_number(&mut self) -> Result<i64, DeserializeError>;
+    fn deserialize_bool(&mut self) -> Result<bool, DeserializeError>;
     fn deserialize_null(&mut self) -> Result<(), DeserializeError>;
     fn deserialize_str(&mut self) -> Result<&'a str, DeserializeError>;
     fn try_deserialize<T: Deserialize>(&mut self) -> Option<T>;
@@ -270,6 +284,10 @@ impl<'a> Deserializer<'a> for crate::parser::Parser<'a> {
         Ok(())
     }
 
+    fn deserialize_bool(&mut self) -> Result<bool, DeserializeError> {
+        Ok(self.parse::<bool>()?)
+    }
+
     fn deserialize_number(&mut self) -> Result<i64, DeserializeError> {
         Ok(self.parse::<i64>()?)
     }
@@ -312,6 +330,12 @@ pub trait Deserialize: Sized {
 impl Deserialize for alloc::string::String {
     fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
         Ok(deserializer.deserialize_str()?.into())
+    }
+}
+
+impl Deserialize for bool {
+    fn deserialize<'a, D: Deserializer<'a>>(deserializer: &mut D) -> Result<Self, DeserializeError> {
+        deserializer.deserialize_bool()
     }
 }
 

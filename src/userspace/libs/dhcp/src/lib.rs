@@ -158,14 +158,17 @@ impl Default for MagicCookie {
 }
 
 pub enum DhcpOption<'a> {
+    Router(IpV4Address),
     DomainNameServer(options::DomainNameServerList<'a>),
     DhcpMessageType(options::DhcpMessageType),
-    DhcpServerIdentifier(options::DhcpServerIdentifier),
+    DhcpServerIdentifier(IpV4Address),
     ParameterRequestList(&'a [u8]),
     EndOfOptions,
+    Unknown(u8, &'a [u8]),
 }
 
 impl DhcpOption<'_> {
+    pub const ROUTER: u8 = 3;
     pub const DOMAIN_NAME_SERVER: u8 = 6;
     pub const DHCP_MESSAGE_TYPE: u8 = 53;
     pub const DHCP_SERVER_IDENTIFIER: u8 = 54;
@@ -174,11 +177,13 @@ impl DhcpOption<'_> {
 
     pub fn option_id(&self) -> u8 {
         match self {
-            DhcpOption::DomainNameServer(_) => Self::DOMAIN_NAME_SERVER,
+            Self::Router(_) => Self::ROUTER,
+            Self::DomainNameServer(_) => Self::DOMAIN_NAME_SERVER,
             Self::DhcpMessageType(_) => Self::DHCP_MESSAGE_TYPE,
             Self::DhcpServerIdentifier(_) => Self::DHCP_SERVER_IDENTIFIER,
             Self::ParameterRequestList(_) => Self::PARAMETER_REQUEST_LIST,
             Self::EndOfOptions => Self::END_OF_OPTIONS,
+            Self::Unknown(id, _) => *id,
         }
     }
 }
@@ -221,6 +226,10 @@ impl<'a> DhcpMessageBuilder<'a> {
     pub fn try_push_option(&mut self, option: DhcpOption<'_>) -> Result<(), TryPushOptionError> {
         let option_id = option.option_id();
         match option {
+            DhcpOption::Router(ip) => {
+                self.push_bytes(&[option_id, 4])?;
+                self.push_bytes(ip.as_bytes())?;
+            }
             DhcpOption::DomainNameServer(servers) => {
                 let servers_len =
                     u8::try_from(servers.0.len() * 4).map_err(|_| TryPushOptionError::OptionValueTooLong)?;
@@ -237,10 +246,15 @@ impl<'a> DhcpMessageBuilder<'a> {
             }
             DhcpOption::DhcpServerIdentifier(identifier) => {
                 self.push_bytes(&[option_id, 4])?;
-                self.push_bytes(identifier.ip().as_bytes())?;
+                self.push_bytes(identifier.as_bytes())?;
             }
             DhcpOption::EndOfOptions => {
                 self.push_bytes(&[option_id])?;
+            }
+            DhcpOption::Unknown(_, data) => {
+                let options_len = u8::try_from(data.len()).map_err(|_| TryPushOptionError::OptionValueTooLong)?;
+                self.push_bytes(&[option_id, options_len])?;
+                self.push_bytes(data)?;
             }
         }
 
@@ -335,14 +349,15 @@ impl<'a> DhcpMessageParser<'a> {
 
             let option_id = data[0];
 
+            // FIXME: get rid of indexing
             #[allow(clippy::wildcard_in_or_patterns)]
             match option_id {
-                DhcpOption::DHCP_MESSAGE_TYPE => {
-                    let message_type = data[2];
-                    data = &data[3..];
-                    Some(Ok(DhcpOption::DhcpMessageType(options::DhcpMessageType::new(message_type))))
-                }
-                DhcpOption::DHCP_SERVER_IDENTIFIER => {
+                DhcpOption::ROUTER => {
+                    if data[1] != 4 {
+                        done = true;
+                        return Some(Err(MalformedPacket::MalformedOption(option_id)));
+                    }
+
                     let ip = match IpV4Address::try_from_byte_slice(&data[2..6]) {
                         Ok(ip) => *ip,
                         Err(_) => {
@@ -350,11 +365,39 @@ impl<'a> DhcpMessageParser<'a> {
                             return Some(Err(MalformedPacket::MalformedOption(option_id)));
                         }
                     };
-                    Some(Ok(DhcpOption::DhcpServerIdentifier(options::DhcpServerIdentifier::new(ip))))
+                    data = &data[6..];
+                    Some(Ok(DhcpOption::Router(ip)))
                 }
-                DhcpOption::END_OF_OPTIONS | _ => {
+                DhcpOption::DHCP_MESSAGE_TYPE => {
+                    let message_type = data[2];
+                    data = &data[3..];
+                    Some(Ok(DhcpOption::DhcpMessageType(options::DhcpMessageType::new(message_type))))
+                }
+                DhcpOption::DHCP_SERVER_IDENTIFIER => {
+                    if data[1] != 4 {
+                        done = true;
+                        return Some(Err(MalformedPacket::MalformedOption(option_id)));
+                    }
+
+                    let ip = match IpV4Address::try_from_byte_slice(&data[2..6]) {
+                        Ok(ip) => *ip,
+                        Err(_) => {
+                            done = true;
+                            return Some(Err(MalformedPacket::MalformedOption(option_id)));
+                        }
+                    };
+                    data = &data[6..];
+                    Some(Ok(DhcpOption::DhcpServerIdentifier(ip)))
+                }
+                DhcpOption::END_OF_OPTIONS => {
                     done = true;
                     None
+                }
+                _ => {
+                    let len = data[1] as usize;
+                    let option_data = &data[2..][..len];
+                    data = &data[2 + len..];
+                    Some(Ok(DhcpOption::Unknown(option_id, option_data)))
                 }
             }
         })

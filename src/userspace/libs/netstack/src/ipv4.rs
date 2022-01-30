@@ -48,6 +48,25 @@ impl core::fmt::Display for IpV4Address {
     }
 }
 
+pub struct IpV4AddressParseErr;
+impl core::str::FromStr for IpV4Address {
+    type Err = IpV4AddressParseErr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = [0u8; 4];
+
+        for (i, part) in s.split('.').enumerate() {
+            if i > 3 {
+                return Err(IpV4AddressParseErr);
+            }
+
+            parts[i] = part.parse().map_err(|_| IpV4AddressParseErr)?;
+        }
+
+        Ok(Self(parts))
+    }
+}
+
 alchemy::derive! {
     #[derive(Debug, Clone, Copy)]
     #[repr(C)]

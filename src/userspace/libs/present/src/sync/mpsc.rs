@@ -10,7 +10,7 @@ use core::{future::Future, pin::Pin};
 use std::{sync::Arc, task::{Context, Poll}};
 use sync::SpinMutex;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Sender<T: Send + 'static> {
     inner: Arc<SpinMutex<VecDeque<T>>>,
     id: u64,
@@ -21,6 +21,15 @@ impl<T: Send + 'static> Sender<T> {
         self.inner.lock().push_back(value);
         if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::AsyncChannel(self.id)) {
             waker.wake();
+        }
+    }
+}
+
+impl<T: Send + 'static> Clone for Sender<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            id: self.id
         }
     }
 }

@@ -221,6 +221,7 @@ pub enum Value {
     Number(i64),
     Object(Object),
     String(String),
+    Bool(bool),
     Null,
 }
 
@@ -230,6 +231,7 @@ impl<'a> parser::Parseable<'a> for Value {
             '"' => Ok(Self::String(parser.parse::<String>()?)),
             '[' => Ok(Self::List(parser.parse::<List>()?)),
             '{' => Ok(Self::Object(parser.parse::<Object>()?)),
+            't' | 'f' => Ok(Self::Bool(parser.parse::<bool>()?)),
             c if c.is_ascii_alphanumeric() => Ok(Self::Number(parser.parse::<i64>()?)),
             c => Err(parser::ParseError::UnexpectedCharacter(c)),
         }
@@ -246,6 +248,7 @@ impl Index<&'_ str> for Value {
             Self::List(_) => panic!("value is a list, not an object"),
             Self::Number(_) => panic!("value is a number, not an object"),
             Self::String(_) => panic!("value is a string, not an object"),
+            Self::Bool(_) => panic!("value is a bool, not an object"),
             Self::Null => panic!("value is null, not an object"),
         }
     }
@@ -261,6 +264,7 @@ impl Index<usize> for Value {
             Self::Object(_) => panic!("value us an object, not a list"),
             Self::Number(_) => panic!("value is a number, not a list"),
             Self::String(_) => panic!("value is a string, not a list"),
+            Self::Bool(_) => panic!("value is a bool, not a list"),
             Self::Null => panic!("value is null, not a list"),
         }
     }

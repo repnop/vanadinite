@@ -51,5 +51,8 @@ pub enum AccessError {
     Write(*mut u8),
 }
 
+unsafe impl Send for AccessError {}
+unsafe impl Sync for AccessError {}
+
 pub const ACCESS_ERROR_READ: usize = 0;
 pub const ACCESS_ERROR_WRITE: usize = 1;

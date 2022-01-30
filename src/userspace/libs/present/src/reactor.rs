@@ -34,6 +34,10 @@ impl EventRegistry {
         assert!(self.interest.lock().insert(block_type, 0).is_none());
     }
 
+    pub(crate) fn unregister_interest(&self, block_type: BlockType) {
+        assert!(self.interest.lock().remove(&block_type).is_none());
+    }
+
     pub(crate) fn is_interest(&self, block_type: BlockType) -> bool {
         self.interest.lock().get(&block_type).is_some()
     }

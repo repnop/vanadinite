@@ -275,6 +275,28 @@ impl<'a, T: Parseable<'a>> Parseable<'a> for Option<T> {
     }
 }
 
+impl<'a> Parseable<'a> for bool {
+    #[inline]
+    fn parse(parser: &mut Parser<'a>) -> Result<Self, ParseError> {
+        match parser.next()? {
+            't' => {
+                parser.eat('r')?;
+                parser.eat('u')?;
+                parser.eat('e')?;
+                Ok(true)
+            }
+            'f' => {
+                parser.eat('a')?;
+                parser.eat('l')?;
+                parser.eat('s')?;
+                parser.eat('e')?;
+                Ok(false)
+            }
+            c => Err(ParseError::UnexpectedCharacter(c)),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct RepeatUntilNoTrail<T, U> {
     pub(super) values: alloc::vec::Vec<T>,
