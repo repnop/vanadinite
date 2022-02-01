@@ -63,9 +63,7 @@ pub fn alloc_virtual_memory(
                 },
             );
 
-            if &*task.name == "init" && page_size == PageSize::Megapage {
-                log::info!("Allocated memory at {:#p} ({:?}) for user process", allocated_at.start, page_size);
-            }
+            log::trace!("Allocated memory at {:#p} ({:?}) for user process", allocated_at.start, page_size);
 
             SyscallOutcome::Processed(Message::from(allocated_at.start.as_usize()))
         }

@@ -7,16 +7,22 @@
 
 #![feature(const_btree_new)]
 
-mod client;
 mod arp;
+mod client;
 mod dhcp_helpers;
 mod drivers;
 
-use crate::{drivers::NetworkDriver, arp::ARP_CACHE};
+use crate::{arp::ARP_CACHE, drivers::NetworkDriver};
 use alchemy::PackedStruct;
-use dhcp::{DhcpMessageParser, options::DhcpMessageType, DhcpOption};
-use librust::{capabilities::Capability};
-use netstack::{ethernet::EthernetHeader, ipv4::{IpV4Header, Protocol, IpV4Socket, IpV4Address}, udp::UdpHeader, MacAddress, arp::{ArpPacket, HardwareType, ArpOperation, ArpHeader}};
+use dhcp::{options::DhcpMessageType, DhcpMessageParser, DhcpOption};
+use librust::capabilities::Capability;
+use netstack::{
+    arp::{ArpHeader, ArpOperation, ArpPacket, HardwareType},
+    ethernet::EthernetHeader,
+    ipv4::{IpV4Address, IpV4Header, IpV4Socket, Protocol},
+    udp::UdpHeader,
+    MacAddress,
+};
 use present::{
     ipc::{IpcChannel, NewChannelListener},
     sync::{mpsc::Sender, oneshot::OneshotTx},
@@ -49,30 +55,18 @@ json::derive! {
 
 #[derive(Debug)]
 pub enum ControlMessage {
-    ClientDisconnect {
-        port: u16,
-    },
+    ClientDisconnect { port: u16 },
     NewInterfaceIp(IpV4Address),
     NewDefaultGateway(IpV4Address),
-    NewClient {
-        port: u16,
-        port_type: PortType,
-        tx: Sender<ClientMessage>,
-    }
+    NewClient { port: u16, port_type: PortType, tx: Sender<ClientMessage> },
 }
 
 #[derive(Debug)]
 pub enum ClientMessage {
     PortBound,
     PortInUse,
-    Send {
-        to: IpV4Socket,
-        data: Vec<u8>,
-    },
-    Received {
-        from: IpV4Socket,
-        data: Vec<u8>,
-    }
+    Send { to: IpV4Socket, data: Vec<u8> },
+    Received { from: IpV4Socket, data: Vec<u8> },
 }
 
 #[derive(Debug)]
@@ -113,7 +107,8 @@ async fn real_main() {
     let (dhcp_packet_task_tx, dhcp_packet_nic_rx) = present::sync::mpsc::unbounded();
     let (dhcp_packet_nic_tx, dhcp_packet_task_rx) = present::sync::mpsc::unbounded();
 
-    let (arp_lookup_tx, arp_lookup_rx): (Sender<(IpV4Address, OneshotTx<MacAddress>)>, _) = present::sync::mpsc::unbounded();
+    let (arp_lookup_tx, arp_lookup_rx): (Sender<(IpV4Address, OneshotTx<MacAddress>)>, _) =
+        present::sync::mpsc::unbounded();
     let (arp_packet_task_tx, arp_packet_nic_rx): (Sender<Vec<u8>>, _) = present::sync::mpsc::unbounded();
     let (arp_packet_nic_tx, arp_packet_task_rx): (Sender<Vec<u8>>, _) = present::sync::mpsc::unbounded();
 
@@ -143,13 +138,13 @@ async fn real_main() {
                         Ok(DhcpMessageType::OFFER) if mac == this_mac => response,
                         _ => {
                             println!("Not offer!");
-                            continue
+                            continue;
                         }
                     }
-                },
+                }
                 Err(e) => {
                     println!("Error: {:?}", e);
-                    continue
+                    continue;
                 }
             };
 
@@ -176,7 +171,7 @@ async fn real_main() {
                 ClientMessage::Received { data, .. } => data,
                 _ => continue,
             };
-            
+
             match DhcpMessageParser::from_slice(&response) {
                 Ok(response) => {
                     let mac: MacAddress = response.message.client_hardware_address.cast::<MacAddress>();
@@ -184,7 +179,7 @@ async fn real_main() {
                         Ok(DhcpMessageType::ACK) if mac == this_mac => break,
                         _ => continue,
                     }
-                },
+                }
                 Err(_) => continue,
             }
         }
@@ -223,7 +218,7 @@ async fn real_main() {
 
         ARP_CACHE.resolve_and_cache(router_ip).await;
     });
-    
+
     loop {
         present::select! {
             _ = interrupt.wait() => {
@@ -243,7 +238,7 @@ async fn real_main() {
                                     if let Some((PortType::Udp, sender)) = ports.get(&port) {
                                         sender.send(ClientMessage::Received {
                                             from: IpV4Socket::new(ipv4_header.source_ip, udp_header.source_port.get()),
-                                            data: payload.to_vec(),
+                                            data: payload[..udp_header.len.get() as usize - core::mem::size_of::<UdpHeader>()].to_vec(),
                                         });
                                     }
                                 }
@@ -255,7 +250,7 @@ async fn real_main() {
                         frame_type => {
                             println!("got an ethernet frame type we don't deal with yet: {:?}", frame_type);
                         }
-                    } 
+                    }
                 }
 
                 librust::syscalls::io::complete_interrupt(interrupt_id).unwrap();
@@ -307,7 +302,7 @@ async fn real_main() {
                     IpV4Socket::new(
                         IpV4Address::new(0, 0, 0, 0),
                         68
-                    ), 
+                    ),
                     (
                         MacAddress::BROADCAST,
                         IpV4Socket::new(
@@ -333,6 +328,7 @@ async fn real_main() {
                         if ports.get(&port).is_some() {
                             tx.send(ClientMessage::PortInUse);
                         } else {
+                            tx.send(ClientMessage::PortBound);
                             ports.insert(port, (port_type, tx));
                         }
                     }

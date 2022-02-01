@@ -39,6 +39,10 @@ static INIT_ORDER: &str = r#"{
             "name": "servicemgr",
             "caps": ["devicemgr", "stdio", "network"],
         },
+        {
+            "name": "echonet",
+            "caps": ["stdio", "network"],
+        },
     ]
 }"#;
 

@@ -121,19 +121,14 @@ impl<'a> Future for IpcRead<'a> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        match EVENT_REGISTRY.consume_interest_event(BlockType::IpcChannelMessage(this.0 .0)) {
-            true => {
-                match syscalls::channel::read_message_non_blocking(this.0 .0, this.1) {
-                    SyscallResult::Ok(Some((m, caps_read, caps_left))) => Poll::Ready(Ok(ReadChannelMessage {
-                        message: unsafe { Message::new(this.0 .0, m) },
-                        caps_read,
-                        caps_left,
-                    })),
-                    SyscallResult::Err(e) => Poll::Ready(Err(e)),
-                    _ => unreachable!()
-                }
-            }
-            false => {
+        match syscalls::channel::read_message_non_blocking(this.0 .0, this.1) {
+            SyscallResult::Ok(Some((m, caps_read, caps_left))) => Poll::Ready(Ok(ReadChannelMessage {
+                message: unsafe { Message::new(this.0 .0, m) },
+                caps_read,
+                caps_left,
+            })),
+            SyscallResult::Err(e) => Poll::Ready(Err(e)),
+            _ => {
                 EVENT_REGISTRY.register(BlockType::IpcChannelMessage(this.0 .0), cx.waker().clone());
                 Poll::Pending
             }

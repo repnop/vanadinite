@@ -5,10 +5,10 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::{ClientMessage, ControlMessage, PortType};
 use librust::capabilities::CapabilityPtr;
 use netstack::ipv4::IpV4Socket;
-use present::{sync::mpsc::Sender, ipc::IpcChannel};
-use crate::{ControlMessage, ClientMessage, PortType};
+use present::{ipc::IpcChannel, sync::mpsc::Sender};
 
 json::derive! {
     #[derive(Debug, Clone)]
@@ -54,13 +54,20 @@ json::derive! {
     }
 }
 
-pub async fn handle_client(control_tx: Sender<ControlMessage>, packet_tx: Sender<(u16, IpV4Socket, Vec<u8>)>, cptr: CapabilityPtr) {
+pub async fn handle_client(
+    control_tx: Sender<ControlMessage>,
+    packet_tx: Sender<(u16, IpV4Socket, Vec<u8>)>,
+    cptr: CapabilityPtr,
+) {
     let mut ipc_channel = IpcChannel::new(cptr);
     let msg = ipc_channel.read(&mut []).await;
 
     let msg = match msg {
         Ok(msg) => msg,
-        Err(_) => return,
+        Err(e) => {
+            println!("Error reading from IPC channel: {:?}", e);
+            return;
+        }
     };
 
     let request: BindRequest = match json::deserialize(msg.message.as_bytes()) {
@@ -73,7 +80,8 @@ pub async fn handle_client(control_tx: Sender<ControlMessage>, packet_tx: Sender
         "udp" => PortType::Udp,
         "raw" => PortType::Raw,
         _ => {
-            let _ = ipc_channel.send_bytes(&json::to_bytes(&BindResponse { msg: String::from("unknown port type"), port: None }), &[]);
+            let _ = ipc_channel
+                .send_bytes(&json::to_bytes(&BindResponse { msg: String::from("unknown port type"), port: None }), &[]);
             return;
         }
     };
@@ -83,11 +91,15 @@ pub async fn handle_client(control_tx: Sender<ControlMessage>, packet_tx: Sender
 
     match client_rx.recv().await {
         ClientMessage::PortInUse => {
-            let _ = ipc_channel.send_bytes(&json::to_bytes(&BindResponse { msg: String::from("port in use"), port: None }), &[]);
+            let _ = ipc_channel
+                .send_bytes(&json::to_bytes(&BindResponse { msg: String::from("port in use"), port: None }), &[]);
             return;
         }
         ClientMessage::PortBound => {
-            if ipc_channel.send_bytes(&json::to_bytes(&BindResponse { msg: String::new(), port: Some(port) }), &[]).is_err() {
+            if ipc_channel
+                .send_bytes(&json::to_bytes(&BindResponse { msg: String::new(), port: Some(port) }), &[])
+                .is_err()
+            {
                 control_tx.send(ControlMessage::ClientDisconnect { port });
                 return;
             }
@@ -105,7 +117,7 @@ pub async fn handle_client(control_tx: Sender<ControlMessage>, packet_tx: Sender
                                 from_ip: from.ip.to_string(),
                                 from_port: from.port,
                                 data,
-                            }), 
+                            }),
                             &[]
                         ).is_err() {
                             control_tx.send(ControlMessage::ClientDisconnect { port });

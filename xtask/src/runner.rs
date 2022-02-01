@@ -139,7 +139,7 @@ pub fn run(options: RunOptions) -> Result<()> {
                     -append {kernel_args}
                     -global virtio-mmio.force-legacy=false
                     {enable_virtio_block_device...}
-                    -netdev user,id=net1
+                    -netdev user,id=net1,hostfwd=udp:127.0.0.1:1111-10.0.2.15:1337
                     -device virtio-net-device,netdev=net1
                     -object filter-dump,id=f1,netdev=net1,file=testing_files/nettraffic.dat
                     -bios {sbi_firmware}
