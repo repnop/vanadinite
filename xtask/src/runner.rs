@@ -122,7 +122,8 @@ pub fn run(options: RunOptions) -> Result<()> {
                 Some(path) => vec![
                     String::from("-d"),
                     String::from("guest_errors,\
-                                    trace:virtio*"),
+                                    trace:virtio*,\
+                                    int"),
                     String::from("-D"),
                     format!("{}", path.display()),
                     String::from("-monitor"), String::from("stdio"),

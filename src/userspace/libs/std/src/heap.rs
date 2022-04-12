@@ -35,7 +35,7 @@ unsafe impl Allocator for TaskLocal {
     }
 }
 
-// #[thread_local]
+#[thread_local]
 static TASK_LOCAL_ALLOCATOR: SpinMutex<TaskLocalAllocator> = SpinMutex::new(TaskLocalAllocator::new());
 
 unsafe impl Send for TaskLocalAllocator {}

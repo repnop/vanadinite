@@ -155,6 +155,7 @@ impl Scheduler for RoundRobinScheduler {
         }
     }
 
+    #[track_caller]
     fn block(&self, tid: Tid) {
         let mut queue = self.current_queue().lock();
         let index = queue.queue.iter().position(|t| t.tid == tid).expect("blocking task not on current hart");

@@ -256,27 +256,23 @@ impl Task {
         }
 
         let tls = elf.program_headers().find(|header| header.r#type == elf64::ProgramSegmentType::Tls).map(|header| {
-            // This is mostly the same as the above, just force 4 KiB alignment
-            // because its not like we can have 8-byte aligned pages.
-            //
-            // TODO: `.tbss`?
-            let n_pages_needed = round_up_to_next(header.memory_size as usize, 4.kib()) / 4.kib();
+            let n_pages_needed = round_up_to_next(header.memory_size as usize + 8 + 16, 4.kib()) / 4.kib();
             let tls_base = memory_manager.find_free_region(PageSize::Kilopage, n_pages_needed);
 
-            // This might actually not be necessary, since in the end the
-            // thread-local loads are done with `tp + offset` but in case this
-            // is important for any possible TLS relocations later, keeping it
-            // the same as above
-            let segment_load_offset = (header.vaddr & (4.kib() - 1)) as usize;
-            let segment_len = header.file_size as usize + segment_load_offset;
+            let segment_len = header.file_size as usize + 8 + 16;
 
             if segment_data.len() < segment_len {
                 segment_data.resize(segment_len, 0);
             }
 
             let segment_file_size = header.file_size as usize;
-            segment_data[segment_load_offset..][..segment_file_size].copy_from_slice(elf.program_segment_data(&header));
-            segment_data[segment_load_offset..][segment_file_size..].fill(0);
+            let tls_base_addr = tls_base.as_usize();
+            segment_data[0..][..8].copy_from_slice(&(tls_base_addr + 8).to_le_bytes()[..]); // ->|
+            segment_data[8..][..8].copy_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]); // <-|
+            segment_data[16..][..8].copy_from_slice(&(tls_base_addr + 24).to_le_bytes()[..]);
+
+            segment_data[24..][..segment_file_size].copy_from_slice(elf.program_segment_data(&header));
+            segment_data[segment_file_size..segment_len].fill(0);
 
             memory_manager.alloc_region(
                 Some(tls_base),
@@ -290,7 +286,7 @@ impl Task {
                 },
             );
 
-            tls_base.add(segment_load_offset).as_usize()
+            tls_base_addr + 24
         });
 
         // We guard the stack on both ends, though a stack underflow is

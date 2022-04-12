@@ -70,7 +70,7 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> usize {
                 (_, SyscallOutcome::Err(e)) => report_error(e, &mut frame.registers),
                 (_, SyscallOutcome::Block) => {
                     let tid = task.tid;
-                    log::debug!("Blocking task {:?}", task.name);
+                    log::trace!("Blocking task {:?}", task.name);
                     task.context.gp_regs = frame.registers;
 
                     // Don't re-call the syscall after its unblocked

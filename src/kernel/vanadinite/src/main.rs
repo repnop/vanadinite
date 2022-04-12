@@ -13,8 +13,6 @@
     arbitrary_self_types,
     asm_sym,
     const_btree_new,
-    const_fn_fn_ptr_basics,
-    const_fn_trait_bound,
     custom_test_frameworks,
     extern_types,
     fn_align,
@@ -23,6 +21,7 @@
     map_first_last,
     naked_functions,
     new_uninit,
+    sync_unsafe_cell,
     thread_local
 )]
 #![no_std]
@@ -72,7 +71,7 @@ use core::sync::atomic::AtomicU64;
 use alloc::boxed::Box;
 use fdt::Fdt;
 use mem::kernel_patching::kernel_section_v2p;
-use sbi::{hart_state_management::hart_start, probe_extension, ExtensionAvailability};
+use sbi::{base::probe_extension, base::ExtensionAvailability, hart_state_management::hart_start};
 use scheduler::Scheduler;
 pub use vanadinite_macros::{debug, error, info, trace, warn};
 
@@ -80,9 +79,8 @@ static N_CPUS: AtomicUsize = AtomicUsize::new(1);
 static TIMER_FREQ: AtomicU64 = AtomicU64::new(0);
 static INIT: &[u8] = include_bytes!("../../../../build/init");
 
-cpu_local! {
-    static HART_ID: core::cell::Cell<usize> = core::cell::Cell::new(0);
-}
+#[thread_local]
+static HART_ID: core::cell::Cell<usize> = core::cell::Cell::new(0);
 
 #[no_mangle]
 #[repr(align(4))]
@@ -209,6 +207,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     let n_cpus = fdt.cpus().count();
     N_CPUS.store(n_cpus, Ordering::Release);
+    let mut first_mem_resv = true;
 
     info!("vanadinite version {#brightgreen}", env!("CARGO_PKG_VERSION"));
     info!(blue, "=== Machine Info ===");
@@ -216,6 +215,17 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     info!(" Total CPUs: {}", n_cpus);
     info!(" RAM: {} MiB @ {:#X}", mem_size, mem_start as usize);
     info!(" Timer Clock: {}Hz", timebase_frequency);
+    for memory_reservation in fdt.memory_reservations() {
+        if first_mem_resv {
+            info!(" Reserved Memory Regions:");
+            first_mem_resv = false;
+        }
+
+        let size = memory_reservation.size();
+        let start = memory_reservation.address() as usize;
+        let end = start + size;
+        info!("   {:#p}..{:#p} ({} KiB)", start as *const u8, end as *const u8, size / 4.kib());
+    }
     info!(blue, "=== SBI Implementation ===");
     info!(" Implementor: {:?} (version: {#green'{}.{}})", sbi::base::impl_id(), impl_major, impl_minor);
     info!(" Spec Version: {#green'{}.{}}", spec_major, spec_minor);
@@ -461,7 +471,9 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     error!("{}", info);
     error!("Shutting hart down");
 
-    sbi::hart_state_management::hart_stop().unwrap()
+    sbi::hart_state_management::hart_stop().unwrap();
+    #[allow(unreachable_code)]
+    loop {}
 }
 
 #[no_mangle]

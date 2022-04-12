@@ -16,11 +16,21 @@ unsafe extern "C" fn _start(argc: isize, argv: *const *const u8, a2: usize) -> !
 
     #[rustfmt::skip]
     core::arch::asm!("
-        .option push
-        .option norelax
-        lla gp, __global_pointer$
-        .option pop
-    ");
+            .option push
+            .option norelax
+            lla gp, __global_pointer$
+            .option pop
+
+            lla {bss_start}, __bss_start
+            lla {bss_end}, end
+            1:
+                sb zero, 0({bss_start})
+                addi {bss_start}, {bss_start}, 1
+                blt {bss_start}, {bss_end}, 1b
+        ",
+        bss_start = out(reg) _,
+        bss_end = out(reg) _,
+    );
 
     A2 = a2;
 

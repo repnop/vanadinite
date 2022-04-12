@@ -5,7 +5,16 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(allocator_api, alloc_error_handler, const_btree_new, inline_const, lang_items, prelude_import, thread_local)]
+#![feature(
+    allocator_api,
+    alloc_error_handler,
+    const_btree_new,
+    extern_types,
+    inline_const,
+    lang_items,
+    prelude_import,
+    thread_local
+)]
 #![no_std]
 #![allow(incomplete_features)]
 
@@ -56,8 +65,9 @@ macro_rules! dbg {
 pub fn _print(args: core::fmt::Arguments) {
     use core::fmt::Write;
     // FIXME: hack rn to make output less wacky
-    let out = args.to_string();
-    let _ = io::Stdout.write_str(&out);
+    // let out = args.to_string();
+    // let _ = io::Stdout.write_str(&out);
+    let _ = io::Stdout.write_fmt(args);
 }
 
 #[panic_handler]

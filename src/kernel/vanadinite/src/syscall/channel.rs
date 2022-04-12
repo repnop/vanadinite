@@ -292,9 +292,10 @@ pub fn read_message(
     };
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
-    // TODO: need to be able to return more than just the first one FIXME: this
-    // probably needs the lock to make sure a message wasn't sent after the
-    // check but before the register
+    // TODO: need to be able to return more than just the first one
+
+    // FIXME: this probably needs the lock to make sure a message wasn't sent
+    // after the check but before the register
 
     // FIXME: check for broken channel
 

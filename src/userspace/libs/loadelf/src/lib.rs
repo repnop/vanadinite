@@ -114,31 +114,35 @@ pub fn load_elf(name: &str, elf: &Elf) -> Result<(Vmspace, VmspaceSpawnEnv), ()>
     }
 
     let tls = elf.program_headers().find(|header| header.r#type == elf64::ProgramSegmentType::Tls).map(|header| {
-        // This is mostly the same as the above, just force 4 KiB alignment
-        // because its not like we can have 8-byte aligned pages.
-        //
-        // TODO: `.tbss`?
-
-        // This might actually not be necessary, since in the end the
-        // thread-local loads are done with `tp + offset` but in case this
-        // is important for any possible TLS relocations later, keeping it
-        // the same as above
-        let segment_load_offset = (header.vaddr as usize & (PAGE_SIZE - 1)) as usize;
-
         let mut tls_base = vmspace
             .create_object(
                 core::ptr::null(),
-                header.memory_size as usize + segment_load_offset,
+                header.memory_size as usize
+                // This +8 represents the fact that the first 8 bytes represent
+                // the Thread Control Block of the TLS, which is necessary for
+                // `__tls_get_addr`
+                + 8
+                // This +16 represents the dynamic thread vector (dtv) entries
+                // which are composed of a generation and an array of modules
+                // which contain pointers to the various TLS blocks, but seeing
+                // as how we don't have module loading of any kind, we should
+                // just need a single pointer
+                + 16,
                 MemoryPermissions::READ | MemoryPermissions::WRITE,
             )
             .unwrap();
 
         let segment_file_size = header.file_size as usize;
+        let tls_base_addr = tls_base.vmspace_address() as usize;
         let data = tls_base.as_slice();
-        data[segment_load_offset..][..segment_file_size].copy_from_slice(elf.program_segment_data(&header));
-        data[segment_load_offset..][segment_file_size..].fill(0);
+        data[0..][..8].copy_from_slice(&(tls_base_addr + 8).to_le_bytes()[..]);
+        data[8..][..8].copy_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]);
+        data[16..][..8].copy_from_slice(&(tls_base_addr + 24).to_le_bytes()[..]);
 
-        tls_base.vmspace_address() as usize + segment_load_offset
+        data[24..][..segment_file_size].copy_from_slice(elf.program_segment_data(&header));
+        data[segment_file_size..].fill(0);
+
+        tls_base_addr + 24
     });
 
     let sp = vmspace

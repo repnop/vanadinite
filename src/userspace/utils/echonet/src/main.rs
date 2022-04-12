@@ -55,13 +55,13 @@ fn main() {
     let mut network = IpcChannel::new(std::env::lookup_capability("network").unwrap());
     network.send_bytes(&json::to_bytes(&BindRequest { port: 1337, port_type: String::from("udp") }), &[]).unwrap();
     let bind_response: BindResponse = json::deserialize(network.read(&mut []).unwrap().message.as_bytes()).unwrap();
-    // match bind_response.port {
-    //     Some(port) => println!("Bound to port {}", port),
-    //     None => {
-    //         println!("Couldn't bind to port 1337: {}", bind_response.msg);
-    //         return;
-    //     }
-    // }
+    match bind_response.port {
+        Some(port) => println!("Bound to port {}", port),
+        None => {
+            println!("Couldn't bind to port 1337: {}", bind_response.msg);
+            return;
+        }
+    }
 
     loop {
         let received: Received = json::deserialize(network.read(&mut []).unwrap().message.as_bytes()).unwrap();

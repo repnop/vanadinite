@@ -3,7 +3,7 @@ members = ["vanadinite", "vanadinite_macros"]
 resolver = "2"
 
 [profile.release]
-debug = false
+debug = 1
 lto = "fat"
 codegen-units = 1
 

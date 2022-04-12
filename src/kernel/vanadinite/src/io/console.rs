@@ -141,10 +141,7 @@ impl ConsoleDevice for LegacySbiConsoleOut {
     fn init(&mut self) {}
 
     fn read(&self) -> u8 {
-        match sbi::legacy::console_getchar() {
-            -1 => 0,
-            n => n as u8,
-        }
+        sbi::legacy::console_getchar().unwrap_or(0)
     }
 
     fn write(&mut self, n: u8) {
