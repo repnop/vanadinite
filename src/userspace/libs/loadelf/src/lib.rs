@@ -101,6 +101,7 @@ pub fn load_elf(name: &str, elf: &Elf) -> Result<(Vmspace, VmspaceSpawnEnv), ()>
                         // RELATIVE
                         3 => {
                             // FIXME: Should prob check for negative addends?
+                            assert!(rela.addend.is_positive());
                             let fixup = task_load_base + rela.addend as usize;
                             object.as_slice()[offset_into..][..8].copy_from_slice(&fixup.to_le_bytes());
                         }

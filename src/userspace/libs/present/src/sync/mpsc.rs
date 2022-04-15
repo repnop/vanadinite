@@ -7,18 +7,17 @@
 
 use crate::reactor::{BlockType, EVENT_REGISTRY};
 use core::{future::Future, pin::Pin};
-use std::{sync::Arc, task::{Context, Poll}};
-use sync::SpinMutex;
+use std::{sync::{SyncRc, SyncRefCell}, task::{Context, Poll}};
 
 #[derive(Debug)]
 pub struct Sender<T: Send + 'static> {
-    inner: Arc<SpinMutex<VecDeque<T>>>,
+    inner: SyncRc<SyncRefCell<VecDeque<T>>>,
     id: u64,
 }
 
 impl<T: Send + 'static> Sender<T> {
     pub fn send(&self, value: T) {
-        self.inner.lock().push_back(value);
+        self.inner.borrow_mut().push_back(value);
         if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::AsyncChannel(self.id)) {
             waker.wake();
         }
@@ -28,7 +27,7 @@ impl<T: Send + 'static> Sender<T> {
 impl<T: Send + 'static> Clone for Sender<T> {
     fn clone(&self) -> Self {
         Self {
-            inner: Arc::clone(&self.inner),
+            inner: SyncRc::clone(&self.inner),
             id: self.id
         }
     }
@@ -36,7 +35,7 @@ impl<T: Send + 'static> Clone for Sender<T> {
 
 #[derive(Debug)]
 pub struct Receiver<T: Send + 'static> {
-    inner: Arc<SpinMutex<VecDeque<T>>>,
+    inner: SyncRc<SyncRefCell<VecDeque<T>>>,
     id: u64,
 }
 
@@ -51,7 +50,7 @@ struct ReceiverRecv<'a, T: Send + 'static>(&'a Receiver<T>);
 impl<T: Send + 'static> Future for ReceiverRecv<'_, T> {
     type Output = T;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut locked = self.0.inner.lock();
+        let mut locked = self.0.inner.borrow_mut();
         match locked.pop_front() {
             Some(t) => Poll::Ready(t),
             None => {
@@ -68,7 +67,7 @@ impl<T: Send + 'static> Future for ReceiverRecv<'_, T> {
 
 pub fn unbounded<T: Send + 'static>() -> (Sender<T>, Receiver<T>) {
     let id = super::CHANNEL_ID.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-    let inner = Arc::new(SpinMutex::new(VecDeque::new()));
+    let inner = SyncRc::new(SyncRefCell::new(VecDeque::new()));
 
-    (Sender { inner: Arc::clone(&inner), id }, Receiver { inner, id })
+    (Sender { inner: SyncRc::clone(&inner), id }, Receiver { inner, id })
 }

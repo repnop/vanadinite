@@ -38,7 +38,7 @@ struct NewChannelListenerRecv;
 impl Future for NewChannelListenerRecv {
     type Output = CapabilityPtr;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match NEW_IPC_CHANNELS.lock().pop_front() {
+        match NEW_IPC_CHANNELS.borrow_mut().pop_front() {
             Some(cptr) => Poll::Ready(cptr),
             None => {
                 EVENT_REGISTRY.register(BlockType::NewIpcChannel, cx.waker().clone());

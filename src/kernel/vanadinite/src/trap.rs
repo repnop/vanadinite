@@ -285,6 +285,13 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                                 stval,
                                 sepc,
                             );
+                            log::error!("Register dump:\n{:#x?}", regs);
+                            // log::error!("Stack dump (last 32 values):\n");
+                            // let mut sp = regs.registers.sp as *const u64;
+                            // for _ in 0..32 {
+                            //     log::error!("{:#p}: {:#x}", sp, unsafe { *sp });
+                            //     sp = unsafe { sp.offset(1) };
+                            // }
                             log::error!(
                                 "Memory map:\n{:#?}",
                                 active_task.memory_manager.address_map_debug(Some(stval))

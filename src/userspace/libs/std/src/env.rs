@@ -7,7 +7,8 @@
 
 use alloc::{collections::BTreeMap, string::String};
 use librust::capabilities::CapabilityPtr;
-use sync::SpinRwLock;
+
+use crate::sync::SyncRefCell;
 
 #[no_mangle]
 static mut ARGS: [usize; 2] = [0; 2];
@@ -29,14 +30,12 @@ pub fn a2() -> usize {
     unsafe { A2 }
 }
 
-// FIXME: making this #[thread_local] required a relocation that I don't feel
-// like implementing right now
-pub(crate) static CAP_MAP: SpinRwLock<BTreeMap<String, CapabilityPtr>> = SpinRwLock::new(BTreeMap::new());
+pub(crate) static CAP_MAP: SyncRefCell<BTreeMap<String, CapabilityPtr>> = SyncRefCell::new(BTreeMap::new());
 
 pub fn lookup_capability(service: &str) -> Option<CapabilityPtr> {
-    CAP_MAP.read().get(service).copied()
+    CAP_MAP.borrow().get(service).copied()
 }
 
 pub fn register_capability(service: &str, cptr: CapabilityPtr) {
-    CAP_MAP.write().insert(service.into(), cptr);
+    CAP_MAP.borrow_mut().insert(service.into(), cptr);
 }

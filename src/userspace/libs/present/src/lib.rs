@@ -22,8 +22,8 @@ use core::{
     task::{Context, Poll},
 };
 use reactor::Reactor;
-use sync_prims::{Lazy, SpinMutex, Immediate};
-use std::collections::BTreeMap;
+use sync_prims::{Lazy, };
+use std::{collections::BTreeMap, sync::SyncRefCell};
 
 pub struct Task {
     task_id: u64,
@@ -31,8 +31,8 @@ pub struct Task {
     waker: waker::ArcWaker,
 }
 
-pub(crate) static GLOBAL_EXECUTOR: SpinMutex<Lazy<PresentExecutor>, Immediate> =
-    SpinMutex::new(Lazy::new(|| PresentExecutor { next_task_id: 0, ready_tasks: VecDeque::new(), waiting_tasks: BTreeMap::new() }));
+pub(crate) static GLOBAL_EXECUTOR: SyncRefCell<Lazy<PresentExecutor>> =
+    SyncRefCell::new(Lazy::new(|| PresentExecutor { next_task_id: 0, ready_tasks: VecDeque::new(), waiting_tasks: BTreeMap::new() }));
 
 pub struct Present {}
 
@@ -43,7 +43,7 @@ impl Present {
 
     pub fn run(&self) {
         loop {
-            let mut executor = GLOBAL_EXECUTOR.lock();
+            let mut executor = GLOBAL_EXECUTOR.borrow_mut();
             if executor.ready_tasks.is_empty() && executor.waiting_tasks.is_empty() {
                 return;
             } else if executor.ready_tasks.is_empty() {
@@ -56,7 +56,7 @@ impl Present {
             drop(executor);
 
             if next.future.as_mut().poll(&mut Context::from_waker(&next.waker.clone().into())).is_pending() {
-                GLOBAL_EXECUTOR.lock().push_blocked(next);
+                GLOBAL_EXECUTOR.borrow_mut().push_blocked(next);
             }
         }
     }
@@ -67,13 +67,13 @@ impl Present {
         // SAFETY: We're single threaded and block the current thread until the
         // future finishes executing
         let waiting_on = unsafe {
-            GLOBAL_EXECUTOR.lock().push_unchecked(async {
+            GLOBAL_EXECUTOR.borrow_mut().push_unchecked(async {
                 value = Some(f.await);
             })
         };
 
         loop {
-            let mut executor = GLOBAL_EXECUTOR.lock();
+            let mut executor = GLOBAL_EXECUTOR.borrow_mut();
             if executor.ready_tasks.is_empty() {
                 drop(executor);
                 Reactor::wait();
@@ -84,7 +84,7 @@ impl Present {
             drop(executor);
 
             match next.future.as_mut().poll(&mut Context::from_waker(&next.waker.clone().into())) {
-                Poll::Pending => GLOBAL_EXECUTOR.lock().push_blocked(next),
+                Poll::Pending => GLOBAL_EXECUTOR.borrow_mut().push_blocked(next),
                 Poll::Ready(_) if next.task_id == waiting_on => return value.unwrap(),
                 _ => {}
             }
@@ -105,7 +105,7 @@ where
     F::Output: Send + 'static
 {
     let (tx, rx) = sync::oneshot::oneshot();
-    GLOBAL_EXECUTOR.lock().push_new(async move {
+    GLOBAL_EXECUTOR.borrow_mut().push_new(async move {
         tx.send(f.await)
     });
 

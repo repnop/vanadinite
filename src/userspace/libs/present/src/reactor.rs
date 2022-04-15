@@ -12,44 +12,45 @@ use std::{
         message::KernelNotification,
         syscalls::{receive_message, ReadMessage},
     },
+    sync::SyncRefCell,
     task::Waker,
 };
+use sync::Lazy;
 
-use sync::{Immediate, Lazy, SpinMutex};
-
-pub(crate) static NEW_IPC_CHANNELS: SpinMutex<Lazy<VecDeque<CapabilityPtr>>> = SpinMutex::new(Lazy::new(VecDeque::new));
+pub(crate) static NEW_IPC_CHANNELS: SyncRefCell<Lazy<VecDeque<CapabilityPtr>>> =
+    SyncRefCell::new(Lazy::new(VecDeque::new));
 pub(crate) static EVENT_REGISTRY: EventRegistry = EventRegistry::new();
 
 pub struct EventRegistry {
-    waiting_for_event: SpinMutex<BTreeMap<BlockType, Waker>, Immediate>,
-    interest: SpinMutex<BTreeMap<BlockType, usize>, Immediate>,
+    waiting_for_event: SyncRefCell<BTreeMap<BlockType, Waker>>,
+    interest: SyncRefCell<BTreeMap<BlockType, usize>>,
 }
 
 impl EventRegistry {
     pub(crate) const fn new() -> Self {
-        Self { waiting_for_event: SpinMutex::new(BTreeMap::new()), interest: SpinMutex::new(BTreeMap::new()) }
+        Self { waiting_for_event: SyncRefCell::new(BTreeMap::new()), interest: SyncRefCell::new(BTreeMap::new()) }
     }
 
     pub(crate) fn register_interest(&self, block_type: BlockType) {
-        assert!(self.interest.lock().insert(block_type, 0).is_none());
+        assert!(self.interest.borrow_mut().insert(block_type, 0).is_none());
     }
 
     pub(crate) fn unregister_interest(&self, block_type: BlockType) {
-        assert!(self.interest.lock().remove(&block_type).is_none());
+        assert!(self.interest.borrow_mut().remove(&block_type).is_none());
     }
 
     pub(crate) fn is_interest(&self, block_type: BlockType) -> bool {
-        self.interest.lock().get(&block_type).is_some()
+        self.interest.borrow().get(&block_type).is_some()
     }
 
     pub(crate) fn add_interested_event(&self, block_type: BlockType) {
-        if let Some(n) = self.interest.lock().get_mut(&block_type) {
+        if let Some(n) = self.interest.borrow_mut().get_mut(&block_type) {
             *n += 1;
         }
     }
 
     pub(crate) fn consume_interest_event(&self, block_type: BlockType) -> bool {
-        match self.interest.lock().get_mut(&block_type) {
+        match self.interest.borrow_mut().get_mut(&block_type) {
             Some(n) if *n > 0 => {
                 *n -= 1;
                 true
@@ -62,11 +63,11 @@ impl EventRegistry {
     pub(crate) fn register(&self, block_type: BlockType, waker: Waker) {
         // TODO: figure out if its okay to ignore adding more than one thing
         // here...
-        self.waiting_for_event.lock().insert(block_type, waker);
+        self.waiting_for_event.borrow_mut().insert(block_type, waker);
     }
 
     pub(crate) fn unregister(&self, block_type: BlockType) -> Option<Waker> {
-        self.waiting_for_event.lock().remove(&block_type)
+        self.waiting_for_event.borrow_mut().remove(&block_type)
     }
 
     #[track_caller]
@@ -101,7 +102,7 @@ impl Reactor {
                 }
             }
             ReadMessage::Kernel(KernelNotification::ChannelOpened(cptr)) => {
-                let mut new_ipc_channels = NEW_IPC_CHANNELS.lock();
+                let mut new_ipc_channels = NEW_IPC_CHANNELS.borrow_mut();
                 new_ipc_channels.push_back(cptr);
                 if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::NewIpcChannel) {
                     drop(new_ipc_channels);

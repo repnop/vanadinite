@@ -20,6 +20,8 @@ struct TlsIndex {
 unsafe extern "C" fn __tls_get_addr(index: *const TlsIndex) -> *mut c_void {
     assert_eq!((*index).module, 1, "whelp guess we need to handle multiple modules");
     (*dtv()).gen_then_modules[(*index).module].offset((*index).offset + DTV_OFFSET)
+    // println!("tcb={:#p}, dtv={:#p} ptr result={:#p}", tcb(), dtv(), res);
+    // res
 }
 
 unsafe fn dtv() -> *mut DynamicThreadVector {

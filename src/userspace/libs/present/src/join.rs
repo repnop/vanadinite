@@ -8,7 +8,7 @@
 use crate::sync::oneshot::OneshotRx;
 
 pub struct JoinHandle<T: Send + 'static> {
-    oneshot: OneshotRx<T>
+    oneshot: OneshotRx<T>,
 }
 
 impl<T: Send + 'static> JoinHandle<T> {

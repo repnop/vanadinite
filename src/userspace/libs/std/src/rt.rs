@@ -47,7 +47,7 @@ extern "C" {
 fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize {
     unsafe { ARGS = [argc as usize, argv as usize] };
 
-    let mut map = crate::env::CAP_MAP.write();
+    let mut map = crate::env::CAP_MAP.borrow_mut();
     let channel = crate::ipc::IpcChannel::new(librust::capabilities::CapabilityPtr::new(0));
     let mut cap = [Capability::default()];
 

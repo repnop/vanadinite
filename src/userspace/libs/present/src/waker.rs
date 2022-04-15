@@ -16,6 +16,6 @@ pub struct Waker {
 
 impl std::task::Wake for Waker {
     fn wake(self: std::sync::Arc<Self>) {
-        GLOBAL_EXECUTOR.lock().awaken(self.task_id);
+        GLOBAL_EXECUTOR.borrow_mut().awaken(self.task_id);
     }
 }

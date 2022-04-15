@@ -5,6 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::sync::SyncRefCell;
 use core::{
     alloc::{AllocError, Allocator, GlobalAlloc, Layout},
     cell::Cell,
@@ -14,7 +15,6 @@ use librust::{
     message::SyscallResult,
     syscalls::allocation::{self, AllocationOptions, MemoryPermissions},
 };
-use sync::SpinMutex;
 
 #[derive(Clone, Copy)]
 pub struct TaskLocal(core::marker::PhantomData<*mut ()>);
@@ -27,16 +27,15 @@ impl TaskLocal {
 
 unsafe impl Allocator for TaskLocal {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, core::alloc::AllocError> {
-        TASK_LOCAL_ALLOCATOR.lock().allocate(layout)
+        TASK_LOCAL_ALLOCATOR.borrow().allocate(layout)
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        TASK_LOCAL_ALLOCATOR.lock().deallocate(ptr, layout)
+        TASK_LOCAL_ALLOCATOR.borrow().deallocate(ptr, layout)
     }
 }
 
-#[thread_local]
-static TASK_LOCAL_ALLOCATOR: SpinMutex<TaskLocalAllocator> = SpinMutex::new(TaskLocalAllocator::new());
+static TASK_LOCAL_ALLOCATOR: SyncRefCell<TaskLocalAllocator> = SyncRefCell::new(TaskLocalAllocator::new());
 
 unsafe impl Send for TaskLocalAllocator {}
 struct TaskLocalAllocator {
@@ -128,7 +127,7 @@ struct GlobalTaskLocalAllocator;
 
 unsafe impl GlobalAlloc for GlobalTaskLocalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        match TASK_LOCAL_ALLOCATOR.lock().allocate(layout) {
+        match TASK_LOCAL_ALLOCATOR.borrow().allocate(layout) {
             Ok(ptr) => ptr.as_ptr() as *mut u8,
             Err(_) => core::ptr::null_mut(),
         }
@@ -136,7 +135,7 @@ unsafe impl GlobalAlloc for GlobalTaskLocalAllocator {
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         if !ptr.is_null() {
-            TASK_LOCAL_ALLOCATOR.lock().deallocate(NonNull::new_unchecked(ptr), layout)
+            TASK_LOCAL_ALLOCATOR.borrow().deallocate(NonNull::new_unchecked(ptr), layout)
         }
     }
 }
