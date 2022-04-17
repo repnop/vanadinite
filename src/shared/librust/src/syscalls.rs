@@ -69,60 +69,7 @@ impl Syscall {
     }
 }
 
-#[inline(never)]
-pub fn syscall<T: Into<Message>, U: From<Message>, E: From<Message>>(
-    recipient: Recipient,
-    args: T,
-) -> (Sender, SyscallResult<U, E>) {
-    let sender: usize;
-    let is_err: usize;
-    let message = args.into();
-    let mut t2 = message.contents[0];
-    let mut t3 = message.contents[1];
-    let mut t4 = message.contents[2];
-    let mut t5 = message.contents[3];
-    let mut t6 = message.contents[4];
-    let mut a0 = message.contents[5];
-    let mut a1 = message.contents[6];
-    let mut a2 = message.contents[7];
-    let mut a3 = message.contents[8];
-    let mut a4 = message.contents[9];
-    let mut a5 = message.contents[10];
-    let mut a6 = message.contents[11];
-    let mut a7 = message.contents[12];
-
-    unsafe {
-        #[rustfmt::skip]
-        core::arch::asm!(
-            "ecall",
-            inlateout("t0") recipient.value() => is_err,
-            inlateout("t1") 0usize => sender,
-            inlateout("t2") t2,
-            inlateout("t3") t3,
-            inlateout("t4") t4,
-            inlateout("t5") t5,
-            inlateout("t6") t6,
-            inlateout("a0") a0,
-            inlateout("a1") a1,
-            inlateout("a2") a2,
-            inlateout("a3") a3,
-            inlateout("a4") a4,
-            inlateout("a5") a5,
-            inlateout("a6") a6,
-            inlateout("a7") a7,
-        );
-    }
-
-    let message = Message { contents: [t2, t3, t4, t5, t6, a0, a1, a2, a3, a4, a5, a6, a7] };
-    let sender = Sender::new(sender);
-    match sender.is_kernel() {
-        true => match is_err == 1 {
-            true => (sender, SyscallResult::Err(E::from(message))),
-            false => (sender, SyscallResult::Ok(U::from(message))),
-        },
-        false => (sender, SyscallResult::Ok(U::from(message))),
-    }
-}
+pub unsafe fn syscall0(id: Syscall) -> Result<
 
 #[inline(always)]
 pub fn exit() -> ! {
