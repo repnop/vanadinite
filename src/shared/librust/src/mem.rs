@@ -6,9 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    error::KError,
-    message::SyscallResult,
-    syscalls::allocation::{alloc_dma_memory, DmaAllocationOptions},
+    syscalls::mem::{alloc_dma_memory, DmaAllocationOptions},
 };
 use core::{mem::MaybeUninit, ptr::Pointee};
 
@@ -72,12 +70,12 @@ pub struct DmaRegion<T: ?Sized> {
 }
 
 impl<T: Sized> DmaRegion<[MaybeUninit<T>]> {
-    pub fn new_many(n_elements: usize) -> SyscallResult<Self, KError> {
+    pub fn new_many(n_elements: usize) -> Result<Self, SyscallError> {
         alloc_dma_memory(n_elements * core::mem::size_of::<T>(), DmaAllocationOptions::NONE)
             .map(|(phys, virt)| Self { phys, virt: core::ptr::slice_from_raw_parts_mut(virt.cast(), n_elements) })
     }
 
-    pub unsafe fn zeroed_many(n_elements: usize) -> SyscallResult<Self, KError> {
+    pub unsafe fn zeroed_many(n_elements: usize) -> Result<Self, SyscallError> {
         alloc_dma_memory(n_elements * core::mem::size_of::<T>(), DmaAllocationOptions::ZERO)
             .map(|(phys, virt)| Self { phys, virt: core::ptr::slice_from_raw_parts_mut(virt.cast(), n_elements) })
     }
@@ -106,7 +104,7 @@ impl<T: Sized> DmaRegion<[T]> {
 }
 
 impl<T: ?Sized> DmaRegion<T> {
-    pub unsafe fn new_raw(metadata: <T as Pointee>::Metadata, zero: bool) -> SyscallResult<Self, KError> {
+    pub unsafe fn new_raw(metadata: <T as Pointee>::Metadata, zero: bool) -> Result<Self, SyscallError> {
         let size = core::mem::size_of_val_raw::<T>(core::ptr::from_raw_parts(core::ptr::null(), metadata));
         let opts = if zero { DmaAllocationOptions::ZERO } else { DmaAllocationOptions::NONE };
 
@@ -124,20 +122,20 @@ impl<T: ?Sized> DmaRegion<T> {
 }
 
 impl<T> DmaRegion<MaybeUninit<T>> {
-    pub unsafe fn new() -> SyscallResult<Self, KError>
+    pub unsafe fn new() -> Result<Self, SyscallError>
     where
         T: Pointee<Metadata = ()>,
     {
         let (phys, virt) = alloc_dma_memory(core::mem::size_of::<T>(), DmaAllocationOptions::NONE)?;
-        SyscallResult::Ok(Self { phys, virt: core::ptr::from_raw_parts_mut(virt.cast(), ()) })
+        Result::Ok(Self { phys, virt: core::ptr::from_raw_parts_mut(virt.cast(), ()) })
     }
 
-    pub unsafe fn zeroed() -> SyscallResult<Self, KError>
+    pub unsafe fn zeroed() -> Result<Self, SyscallError>
     where
         T: Pointee<Metadata = ()>,
     {
         let (phys, virt) = alloc_dma_memory(core::mem::size_of::<T>(), DmaAllocationOptions::ZERO)?;
-        SyscallResult::Ok(Self { phys, virt: core::ptr::from_raw_parts_mut(virt.cast(), ()) })
+        Result::Ok(Self { phys, virt: core::ptr::from_raw_parts_mut(virt.cast(), ()) })
     }
 
     pub unsafe fn assume_init(self) -> DmaRegion<T> {

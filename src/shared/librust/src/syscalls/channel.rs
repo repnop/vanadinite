@@ -7,9 +7,7 @@
 
 use crate::{
     capabilities::{Capability, CapabilityPtr},
-    error::KError,
-    message::{Recipient, SyscallRequest, SyscallResult},
-    syscalls::{syscall, Syscall},
+    syscalls::{Syscall},
 };
 
 #[derive(Debug, Clone, Copy)]

@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use core::num::NonZeroUsize;
+
 pub const INSUFFICIENT_RIGHTS: usize = 1;
 pub const INVALID_OPERATION: usize = 2;
 pub const INVALID_ARGUMENT: usize = 3;
@@ -19,28 +21,28 @@ pub enum SyscallError {
 impl SyscallError {
     pub const fn uncook(self) -> RawSyscallError {
         match self {
-            Self::InsufficientRights(n) => RawSyscallError::new(((n as usize) << 8) | INSUFFICIENT_RIGHTS),
-            Self::InvalidOperation(n) => RawSyscallError::new(((n as usize) << 8) | INVALID_OPERATION),
-            Self::InvalidArgument(n) => RawSyscallError::new(((n as usize) << 8) | INVALID_ARGUMENT),
+            Self::InsufficientRights(n) => RawSyscallError::new(NonZeroUsize::new(((n as usize) << 8) | INSUFFICIENT_RIGHTS).unwrap()),
+            Self::InvalidOperation(n) => RawSyscallError::new(NonZeroUsize::new(((n as usize) << 8) | INVALID_OPERATION).unwrap()),
+            Self::InvalidArgument(n) => RawSyscallError::new(NonZeroUsize::new(((n as usize) << 8) | INVALID_ARGUMENT).unwrap()),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
-pub struct RawSyscallError(usize);
+pub struct RawSyscallError(NonZeroUsize);
 
 impl RawSyscallError {
-    pub const fn new(value: usize) -> Self {
+    pub const fn new(value: NonZeroUsize) -> Self {
         Self(value)
     }
 
     pub const fn kind(self) -> usize {
-        self.0 & 0xFF
+        self.0.get() & 0xFF
     }
 
     pub const fn context(self) -> usize {
-        self.0 >> 8
+        self.0.get() >> 8
     }
 
     pub const fn cook(self) -> SyscallError {

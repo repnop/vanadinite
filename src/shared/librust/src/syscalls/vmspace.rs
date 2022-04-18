@@ -7,11 +7,9 @@
 
 use core::num::NonZeroUsize;
 
-use super::{allocation::MemoryPermissions, Syscall};
+use super::{mem::MemoryPermissions, Syscall};
 use crate::{
     capabilities::CapabilityPtr,
-    error::KError,
-    message::{Recipient, SyscallRequest, SyscallResult},
     task::Tid,
 };
 
@@ -20,11 +18,11 @@ use crate::{
 pub struct VmspaceObjectId(usize);
 
 impl VmspaceObjectId {
-    pub fn new(id: usize) -> Self {
+    pub const fn new(id: usize) -> Self {
         Self(id)
     }
 
-    pub fn value(self) -> usize {
+    pub const fn value(self) -> usize {
         self.0
     }
 }

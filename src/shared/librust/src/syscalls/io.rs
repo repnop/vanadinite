@@ -5,15 +5,13 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{allocation::MemoryPermissions, syscall, Syscall};
+use super::{mem::MemoryPermissions, Syscall};
 use crate::{
     capabilities::CapabilityPtr,
-    error::KError,
-    message::{Message, Recipient, SyscallRequest, SyscallResult},
 };
 
 #[inline]
-pub fn claim_device(node: &str) -> SyscallResult<CapabilityPtr, KError> {
+pub fn claim_device(node: &str) -> Result<CapabilityPtr, SyscallError> {
     syscall(
         Recipient::kernel(),
         SyscallRequest {
@@ -26,7 +24,7 @@ pub fn claim_device(node: &str) -> SyscallResult<CapabilityPtr, KError> {
 }
 
 #[inline]
-pub fn complete_interrupt(interrupt_id: usize) -> SyscallResult<(), KError> {
+pub fn complete_interrupt(interrupt_id: usize) -> Result<(), SyscallError> {
     syscall(
         Recipient::kernel(),
         SyscallRequest {
@@ -66,15 +64,8 @@ impl MmioCapabilityInfo {
     }
 }
 
-pub fn query_mmio_cap(cptr: CapabilityPtr) -> SyscallResult<MmioCapabilityInfo, KError> {
-    syscall(
-        Recipient::kernel(),
-        SyscallRequest {
-            syscall: Syscall::QueryMmioCapability,
-            arguments: [cptr.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        },
-    )
-    .1
+pub fn query_mmio_cap(cptr: CapabilityPtr) -> Result<MmioCapabilityInfo, SyscallError> {
+    unsafe { super::syscall}
     .map(|msg: Message| MmioCapabilityInfo {
         address: msg.contents[0] as *mut u8,
         len: msg.contents[1],
@@ -82,4 +73,9 @@ pub fn query_mmio_cap(cptr: CapabilityPtr) -> SyscallResult<MmioCapabilityInfo, 
         n_interrupts: msg.contents[3],
         interrupts: msg.contents[4..12].try_into().unwrap(),
     })
+}
+
+#[inline]
+pub fn debug_print(value: &[u8]) -> Result<(), SyscallError> {
+    unsafe { super::syscall2r0(Syscall::Print, value.as_ptr().addr(), value.len()) }
 }
