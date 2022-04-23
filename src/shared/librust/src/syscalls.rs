@@ -79,6 +79,22 @@ pub unsafe fn syscall0r0(id: Syscall) -> Result<(), SyscallError> {
     }
 }
 
+pub unsafe fn syscall1r0(id: Syscall, arg0: usize) -> Result<(), SyscallError> {
+    let error: Option<RawSyscallError>;
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inlateout("a0") id as usize => error,
+            in("a1") arg0,
+        );
+    }
+
+    match error {
+        Some(error) => Err(error.cook()),
+        None => Ok(())
+    }
+}
+
 pub unsafe fn syscall0r1(id: Syscall) -> Result<usize, SyscallError> {
     let error: Option<RawSyscallError>;
     let ret0: usize;
@@ -88,6 +104,24 @@ pub unsafe fn syscall0r1(id: Syscall) -> Result<usize, SyscallError> {
             "ecall",
             inlateout("a0") id as usize => error,
             lateout("a1") ret0, 
+        );
+    }
+
+    match error {
+        Some(error) => Err(error.cook()),
+        None => Ok(ret0)
+    }
+}
+
+pub unsafe fn syscall1r1(id: Syscall, arg0: usize) -> Result<usize, SyscallError> {
+    let error: Option<RawSyscallError>;
+    let ret0: usize;
+
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inlateout("a0") id as usize => error,
+            inlateout("a1") arg0 => ret0,
         );
     }
 
@@ -125,8 +159,8 @@ pub unsafe fn syscall2r0(id: Syscall, arg0: usize, arg1: usize) -> Result<(), Sy
         core::arch::asm!(
             "ecall",
             inlateout("a0") id as usize => error,
-            inlateout("a1") arg0 => _,
-            inlateout("a2") arg1 => _,
+            in("a1") arg0,
+            in("a2") arg1,
         );
     }
 

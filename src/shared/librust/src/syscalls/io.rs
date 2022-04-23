@@ -7,7 +7,7 @@
 
 use super::{mem::MemoryPermissions, Syscall};
 use crate::{
-    capabilities::CapabilityPtr,
+    capabilities::CapabilityPtr, error::SyscallError,
 };
 
 #[inline]
@@ -25,14 +25,7 @@ pub fn claim_device(node: &str) -> Result<CapabilityPtr, SyscallError> {
 
 #[inline]
 pub fn complete_interrupt(interrupt_id: usize) -> Result<(), SyscallError> {
-    syscall(
-        Recipient::kernel(),
-        SyscallRequest {
-            syscall: Syscall::CompleteInterrupt,
-            arguments: [interrupt_id, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        },
-    )
-    .1
+    unsafe { super::syscall1r0(Syscall::CompleteInterrupt, interrupt_id) }
 }
 
 unsafe impl Send for MmioCapabilityInfo {}
