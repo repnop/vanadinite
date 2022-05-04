@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    error::SyscallError,
     syscalls::mem::{alloc_dma_memory, DmaAllocationOptions},
 };
 use core::{mem::MaybeUninit, ptr::Pointee};

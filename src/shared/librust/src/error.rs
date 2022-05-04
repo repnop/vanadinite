@@ -10,20 +10,29 @@ use core::num::NonZeroUsize;
 pub const INSUFFICIENT_RIGHTS: usize = 1;
 pub const INVALID_OPERATION: usize = 2;
 pub const INVALID_ARGUMENT: usize = 3;
+pub const WOULD_BLOCK: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SyscallError {
     InsufficientRights(u32),
     InvalidOperation(u32),
     InvalidArgument(u32),
+    WouldBlock,
 }
 
 impl SyscallError {
     pub const fn uncook(self) -> RawSyscallError {
         match self {
-            Self::InsufficientRights(n) => RawSyscallError::new(NonZeroUsize::new(((n as usize) << 8) | INSUFFICIENT_RIGHTS).unwrap()),
-            Self::InvalidOperation(n) => RawSyscallError::new(NonZeroUsize::new(((n as usize) << 8) | INVALID_OPERATION).unwrap()),
-            Self::InvalidArgument(n) => RawSyscallError::new(NonZeroUsize::new(((n as usize) << 8) | INVALID_ARGUMENT).unwrap()),
+            Self::InsufficientRights(n) => {
+                RawSyscallError::new(NonZeroUsize::new(((n as usize) << 8) | INSUFFICIENT_RIGHTS).unwrap())
+            }
+            Self::InvalidOperation(n) => {
+                RawSyscallError::new(NonZeroUsize::new(((n as usize) << 8) | INVALID_OPERATION).unwrap())
+            }
+            Self::InvalidArgument(n) => {
+                RawSyscallError::new(NonZeroUsize::new(((n as usize) << 8) | INVALID_ARGUMENT).unwrap())
+            }
+            Self::WouldBlock => RawSyscallError::new(NonZeroUsize::new(WOULD_BLOCK).unwrap()),
         }
     }
 }
@@ -50,6 +59,7 @@ impl RawSyscallError {
             INSUFFICIENT_RIGHTS => SyscallError::InsufficientRights(self.context() as u32),
             INVALID_OPERATION => SyscallError::InvalidOperation(self.context() as u32),
             INVALID_ARGUMENT => SyscallError::InvalidArgument(self.context() as u32),
+            WOULD_BLOCK => SyscallError::WouldBlock,
             kind => unreachable!("invalid syscall error kind: {}", kind),
         }
     }
