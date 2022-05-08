@@ -42,6 +42,13 @@ impl SyscallError {
 pub struct RawSyscallError(NonZeroUsize);
 
 impl RawSyscallError {
+    pub const fn optional(value: usize) -> Option<Self> {
+        match value {
+            0 => None,
+            _ => Some(Self(unsafe { NonZeroUsize::new_unchecked(value) })),
+        }
+    }
+
     pub const fn new(value: NonZeroUsize) -> Self {
         Self(value)
     }
@@ -60,7 +67,7 @@ impl RawSyscallError {
             INVALID_OPERATION => SyscallError::InvalidOperation(self.context() as u32),
             INVALID_ARGUMENT => SyscallError::InvalidArgument(self.context() as u32),
             WOULD_BLOCK => SyscallError::WouldBlock,
-            kind => unreachable!("invalid syscall error kind: {}", kind),
+            kind => panic!("invalid syscall error kind: {}", kind),
         }
     }
 }

@@ -443,6 +443,8 @@ pub unsafe extern "C" fn stvec_trap_shim() -> ! {
 extern "C" fn save_fp_registers(fp_regs: &mut FloatingPointRegisters) {
     unsafe {
         core::arch::asm!("
+                .option push
+                .option arch, +d
                 fsd f0, 0({regs})
                 fsd f1, 8({regs})
                 fsd f2, 16({regs})
@@ -478,6 +480,7 @@ extern "C" fn save_fp_registers(fp_regs: &mut FloatingPointRegisters) {
 
                 frcsr {0}
                 sd {0}, 256({regs})
+                .option pop
             ",
             out(reg) _,
             regs = in(reg) fp_regs,

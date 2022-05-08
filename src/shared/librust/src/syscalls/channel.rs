@@ -15,13 +15,46 @@ use crate::{
 #[repr(C)]
 pub struct ChannelMessage(pub [usize; 7]);
 
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(transparent)]
+pub struct ChannelReadFlags(usize);
+
+impl ChannelReadFlags {
+    pub const NONE: Self = Self(0);
+    pub const NONBLOCKING: Self = Self(1);
+
+    pub const fn new(flags: usize) -> Self {
+        Self(flags)
+    }
+
+    pub const fn value(self) -> usize {
+        self.0
+    }
+}
+
+impl core::ops::BitOr for ChannelReadFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl core::ops::BitAnd for ChannelReadFlags {
+    type Output = bool;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        self.0 & rhs.0 == rhs.0
+    }
+}
+
 pub fn send_message(cptr: CapabilityPtr, message: ChannelMessage, caps: &[Capability]) -> Result<(), SyscallError> {
-    let error: Option<RawSyscallError>;
+    let error: usize;
 
     unsafe {
         core::arch::asm!(
             "ecall",
-            inlateout("a0") Syscall::SendChannelMessage => error,
+            inlateout("a0") Syscall::WriteChannel as usize => error,
             in("a1") cptr.value(),
             in("a2") caps.as_ptr(),
             in("a3") caps.len(),
@@ -35,7 +68,7 @@ pub fn send_message(cptr: CapabilityPtr, message: ChannelMessage, caps: &[Capabi
         );
     }
 
-    match error {
+    match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
         None => Ok(()),
     }
@@ -44,19 +77,21 @@ pub fn send_message(cptr: CapabilityPtr, message: ChannelMessage, caps: &[Capabi
 pub fn read_message(
     cptr: CapabilityPtr,
     cap_buffer: &mut [Capability],
+    flags: ChannelReadFlags,
 ) -> Result<(ChannelMessage, usize, usize), SyscallError> {
-    let error: Option<RawSyscallError>;
+    let error: usize;
     let read_caps: usize;
     let remaining_caps: usize;
-    let message = [0; 7];
+    let mut message = [0; 7];
 
     unsafe {
         core::arch::asm!(
             "ecall",
-            inlateout("a0") Syscall::ReadChannel => error,
+            inlateout("a0") Syscall::ReadChannel as usize => error,
             inlateout("a1") cptr.value() => read_caps,
             inlateout("a2") cap_buffer.as_mut_ptr() => remaining_caps,
             in("a3") cap_buffer.len(),
+            in("a4") flags.0,
             lateout("t0") message[0],
             lateout("t1") message[1],
             lateout("t2") message[2],
@@ -67,43 +102,8 @@ pub fn read_message(
         );
     }
 
-    match error {
+    match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
         None => Ok((ChannelMessage(message), read_caps, remaining_caps)),
-    }
-}
-
-pub fn read_message_non_blocking(
-    cptr: CapabilityPtr,
-    cap_buffer: &mut [Capability],
-) -> Result<Option<(ChannelMessage, usize, usize)>, SyscallError> {
-    let error: Option<RawSyscallError>;
-    let read_caps: usize;
-    let remaining_caps: usize;
-    let message = [0; 7];
-
-    unsafe {
-        core::arch::asm!(
-            "ecall",
-            inlateout("a0") Syscall::ReadChannelNonBlocking => error,
-            inlateout("a1") cptr.value() => read_caps,
-            inlateout("a2") cap_buffer.as_mut_ptr() => remaining_caps,
-            in("a3") cap_buffer.len(),
-            lateout("t0") message[0],
-            lateout("t1") message[1],
-            lateout("t2") message[2],
-            lateout("t3") message[3],
-            lateout("t4") message[4],
-            lateout("t5") message[5],
-            lateout("t6") message[6],
-        );
-    }
-
-    match error {
-        Some(error) => match error.cook() {
-            SyscallError::WouldBlock => Ok(None),
-            error => Err(error),
-        },
-        None => Ok(Some((ChannelMessage(message), read_caps, remaining_caps))),
     }
 }

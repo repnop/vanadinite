@@ -5,13 +5,9 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use core::num::NonZeroUsize;
-
 use super::{mem::MemoryPermissions, Syscall};
-use crate::{
-    capabilities::CapabilityPtr,
-    task::Tid,
-};
+use crate::{capabilities::CapabilityPtr, error::SyscallError, task::Tid};
+use core::num::NonZeroUsize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
@@ -34,7 +30,7 @@ pub struct VmspaceObjectMapping {
     pub permissions: MemoryPermissions,
 }
 
-pub fn create_vmspace() -> SyscallResult<VmspaceObjectId, KError> {
+pub fn create_vmspace() -> Result<VmspaceObjectId, SyscallError> {
     crate::syscalls::syscall(
         Recipient::kernel(),
         SyscallRequest { syscall: Syscall::CreateVmspace, arguments: [0; 12] },
@@ -46,7 +42,7 @@ pub fn create_vmspace() -> SyscallResult<VmspaceObjectId, KError> {
 pub fn alloc_vmspace_object(
     id: VmspaceObjectId,
     mapping: VmspaceObjectMapping,
-) -> SyscallResult<(*mut u8, *mut u8), KError> {
+) -> Result<(*mut u8, *mut u8), SyscallError> {
     crate::syscalls::syscall(
         Recipient::kernel(),
         SyscallRequest {
@@ -83,7 +79,7 @@ pub fn spawn_vmspace(
     id: VmspaceObjectId,
     name: &str,
     env: VmspaceSpawnEnv,
-) -> SyscallResult<(Tid, CapabilityPtr), KError> {
+) -> Result<(Tid, CapabilityPtr), SyscallError> {
     crate::syscalls::syscall(
         Recipient::kernel(),
         SyscallRequest {

@@ -5,14 +5,18 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Syscall, syscall1r3};
+use super::{syscall1r3, Syscall};
 use crate::{
-    capabilities::CapabilityPtr, mem::PhysicalAddress, error::SyscallError,
+    capabilities::CapabilityPtr,
+    error::{RawSyscallError, SyscallError},
+    mem::PhysicalAddress,
 };
 
 pub fn query_memory_capability(cptr: CapabilityPtr) -> Result<(*mut u8, usize, MemoryPermissions), SyscallError> {
-    unsafe { syscall1r3(Syscall::QueryMemoryCapability, cptr.value()) 
-    .map(|(ptr, len, perms)| (ptr as *mut u8, len, MemoryPermissions(perms))) }
+    unsafe {
+        syscall1r3(Syscall::QueryMemoryCapability, cptr.value())
+            .map(|(ptr, len, perms)| (ptr as *mut u8, len, MemoryPermissions(perms)))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -91,7 +95,7 @@ pub fn alloc_virtual_memory(
     size_in_bytes: usize,
     options: AllocationOptions,
     perms: MemoryPermissions,
-) -> SyscallResult<*mut u8, KError> {
+) -> Result<*mut u8, SyscallError> {
     syscall(
         Recipient::kernel(),
         SyscallRequest {
@@ -136,14 +140,22 @@ impl core::ops::BitAnd for DmaAllocationOptions {
 pub fn alloc_dma_memory(
     size_in_bytes: usize,
     options: DmaAllocationOptions,
-) -> SyscallResult<(PhysicalAddress, *mut u8), KError> {
-    syscall(
-        Recipient::kernel(),
-        SyscallRequest {
-            syscall: Syscall::AllocDmaMemory,
-            arguments: [size_in_bytes, options.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        },
-    )
-    .1
-    .map(|(phys, virt)| (PhysicalAddress::new(phys), virt as *mut u8))
+) -> Result<(PhysicalAddress, *mut u8), SyscallError> {
+    let error: usize;
+    let phys: usize;
+    let virt: *mut u8;
+
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inlateout("a0") Syscall::AllocDmaMemory as usize => error,
+            inlateout("a1") size_in_bytes => phys,
+            inlateout("a2") options.0 => virt,
+        );
+    }
+
+    match RawSyscallError::optional(error) {
+        Some(error) => Err(error.cook()),
+        None => Ok((PhysicalAddress::new(phys), virt)),
+    }
 }
