@@ -9,10 +9,9 @@ use core::marker::PhantomData;
 
 use librust::{
     capabilities::{Capability, CapabilityPtr, CapabilityRights},
-    error::KError,
-    message::SyscallResult,
+    error::{SyscallError},
     syscalls::{
-        allocation::MemoryPermissions,
+        mem::MemoryPermissions,
         vmspace::{self, VmspaceObjectId, VmspaceObjectMapping, VmspaceSpawnEnv},
     },
     task::Tid,
@@ -37,22 +36,19 @@ impl Vmspace {
         address: *const u8,
         size: usize,
         permissions: MemoryPermissions,
-    ) -> Result<VmspaceObject<'b, '_>, KError> {
+    ) -> Result<VmspaceObject<'b, '_>, SyscallError> {
         match vmspace::alloc_vmspace_object(self.id, VmspaceObjectMapping { address, size, permissions }) {
-            SyscallResult::Ok((ours, theirs)) => Ok(VmspaceObject {
+            Ok((ours, theirs)) => Ok(VmspaceObject {
                 vmspace_address: theirs,
                 mapped_memory: unsafe { core::slice::from_raw_parts_mut(ours, size) },
                 _vmspace: PhantomData,
             }),
-            SyscallResult::Err(e) => Err(e),
+            Err(e) => Err(e),
         }
     }
 
-    pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<(Tid, CapabilityPtr), KError> {
-        let (tid, cptr) = match vmspace::spawn_vmspace(self.id, &self.name, env) {
-            SyscallResult::Ok((tid, cptr)) => (tid, cptr),
-            SyscallResult::Err(e) => return Err(e),
-        };
+    pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<(Tid, CapabilityPtr), SyscallError> {
+        let (tid, cptr) = vmspace::spawn_vmspace(self.id, &self.name, env)?;
 
         let mut channel = crate::ipc::IpcChannel::new(cptr);
 

@@ -20,9 +20,6 @@
 
 extern crate alloc;
 
-#[cfg(feature = "rt0")]
-extern crate rt0;
-
 pub mod env;
 pub mod heap;
 pub mod io;
@@ -73,7 +70,7 @@ pub fn _print(args: core::fmt::Arguments) {
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     println!("PANIC: {}", info);
-    librust::syscalls::exit()
+    librust::syscalls::task::exit()
 }
 
 #[alloc_error_handler]

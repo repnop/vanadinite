@@ -12,8 +12,7 @@ use core::{
     ptr::{self, NonNull},
 };
 use librust::{
-    message::SyscallResult,
-    syscalls::allocation::{self, AllocationOptions, MemoryPermissions},
+    syscalls::mem::{self, AllocationOptions, MemoryPermissions},
 };
 
 #[derive(Clone, Copy)]
@@ -80,16 +79,16 @@ impl TaskLocalAllocator {
 
             let mem_size = slab.0 * 64;
             let perms = MemoryPermissions::READ | MemoryPermissions::WRITE;
-            let mut options = AllocationOptions::None;
+            let mut options = AllocationOptions::NONE;
 
             if mem_size >= 2 * 1024 * 1024 {
                 //println!("Asking for large pages");
-                options = options | AllocationOptions::LargePage;
+                options = options | AllocationOptions::LARGE_PAGE;
             }
 
-            let new_mem = match allocation::alloc_virtual_memory(mem_size, options, perms) {
-                SyscallResult::Ok(new_mem) => new_mem,
-                SyscallResult::Err(_) => return Err(AllocError),
+            let new_mem = match mem::alloc_virtual_memory(mem_size, options, perms) {
+                Result::Ok(new_mem) => new_mem,
+                Result::Err(_) => return Err(AllocError),
             };
 
             //println!("New mem is at {:#p}", new_mem);

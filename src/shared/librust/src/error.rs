@@ -67,7 +67,7 @@ impl RawSyscallError {
             INVALID_OPERATION => SyscallError::InvalidOperation(self.context() as u32),
             INVALID_ARGUMENT => SyscallError::InvalidArgument(self.context() as u32),
             WOULD_BLOCK => SyscallError::WouldBlock,
-            kind => panic!("invalid syscall error kind: {}", kind),
+            _ => panic!("invalid syscall error kind"),
         }
     }
 }

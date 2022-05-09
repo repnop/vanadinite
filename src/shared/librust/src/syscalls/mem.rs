@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{syscall1r3, Syscall};
+use super::{Syscall};
 use crate::{
     capabilities::CapabilityPtr,
     error::{RawSyscallError, SyscallError},
@@ -13,9 +13,24 @@ use crate::{
 };
 
 pub fn query_memory_capability(cptr: CapabilityPtr) -> Result<(*mut u8, usize, MemoryPermissions), SyscallError> {
+    let error: usize;
+    let virt: *mut u8;
+    let size: usize;
+    let perms: usize;
+
     unsafe {
-        syscall1r3(Syscall::QueryMemoryCapability, cptr.value())
-            .map(|(ptr, len, perms)| (ptr as *mut u8, len, MemoryPermissions(perms)))
+        core::arch::asm!(
+            "ecall",
+            inlateout("a0") Syscall::QueryMemoryCapability as usize => error,
+            inlateout("a1") cptr.value() => virt,
+            lateout("a2") size,
+            lateout("a3") perms,
+        );
+    }
+
+    match RawSyscallError::optional(error) {
+        Some(error) => Err(error.cook()),
+        None => Ok((virt, size, MemoryPermissions::new(perms))),
     }
 }
 
@@ -90,20 +105,30 @@ impl core::ops::BitAnd for AllocationOptions {
     }
 }
 
+// TODO: return `*mut [u8]`?
 #[inline]
 pub fn alloc_virtual_memory(
     size_in_bytes: usize,
     options: AllocationOptions,
     perms: MemoryPermissions,
 ) -> Result<*mut u8, SyscallError> {
-    syscall(
-        Recipient::kernel(),
-        SyscallRequest {
-            syscall: Syscall::AllocVirtualMemory,
-            arguments: [size_in_bytes, options.value(), perms.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        },
-    )
-    .1
+    let error: usize;
+    let virt: *mut u8;
+
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inlateout("a0") Syscall::AllocVirtualMemory as usize => error,
+            inlateout("a1") size_in_bytes => virt,
+            in("a2") options.0,
+            in("a3") perms.0,
+        );
+    }
+
+    match RawSyscallError::optional(error) {
+        Some(error) => Err(error.cook()),
+        None => Ok(virt),
+    }
 }
 
 pub struct DmaAllocationOptions(usize);

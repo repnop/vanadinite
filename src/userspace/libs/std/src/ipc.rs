@@ -7,9 +7,7 @@
 
 use librust::{
     capabilities::{Capability, CapabilityPtr},
-    error::KError,
-    message::SyscallResult,
-    syscalls::channel::{self, ChannelMessage},
+    syscalls::channel::{self, ChannelMessage}, error::SyscallError,
 };
 
 #[derive(Debug)]
@@ -24,16 +22,13 @@ impl IpcChannel {
 
     // FIXME: use a real error
     #[allow(clippy::result_unit_err)]
-    pub fn new_message(&mut self, size: usize) -> Result<NewMessage<'_>, KError> {
-        let message = match channel::create_message(self.cptr, size) {
-            SyscallResult::Ok(msg) => msg,
-            SyscallResult::Err(e) => return Err(e),
-        };
+    pub fn new_message(&mut self, size: usize) -> Result<NewMessage<'_>, SyscallError> {
+        let message = channel::create_message(self.cptr, size)?;
 
         Ok(NewMessage { channel: self, message, cursor: 0 })
     }
 
-    pub fn send_bytes<T: AsRef<[u8]>>(&mut self, msg: T, caps: &[Capability]) -> Result<(), KError> {
+    pub fn send_bytes<T: AsRef<[u8]>>(&mut self, msg: T, caps: &[Capability]) -> Result<(), SyscallError> {
         let msg = msg.as_ref();
         let mut chan_msg = self.new_message(msg.len())?;
         chan_msg.write(msg);
@@ -42,16 +37,16 @@ impl IpcChannel {
 
     // FIXME: use a real error
     #[allow(clippy::result_unit_err)]
-    pub fn read(&self, cap_buffer: &mut [Capability]) -> Result<ReadChannelMessage, KError> {
+    pub fn read(&self, cap_buffer: &mut [Capability]) -> Result<ReadChannelMessage, SyscallError> {
         match channel::read_message(self.cptr, cap_buffer) {
-            SyscallResult::Ok((m, caps_read, caps_left)) => {
+            Ok((m, caps_read, caps_left)) => {
                 Ok(ReadChannelMessage { message: Message(self.cptr, m), caps_read, caps_left })
             }
-            SyscallResult::Err(e) => Err(e),
+            Err(e) => Err(e),
         }
     }
 
-    pub fn read_with_all_caps(&self) -> Result<(Message, Vec<Capability>), KError> {
+    pub fn read_with_all_caps(&self) -> Result<(Message, Vec<Capability>), SyscallError> {
         let mut caps = Vec::new();
         let ReadChannelMessage { message, caps_left, .. } = self.read(&mut caps[..])?;
 
@@ -63,8 +58,8 @@ impl IpcChannel {
         Ok((message, caps))
     }
 
-    fn send(&mut self, msg: ChannelMessage, written_len: usize, caps: &[Capability]) -> Result<(), KError> {
-        if let SyscallResult::Err(e) = channel::send_message(self.cptr, msg.id, written_len, caps) {
+    fn send(&mut self, msg: ChannelMessage, written_len: usize, caps: &[Capability]) -> Result<(), SyscallError> {
+        if let Err(e) = channel::send_message(self.cptr, msg.id, written_len, caps) {
             return Err(e);
         }
 
@@ -115,7 +110,7 @@ pub struct NewMessage<'a> {
 }
 
 impl NewMessage<'_> {
-    pub fn send(self, caps: &[Capability]) -> Result<(), KError> {
+    pub fn send(self, caps: &[Capability]) -> Result<(), SyscallError> {
         self.channel.send(self.message, self.cursor, caps)
     }
 

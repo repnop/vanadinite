@@ -31,8 +31,7 @@ use core::{
 };
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
-    error::KError,
-    message::{KernelNotification, Message},
+    error::SyscallError,
     syscalls::channel::{ChannelId, MessageId},
 };
 use sync::{SpinMutex, SpinRwLock};
@@ -171,7 +170,7 @@ pub fn create_message(task: &mut Task, cptr: CapabilityPtr, size: usize) -> Sysc
         {
             channel
         }
-        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
+        _ => return SyscallOutcome::Err(SyscallError::InvalidArgument(0)),
     };
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
@@ -212,7 +211,7 @@ pub fn send_message(
         {
             *channel
         }
-        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
+        _ => return SyscallOutcome::Err(SyscallError::InvalidArgument(0)),
     };
 
     // Fixup caps here so we can error on any invalid caps/slice and not dealloc
@@ -222,11 +221,11 @@ pub fn send_message(
         _ => {
             let cap_slice = match unsafe { caps.validate(&task.memory_manager) } {
                 Ok(cap_slice) => cap_slice,
-                Err(_) => return SyscallOutcome::Err(KError::InvalidArgument(3)),
+                Err(_) => return SyscallOutcome::Err(SyscallError::InvalidArgument(3)),
             };
 
             let cap_slice = cap_slice.guarded();
-            let transferred_caps: Result<Vec<librust::capabilities::Capability>, KError> = cap_slice
+            let transferred_caps: Result<Vec<librust::capabilities::Capability>, SyscallError> = cap_slice
                 .iter()
                 .copied()
                 .map(|cap| {
@@ -250,11 +249,11 @@ pub fn send_message(
         Some(MappedChannelMessage::Synthesized(range)) => range,
         // For now we don't allow sending back received messages, but maybe that
         // should be allowed even if its not useful?
-        _ => return SyscallOutcome::Err(KError::InvalidArgument(1)),
+        _ => return SyscallOutcome::Err(SyscallError::InvalidArgument(1)),
     };
 
     if range.end.as_usize() - range.start.as_usize() < len {
-        return SyscallOutcome::Err(KError::InvalidArgument(2));
+        return SyscallOutcome::Err(SyscallError::InvalidArgument(2));
     }
 
     let backing = match task.memory_manager.dealloc_region(range.start) {
@@ -288,7 +287,7 @@ pub fn read_message(
         {
             channel
         }
-        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
+        _ => return SyscallOutcome::Err(SyscallError::InvalidArgument(0)),
     };
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
@@ -347,7 +346,7 @@ pub fn read_message(
                 len => {
                     let cap_slice = match unsafe { cap_buffer.validate(&task.memory_manager) } {
                         Ok(cap_slice) => cap_slice,
-                        Err(_) => return SyscallOutcome::Err(KError::InvalidArgument(3)),
+                        Err(_) => return SyscallOutcome::Err(SyscallError::InvalidArgument(3)),
                     };
 
                     let n_caps_to_write = len.min(caps.len());
@@ -380,7 +379,7 @@ pub fn read_message_nb(
         {
             channel
         }
-        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
+        _ => return SyscallOutcome::Err(SyscallError::InvalidArgument(0)),
     };
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
@@ -421,7 +420,7 @@ pub fn read_message_nb(
                 len => {
                     let cap_slice = match unsafe { cap_buffer.validate(&task.memory_manager) } {
                         Ok(cap_slice) => cap_slice,
-                        Err(_) => return SyscallOutcome::Err(KError::InvalidArgument(3)),
+                        Err(_) => return SyscallOutcome::Err(SyscallError::InvalidArgument(3)),
                     };
 
                     let n_caps_to_write = len.min(caps.len());
@@ -450,7 +449,7 @@ pub fn retire_message(task: &mut Task, cptr: CapabilityPtr, message_id: MessageI
         {
             channel
         }
-        _ => return SyscallOutcome::Err(KError::InvalidArgument(0)),
+        _ => return SyscallOutcome::Err(SyscallError::InvalidArgument(0)),
     };
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
@@ -459,7 +458,7 @@ pub fn retire_message(task: &mut Task, cptr: CapabilityPtr, message_id: MessageI
             task.memory_manager.dealloc_region(region.start);
             SyscallOutcome::Processed(librust::message::Message::default())
         }
-        _ => SyscallOutcome::Err(KError::InvalidArgument(1)),
+        _ => SyscallOutcome::Err(SyscallError::InvalidArgument(1)),
     }
 }
 
@@ -468,15 +467,15 @@ fn transfer_capability(
     cptr: CapabilityPtr,
     cptr_to_send: CapabilityPtr,
     rights: CapabilityRights,
-) -> Result<CapabilityPtr, KError> {
+) -> Result<CapabilityPtr, SyscallError> {
     let current_tid = task.tid;
     let cap = match task.cspace.resolve(cptr) {
         Some(cap) => cap,
-        None => return Err(KError::InvalidArgument(0)),
+        None => return Err(SyscallError::InvalidArgument(0)),
     };
 
     if !(cap.rights & CapabilityRights::GRANT) {
-        return Err(KError::InvalidArgument(0));
+        return Err(SyscallError::InvalidArgument(0));
     }
 
     let channel_id = match task.cspace.resolve(cptr) {
@@ -485,18 +484,18 @@ fn transfer_capability(
         {
             channel
         }
-        _ => return Err(KError::InvalidArgument(0)),
+        _ => return Err(SyscallError::InvalidArgument(0)),
     };
 
     let (receiving_tid, _) = task.channels.get(channel_id).unwrap();
 
     let cap_to_send = match task.cspace.resolve(cptr_to_send) {
         Some(cap) => cap,
-        None => return Err(KError::InvalidArgument(1)),
+        None => return Err(SyscallError::InvalidArgument(1)),
     };
 
     if !cap_to_send.rights.is_superset(rights) {
-        return Err(KError::InvalidArgument(2));
+        return Err(SyscallError::InvalidArgument(2));
     }
 
     let receiving_task = match TASKS.get(*receiving_tid) {
@@ -515,7 +514,7 @@ fn transfer_capability(
 
             let mut other_task = other_task.lock();
             if other_task.state.is_dead() {
-                return Err(KError::InvalidArgument(1));
+                return Err(SyscallError::InvalidArgument(1));
             }
 
             let other_rights = other_task
@@ -564,7 +563,7 @@ fn transfer_capability(
                 (true, false) => flags::READ,
                 // Write-only pages aren't supported & doesn't really make sense
                 // to send memory the process can't use at all
-                (_, _) => return Err(KError::InvalidArgument(2)),
+                (_, _) => return Err(SyscallError::InvalidArgument(2)),
             };
 
             let range = receiving_task.memory_manager.apply_shared_region(None, flags, phys_region.clone(), *kind);

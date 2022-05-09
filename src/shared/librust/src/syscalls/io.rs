@@ -14,7 +14,7 @@ use crate::{
 #[inline]
 pub fn claim_device(node: &str) -> Result<CapabilityPtr, SyscallError> {
     let error: usize;
-    let cptr: CapabilityPtr;
+    let cptr: usize;
 
     unsafe {
         core::arch::asm!(
@@ -27,7 +27,7 @@ pub fn claim_device(node: &str) -> Result<CapabilityPtr, SyscallError> {
 
     match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
-        None => Ok(cptr),
+        None => Ok(CapabilityPtr::new(cptr)),
     }
 }
 
@@ -91,10 +91,10 @@ pub fn query_mmio_cap(
     unsafe {
         core::arch::asm!(
             "ecall",
-            inlateout("a0") Syscall::QueryMmioCapability => error,
-            inlateout("a1") interrupt_buffer.as_ptr() => address,
-            inlateout("a2") interrupt_buffer.len() => len,
-            lateout("a3") mem_perms,
+            inlateout("a0") Syscall::QueryMmioCapability as usize => error,
+            inlateout("a1") cptr.value() => address,
+            inlateout("a2") interrupt_buffer.as_ptr() => len,
+            inlateout("a3") interrupt_buffer.len() => mem_perms,
             lateout("a4") n_interrupts,
             lateout("a5") read_interrupts,
         );
@@ -116,7 +116,7 @@ pub fn debug_print(value: &[u8]) -> Result<(), SyscallError> {
     unsafe {
         core::arch::asm!(
             "ecall",
-            inlateout("a0") Syscall::DebugPrint => error,
+            inlateout("a0") Syscall::DebugPrint as usize => error,
             in("a1") value.as_ptr(),
             in("a2") value.len(),
         );

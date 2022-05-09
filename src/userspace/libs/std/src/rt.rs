@@ -35,7 +35,7 @@ unsafe extern "C" fn _start(argc: isize, argv: *const *const u8, a2: usize) -> !
     A2 = a2;
 
     main(argc, argv);
-    librust::syscalls::exit()
+    librust::syscalls::task::exit()
 }
 
 extern "C" {
