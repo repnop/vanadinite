@@ -28,6 +28,8 @@ pub enum Syscall {
     QueryMemoryCapability = 20,
     CompleteInterrupt = 21,
     QueryMmioCapability = 22,
+    MintCapability = 23,
+    RevokeCapability = 24,
 }
 
 impl Syscall {
@@ -47,6 +49,8 @@ impl Syscall {
             20 => Some(Self::QueryMemoryCapability),
             21 => Some(Self::CompleteInterrupt),
             22 => Some(Self::QueryMmioCapability),
+            23 => Some(Self::MintCapability),
+            24 => Some(Self::RevokeCapability),
             _ => None,
         }
     }

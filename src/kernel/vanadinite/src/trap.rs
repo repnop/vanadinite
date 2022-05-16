@@ -104,6 +104,20 @@ pub struct TrapFrame {
     pub registers: GeneralRegisters,
 }
 
+impl core::ops::Deref for TrapFrame {
+    type Target = GeneralRegisters;
+
+    fn deref(&self) -> &Self::Target {
+        &self.registers
+    }
+}
+
+impl core::ops::DerefMut for TrapFrame {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.registers
+    }
+}
+
 const INTERRUPT_BIT: usize = 1 << 63;
 
 #[allow(clippy::enum_clike_unportable_variant)]

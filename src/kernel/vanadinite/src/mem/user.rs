@@ -230,6 +230,12 @@ pub struct ValidatedUserSlice<Mode: UserPtrMode, T> {
     mode: PhantomData<Mode>,
 }
 
+impl<Mode, T> ValidatedUserSlice<Mode, T> {
+    pub fn len(&self) -> usize {
+        self.len
+    }
+}
+
 impl<T> ValidatedUserSlice<Read, T> {
     pub fn with<U>(&self, f: impl FnOnce(&[T]) -> U) -> U {
         let _guard = TemporaryUserMemoryAccess::new();
