@@ -132,7 +132,7 @@ fn console_interrupt(
 ) -> Result<(), &'static str> {
     let c = CONSOLE.lock().read();
     claim.complete();
-    super::INPUT_QUEUE.push(c).map_err(|_| "failed to write to input queue")
+    Ok(())
 }
 
 pub struct LegacySbiConsoleOut;

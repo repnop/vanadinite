@@ -16,7 +16,6 @@ use core::fmt::Write;
 use crossbeam_queue::ArrayQueue;
 use librust::task::Tid;
 
-pub static INPUT_QUEUE: sync::Lazy<ArrayQueue<u8>> = sync::Lazy::new(|| ArrayQueue::new(4096));
 pub static CLAIMED_DEVICES: sync::SpinRwLock<BTreeMap<String, Tid>> = sync::SpinRwLock::new(BTreeMap::new());
 
 #[macro_export]

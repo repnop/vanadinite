@@ -5,15 +5,13 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::SyscallOutcome;
 use crate::{
-    io::{ConsoleDevice, INPUT_QUEUE},
+    io::{ConsoleDevice},
     mem::{paging::VirtualAddress, user::RawUserSlice},
     task::Task,
 };
 use librust::{
-    error::{AccessError, KError, SyscallError},
-    message::Message,
+    error::{SyscallError},
 };
 
 pub fn print(task: &mut Task, start: VirtualAddress, len: usize)-> Result<(), SyscallError> {

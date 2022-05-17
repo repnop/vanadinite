@@ -17,18 +17,16 @@ use crate::{
     scheduler::{Scheduler, SCHEDULER},
     syscall::channel::UserspaceChannel,
     task::{Context, MessageQueue, Task},
-    trap::GeneralRegisters,
+    trap::{GeneralRegisters, TrapFrame},
     utils::{self, Units},
 };
 use alloc::{collections::BTreeMap, vec::Vec};
 use librust::{
     capabilities::CapabilityRights,
-    error::{AccessError, KError},
-    syscalls::{allocation::MemoryPermissions, channel::ChannelId, vmspace::VmspaceObjectId},
+    error::{SyscallError},
+    syscalls::{mem::MemoryPermissions, channel::ChannelId, vmspace::VmspaceObjectId},
     task::Tid,
 };
-
-use super::SyscallOutcome;
 
 pub struct VmspaceObject {
     pub memory_manager: MemoryManager,
@@ -42,33 +40,33 @@ impl VmspaceObject {
     }
 }
 
-pub fn create_vmspace(task: &mut Task) -> SyscallOutcome {
+pub fn create_vmspace(task: &mut Task, frame: &mut TrapFrame) -> Result<(), SyscallError> {
     let id = task.vmspace_next_id;
     task.vmspace_next_id += 1;
     task.vmspace_objects.insert(VmspaceObjectId::new(id), VmspaceObject::new());
 
-    SyscallOutcome::processed(id)
+    frame.a1 = id;
+    Ok(())
 }
 
 pub fn alloc_vmspace_object(
     task: &mut Task,
-    id: usize,
-    address: usize,
-    size: usize,
-    permissions: usize,
-) -> SyscallOutcome {
+    frame: &mut TrapFrame,
+) -> Result<(), SyscallError> {
+    let id = frame.a1;
+    let address = VirtualAddress::new(frame.a2);
+    let size = frame.a3;
+    let permissions = MemoryPermissions::new(frame.a4);
+
     let object = match task.vmspace_objects.get_mut(&VmspaceObjectId::new(id)) {
         Some(map) => map,
-        None => return SyscallOutcome::Err(KError::InvalidArgument(0)),
+        None => return Err(SyscallError::InvalidArgument(0)),
     };
 
-    let permissions = MemoryPermissions::new(permissions);
-    let address = VirtualAddress::new(address);
-
     if !address.is_aligned(PageSize::Kilopage) || address.is_kernel_region() || address.checked_add(size).is_none() {
-        return SyscallOutcome::Err(KError::InvalidArgument(1));
+        return Err(SyscallError::InvalidArgument(1));
     } else if size == 0 {
-        return SyscallOutcome::Err(KError::InvalidArgument(2));
+        return Err(SyscallError::InvalidArgument(2));
     }
 
     let mut flags = flags::VALID | flags::USER;
@@ -91,7 +89,7 @@ pub fn alloc_vmspace_object(
         (true, false, false) => AddressRegionKind::ReadOnly,
         (true, false, true) | (false, false, true) => AddressRegionKind::Text,
         (false, false, false) | (false, true, true) | (false, true, false) => {
-            return SyscallOutcome::Err(KError::InvalidArgument(3))
+            return Err(SyscallError::InvalidArgument(3))
         }
     };
 
@@ -124,7 +122,9 @@ pub fn alloc_vmspace_object(
     object.inprocess_mappings.push(range.start);
     log::debug!("added {:#p} to task vmspace", range.start);
 
-    SyscallOutcome::processed((range.start.as_usize(), at.start.as_usize()))
+    frame.a1 = range.start.as_usize();
+    frame.a2 = at.start.as_usize();
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -139,12 +139,12 @@ pub fn spawn_vmspace(
     a2: usize,
     sp: usize,
     tp: usize,
-) -> SyscallOutcome {
+) -> Result<(), SyscallError> {
     let current_tid = task.tid;
 
     let object = match task.vmspace_objects.remove(&id) {
         Some(map) => map,
-        None => return SyscallOutcome::Err(KError::InvalidArgument(0)),
+        None => return Err(SyscallError::InvalidArgument(0)),
     };
 
     let user_slice = RawUserSlice::readable(name, len);
@@ -152,7 +152,7 @@ pub fn spawn_vmspace(
         Ok(slice) => slice,
         Err((addr, e)) => {
             log::error!("Bad memory from process: {:?}", e);
-            return SyscallOutcome::Err(KError::InvalidAccess(AccessError::Read(addr.as_ptr())));
+            return Err(SyscallError::InvalidAccess(AccessError::Read(addr.as_ptr())));
         }
     };
 
@@ -161,7 +161,7 @@ pub fn spawn_vmspace(
         Ok(s) => s,
         Err(_) => {
             log::error!("Invalid UTF-8 in FDT node name from process");
-            return SyscallOutcome::Err(KError::InvalidArgument(1));
+            return Err(SyscallError::InvalidArgument(1));
         }
     };
 
@@ -219,5 +219,5 @@ pub fn spawn_vmspace(
         rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
     });
 
-    SyscallOutcome::processed((tid.value(), cptr.value()))
+    processed((tid.value(), cptr.value()))
 }

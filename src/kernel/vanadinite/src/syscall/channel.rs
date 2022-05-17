@@ -5,7 +5,6 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::SyscallOutcome;
 use crate::{
     capabilities::{Capability, CapabilityResource},
     interrupts::PLIC,
@@ -18,10 +17,10 @@ use crate::{
     scheduler::{Scheduler, WakeToken, SCHEDULER, TASKS},
     task::Task,
     utils::{self, Units},
-    HART_ID,
+    HART_ID, trap::TrapFrame,
 };
 use alloc::{
-    collections::{BTreeMap, VecDeque},
+    collections::{VecDeque},
     sync::Arc,
     vec::Vec,
 };
@@ -32,17 +31,12 @@ use core::{
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
     error::SyscallError,
-    syscalls::channel::{ChannelId, MessageId},
 };
 use sync::{SpinMutex, SpinRwLock};
-
-pub const MAX_CHANNEL_BYTES: usize = 4096;
 
 pub struct UserspaceChannel {
     sender: Sender,
     receiver: Receiver,
-    message_id_counter: Arc<AtomicUsize>,
-    mapped_regions: BTreeMap<MessageId, MappedChannelMessage>,
 }
 
 impl UserspaceChannel {
@@ -75,16 +69,10 @@ impl UserspaceChannel {
         let first = Self {
             sender: sender1,
             receiver: receiver2,
-            message_id_counter: Arc::clone(&message_id_counter),
-            mapped_regions: BTreeMap::new(),
         };
-        let second = Self { sender: sender2, receiver: receiver1, message_id_counter, mapped_regions: BTreeMap::new() };
+        let second = Self { sender: sender2, receiver: receiver1 };
 
         (first, second)
-    }
-
-    fn next_message_id(&self) -> usize {
-        self.message_id_counter.fetch_add(1, Ordering::AcqRel)
     }
 }
 
@@ -95,7 +83,7 @@ enum MappedChannelMessage {
 
 #[derive(Debug)]
 struct ChannelMessage {
-    data: Option<(MessageId, PhysicalRegion, usize)>,
+    data: [usize; 7],
     caps: Vec<librust::capabilities::Capability>,
 }
 
@@ -161,49 +149,22 @@ impl Drop for Sender {
     }
 }
 
-// FIXME: Definitely should be a way to return tuple values that can be
-// converted into `usize` so its a lot more clear what's what
-pub fn create_message(task: &mut Task, cptr: CapabilityPtr, size: usize) -> SyscallOutcome {
-    let channel_id = match task.cspace.resolve(cptr) {
-        Some(Capability { resource: CapabilityResource::Channel(channel), rights })
-            if *rights & CapabilityRights::WRITE =>
-        {
-            channel
-        }
-        _ => return SyscallOutcome::Err(SyscallError::InvalidArgument(0)),
-    };
-    let (_, channel) = task.channels.get_mut(channel_id).unwrap();
-
-    let n_pages = utils::round_up_to_next(size, 4.kib()) / 4.kib();
-
-    let message_id = channel.next_message_id();
-    let size = n_pages * 4.kib();
-
-    // FIXME: does this actually need to be shared? I don't think so
-    let (region, _) = task.memory_manager.alloc_shared_region(
-        None,
-        RegionDescription {
-            size: PageSize::Kilopage,
-            len: n_pages,
-            contiguous: false,
-            flags: flags::READ | flags::WRITE | flags::USER | flags::VALID,
-            fill: FillOption::Zeroed,
-            kind: AddressRegionKind::Channel,
-        },
-    );
-
-    channel.mapped_regions.insert(MessageId::new(message_id), MappedChannelMessage::Synthesized(region.clone()));
-
-    SyscallOutcome::processed((message_id, region.start.as_usize(), size))
-}
-
 pub fn send_message(
     task: &mut Task,
-    cptr: CapabilityPtr,
-    message_id: MessageId,
-    len: usize,
-    caps: RawUserSlice<user::Read, librust::capabilities::Capability>,
-) -> SyscallOutcome {
+    frame: &mut TrapFrame,
+) -> Result<(), SyscallError> {
+    let cptr = CapabilityPtr::new(frame.a1);
+    let caps = RawUserSlice::<user::Read, librust::capabilities::Capability>::new(VirtualAddress::new(frame.a2), frame.a3);
+    let contents = [
+        frame.t0,
+        frame.t1,
+        frame.t2,
+        frame.t3,
+        frame.t4,
+        frame.t5,
+        frame.t6,
+    ];
+
     let current_tid = task.tid;
     let channel_id = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
@@ -211,7 +172,7 @@ pub fn send_message(
         {
             *channel
         }
-        _ => return SyscallOutcome::Err(SyscallError::InvalidArgument(0)),
+        _ => return Err(SyscallError::InvalidArgument(0)),
     };
 
     // Fixup caps here so we can error on any invalid caps/slice and not dealloc
@@ -221,7 +182,7 @@ pub fn send_message(
         _ => {
             let cap_slice = match unsafe { caps.validate(&task.memory_manager) } {
                 Ok(cap_slice) => cap_slice,
-                Err(_) => return SyscallOutcome::Err(SyscallError::InvalidArgument(3)),
+                Err(_) => return Err(SyscallError::InvalidArgument(3)),
             };
 
             let cap_slice = cap_slice.guarded();
@@ -238,7 +199,7 @@ pub fn send_message(
 
             match transferred_caps {
                 Ok(caps) => caps,
-                Err(e) => return SyscallOutcome::Err(e),
+                Err(e) => return Err(e),
             }
         }
     };
@@ -249,11 +210,11 @@ pub fn send_message(
         Some(MappedChannelMessage::Synthesized(range)) => range,
         // For now we don't allow sending back received messages, but maybe that
         // should be allowed even if its not useful?
-        _ => return SyscallOutcome::Err(SyscallError::InvalidArgument(1)),
+        _ => return Err(SyscallError::InvalidArgument(1)),
     };
 
     if range.end.as_usize() - range.start.as_usize() < len {
-        return SyscallOutcome::Err(SyscallError::InvalidArgument(2));
+        return Err(SyscallError::InvalidArgument(2));
     }
 
     let backing = match task.memory_manager.dealloc_region(range.start) {
@@ -273,21 +234,21 @@ pub fn send_message(
         .message_queue
         .push(librust::message::Sender::kernel(), KernelNotification::NewChannelMessage(other_cptr).into());
 
-    SyscallOutcome::Processed(librust::message::Message::default())
+    Processed(librust::message::Message::default())
 }
 
 pub fn read_message(
     task: &mut Task,
     cptr: CapabilityPtr,
     cap_buffer: RawUserSlice<user::ReadWrite, librust::capabilities::Capability>,
-) -> SyscallOutcome {
+) -> Result<(), SyscallError> {
     let channel_id = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::READ =>
         {
             channel
         }
-        _ => return SyscallOutcome::Err(SyscallError::InvalidArgument(0)),
+        _ => return Err(SyscallError::InvalidArgument(0)),
     };
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
@@ -306,7 +267,7 @@ pub fn read_message(
                 log::debug!("Waking task {:?} (TID: {:?}) for channel::read_message!", task.name, task.tid.value());
                 let res = read_message(task, cptr, cap_buffer);
                 match res {
-                    SyscallOutcome::Processed(message) => super::apply_message(
+                    Processed(message) => super::apply_message(
                         false,
                         librust::message::Sender::kernel(),
                         message,
@@ -316,7 +277,7 @@ pub fn read_message(
                 }
             }));
 
-            SyscallOutcome::Block
+            Block
         }
         Some(ChannelMessage { data, mut caps }) => {
             let mut message_id = MessageId::new(0);
@@ -346,7 +307,7 @@ pub fn read_message(
                 len => {
                     let cap_slice = match unsafe { cap_buffer.validate(&task.memory_manager) } {
                         Ok(cap_slice) => cap_slice,
-                        Err(_) => return SyscallOutcome::Err(SyscallError::InvalidArgument(3)),
+                        Err(_) => return Err(SyscallError::InvalidArgument(3)),
                     };
 
                     let n_caps_to_write = len.min(caps.len());
@@ -363,7 +324,7 @@ pub fn read_message(
                 receiver.push_front(ChannelMessage { data: None, caps });
             }
 
-            SyscallOutcome::processed((message_id.value(), region.start.as_usize(), len, caps_written, caps_remaining))
+            processed((message_id.value(), region.start.as_usize(), len, caps_written, caps_remaining))
         }
     }
 }
@@ -372,14 +333,14 @@ pub fn read_message_nb(
     task: &mut Task,
     cptr: CapabilityPtr,
     cap_buffer: RawUserSlice<user::ReadWrite, librust::capabilities::Capability>,
-) -> SyscallOutcome {
+) -> Result<(), SyscallError> {
     let channel_id = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::READ =>
         {
             channel
         }
-        _ => return SyscallOutcome::Err(SyscallError::InvalidArgument(0)),
+        _ => return Err(SyscallError::InvalidArgument(0)),
     };
     let (_, channel) = task.channels.get_mut(channel_id).unwrap();
 
@@ -391,7 +352,7 @@ pub fn read_message_nb(
 
     let mut receiver = channel.receiver.inner.write();
     match receiver.pop_front() {
-        None => SyscallOutcome::processed((0, 0, 0, 0, 0)),
+        None => processed((0, 0, 0, 0, 0)),
         Some(ChannelMessage { data, mut caps }) => {
             let mut message_id = MessageId::new(0);
             let mut region = VirtualAddress::new(0)..VirtualAddress::new(0);
@@ -420,7 +381,7 @@ pub fn read_message_nb(
                 len => {
                     let cap_slice = match unsafe { cap_buffer.validate(&task.memory_manager) } {
                         Ok(cap_slice) => cap_slice,
-                        Err(_) => return SyscallOutcome::Err(SyscallError::InvalidArgument(3)),
+                        Err(_) => return Err(SyscallError::InvalidArgument(3)),
                     };
 
                     let n_caps_to_write = len.min(caps.len());
@@ -437,28 +398,8 @@ pub fn read_message_nb(
                 receiver.push_front(ChannelMessage { data: None, caps });
             }
 
-            SyscallOutcome::processed((message_id.value(), region.start.as_usize(), len, caps_written, caps_remaining))
+            processed((message_id.value(), region.start.as_usize(), len, caps_written, caps_remaining))
         }
-    }
-}
-
-pub fn retire_message(task: &mut Task, cptr: CapabilityPtr, message_id: MessageId) -> SyscallOutcome {
-    let channel_id = match task.cspace.resolve(cptr) {
-        Some(Capability { resource: CapabilityResource::Channel(channel), rights })
-            if *rights & CapabilityRights::WRITE =>
-        {
-            channel
-        }
-        _ => return SyscallOutcome::Err(SyscallError::InvalidArgument(0)),
-    };
-    let (_, channel) = task.channels.get_mut(channel_id).unwrap();
-
-    match channel.mapped_regions.remove(&message_id) {
-        Some(MappedChannelMessage::Received { region, .. }) => {
-            task.memory_manager.dealloc_region(region.start);
-            SyscallOutcome::Processed(librust::message::Message::default())
-        }
-        _ => SyscallOutcome::Err(SyscallError::InvalidArgument(1)),
     }
 }
 
