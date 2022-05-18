@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::ipc::ReadChannelMessage;
-use librust::capabilities::Capability;
+use librust::{capabilities::{Capability, CapabilityPtr, CapabilityRights}, syscalls::channel::PARENT_CHANNEL};
 
 #[no_mangle]
 unsafe extern "C" fn _start(argc: isize, argv: *const *const u8, a2: usize) -> ! {
@@ -48,8 +48,8 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize 
     unsafe { ARGS = [argc as usize, argv as usize] };
 
     let mut map = crate::env::CAP_MAP.borrow_mut();
-    let channel = crate::ipc::IpcChannel::new(librust::capabilities::CapabilityPtr::new(0));
-    let mut cap = [Capability::default()];
+    let channel = crate::ipc::IpcChannel::new(PARENT_CHANNEL);
+    let mut cap = [Capability::new(CapabilityPtr::new(0), CapabilityRights::new(0))];
 
     // FIXME: Wowie is this some awful code!
     while let Ok(ReadChannelMessage { message: msg, .. }) = channel.read(&mut cap[..]) {
@@ -66,7 +66,7 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize 
         map.insert(name.into(), cap[0].cptr);
     }
 
-    map.insert("parent".into(), librust::capabilities::CapabilityPtr::new(0));
+    map.insert("parent".into(), PARENT_CHANNEL);
     drop(map);
 
     main();

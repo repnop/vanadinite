@@ -10,11 +10,11 @@
 pub struct CapabilityPtr(usize);
 
 impl CapabilityPtr {
-    pub fn new(n: usize) -> Self {
+    pub const fn new(n: usize) -> Self {
         Self(n)
     }
 
-    pub fn value(self) -> usize {
+    pub const fn value(self) -> usize {
         self.0
     }
 }
@@ -24,6 +24,7 @@ impl CapabilityPtr {
 pub struct CapabilityRights(usize);
 
 impl CapabilityRights {
+    pub const NONE: Self = Self(0);
     pub const READ: Self = Self(1);
     pub const WRITE: Self = Self(2);
     pub const EXECUTE: Self = Self(4);
@@ -76,11 +77,5 @@ pub struct Capability {
 impl Capability {
     pub fn new(cptr: CapabilityPtr, rights: CapabilityRights) -> Self {
         Self { cptr, rights }
-    }
-}
-
-impl Default for Capability {
-    fn default() -> Self {
-        Self { cptr: CapabilityPtr::new(0), rights: CapabilityRights::new(0) }
     }
 }

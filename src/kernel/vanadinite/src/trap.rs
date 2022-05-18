@@ -217,7 +217,10 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
 
             SCHEDULER.schedule()
         }
-        Trap::UserModeEnvironmentCall => syscall::handle(regs, sepc),
+        Trap::UserModeEnvironmentCall => match syscall::handle(regs, sepc) {
+            syscall::Outcome::Completed => sepc + 4,
+            syscall::Outcome::Blocked => SCHEDULER.schedule(),
+        },
         Trap::SupervisorExternalInterrupt => {
             // FIXME: there has to be a better way
             if let Some(plic) = &*PLIC.lock() {

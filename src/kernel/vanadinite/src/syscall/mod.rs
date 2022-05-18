@@ -6,12 +6,13 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod channel;
+pub mod io;
 pub mod mem;
 pub mod misc;
 pub mod vmspace;
 
 use librust::{syscalls::Syscall, error::SyscallError};
-use crate::{trap::TrapFrame, scheduler::{SCHEDULER, Scheduler}, task::TaskState, mem::paging::VirtualAddress};
+use crate::{trap::{TrapFrame}, scheduler::{SCHEDULER, Scheduler}, task::TaskState, mem::paging::VirtualAddress};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -24,10 +25,12 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> Outcome {
     let mut task_lock = task_lock.lock();
     let task = &mut *task_lock;
 
-    let syscall = match Syscall::from_usize(frame.registers.a0) {
+    let mut regs = &mut frame.registers;
+
+    let syscall = match Syscall::from_usize(regs.a0) {
         Some(syscall) => syscall,
         None => {
-            frame.registers.a0 = usize::from(SyscallError::UnknownSyscall);
+            regs.a0 = usize::from(SyscallError::UnknownSyscall);
             return Outcome::Completed;
         }
     };
@@ -39,14 +42,38 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> Outcome {
             drop(task_lock);
             SCHEDULER.schedule();
         }
-        Syscall::DebugPrint => misc::print(task, VirtualAddress::new(frame.registers.a1), frame.registers.a2),
-        Syscall::AllocDmaMemory => mem::alloc_dma_memory(task, frame),
-        Syscall::AllocVirtualMemory => mem::alloc_virtual_memory(task, frame),
+        Syscall::GetTid => {
+            regs.a1 = task.tid.value();
+            Ok(())
+        },
+        Syscall::DebugPrint => misc::print(task, VirtualAddress::new(regs.a1), regs.a2),
+        Syscall::AllocDmaMemory => mem::alloc_dma_memory(task, regs),
+        Syscall::AllocVirtualMemory => mem::alloc_virtual_memory(task, regs),
+        Syscall::ClaimDevice => io::claim_device(task, regs),
+        Syscall::CompleteInterrupt => todo!(),
+        Syscall::CreateVmspace => vmspace::create_vmspace(task, regs),
+        Syscall::AllocVmspaceObject => vmspace::alloc_vmspace_object(task, regs),
+        Syscall::SpawnVmspace => vmspace::spawn_vmspace(task, regs),
+        Syscall::QueryMemoryCapability => mem::query_mem_cap(task, regs),
+        Syscall::QueryMmioCapability => mem::query_mmio_cap(task, regs),
+        Syscall::ReadChannel => match channel::read_message(task, regs) {
+            Ok(Outcome::Blocked) => {
+                let tid = task.tid;
+                drop(task_lock);
+                SCHEDULER.block(tid);
+                return Outcome::Blocked;
+            },
+            Ok(Outcome::Completed) => Ok(()),
+            Err(e) => Err(e),
+        },
+        Syscall::WriteChannel => channel::send_message(task, regs),
+        Syscall::MintCapability => todo!(),
+        Syscall::RevokeCapability => todo!(),
     };
 
     match res {
-        Ok(()) => frame.a0 = 0,
-        Err(e) => frame.a0 = usize::from(e),
+        Ok(()) => regs.a0 = 0,
+        Err(e) => regs.a0 = usize::from(e),
     }
 
     Outcome::Completed

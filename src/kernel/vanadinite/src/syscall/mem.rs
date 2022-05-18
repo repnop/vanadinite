@@ -12,7 +12,7 @@ use crate::{
         paging::{flags, PageSize, VirtualAddress}, user::{RawUserSlice, ValidatedUserSlice, ReadWrite},
     },
     task::Task,
-    utils, trap::TrapFrame,
+    utils, trap::{GeneralRegisters},
 };
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
@@ -21,7 +21,7 @@ use librust::{
 
 pub fn alloc_virtual_memory(
     task: &mut Task,
-    frame: &mut TrapFrame,
+    frame: &mut GeneralRegisters,
 ) -> Result<(), SyscallError> {
     let size = frame.a1;
     let options = AllocationOptions::new(frame.a2);
@@ -70,7 +70,7 @@ pub fn alloc_virtual_memory(
     }
 }
 
-pub fn alloc_dma_memory(task: &mut Task, frame: &mut TrapFrame) -> Result<(), SyscallError> {
+pub fn alloc_dma_memory(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let size = frame.a1;
     let options = DmaAllocationOptions::new(frame.a2);
     let page_size = PageSize::Kilopage;
@@ -105,7 +105,7 @@ pub fn alloc_dma_memory(task: &mut Task, frame: &mut TrapFrame) -> Result<(), Sy
     }
 }
 
-pub fn query_mem_cap(task: &mut Task, frame: &mut TrapFrame) -> Result<(), SyscallError> {
+pub fn query_mem_cap(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let cptr = CapabilityPtr::new(frame.a1);
 
     match task.cspace.resolve(cptr) {
@@ -125,20 +125,20 @@ pub fn query_mem_cap(task: &mut Task, frame: &mut TrapFrame) -> Result<(), Sysca
     }
 }
 
-pub fn query_mmio_cap(task: &mut Task, frame: &mut TrapFrame) -> Result<(), SyscallError> {
+pub fn query_mmio_cap(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let cptr = CapabilityPtr::new(frame.a1);
     let buffer_ptr = VirtualAddress::new(frame.a2);
     let buffer_len = frame.a3;
     let buffer: ValidatedUserSlice<ReadWrite, usize> = match unsafe { RawUserSlice::new(buffer_ptr, buffer_len).validate(&task.memory_manager) } {
         Ok(slice) => slice,
         Err((_, e)) => {
-            log::debug!("Bad interrupt buffer @ {:#p}: {}", buffer_ptr, e);
+            log::debug!("Bad interrupt buffer @ {:#p}: {:?}", buffer_ptr, e);
             return Err(SyscallError::InvalidArgument(1));
         }
     };
 
     match task.cspace.resolve(cptr) {
-        Some(Capability { resource: CapabilityResource::Mmio(vmem, interrupts), rights }) => {
+        Some(Capability { resource: CapabilityResource::Mmio(_, vmem, interrupts), rights }) => {
             let memory_perms = match (*rights & CapabilityRights::READ, *rights & CapabilityRights::WRITE) {
                 (true, true) => MemoryPermissions::READ | MemoryPermissions::WRITE,
                 (true, false) => MemoryPermissions::READ,

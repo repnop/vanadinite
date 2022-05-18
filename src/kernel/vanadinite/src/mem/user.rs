@@ -230,7 +230,7 @@ pub struct ValidatedUserSlice<Mode: UserPtrMode, T> {
     mode: PhantomData<Mode>,
 }
 
-impl<Mode, T> ValidatedUserSlice<Mode, T> {
+impl<Mode: UserPtrMode, T> ValidatedUserSlice<Mode, T> {
     pub fn len(&self) -> usize {
         self.len
     }

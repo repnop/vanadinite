@@ -107,3 +107,46 @@ pub fn read_message(
         None => Ok((ChannelMessage(message), read_caps, remaining_caps)),
     }
 }
+
+pub const KERNEL_CHANNEL: CapabilityPtr = CapabilityPtr::new(0);
+pub const PARENT_CHANNEL: CapabilityPtr = CapabilityPtr::new(1);
+
+pub const KMSG_INTERRUPT_OCCURRED: usize = 0;
+pub const KMSG_NEW_CHANNEL_MESSAGE: usize = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum KernelMessage {
+    InterruptOccurred(usize),
+    NewChannelMessage(CapabilityPtr),
+}
+
+impl KernelMessage {
+    pub const fn into_parts(self) -> [usize; 7] {
+        match self {
+            Self::InterruptOccurred(n) => [
+                KMSG_INTERRUPT_OCCURRED,
+                n,
+                0,
+                0, 0, 0, 0
+            ],
+            Self::NewChannelMessage(cptr) => [
+                KMSG_NEW_CHANNEL_MESSAGE,
+                cptr.value(),
+                0,
+                0, 0, 0, 0
+            ],
+        }
+    }
+
+    pub const fn construct(parts: [usize; 7]) -> Self {
+        match parts[0] {
+            KMSG_INTERRUPT_OCCURRED => Self::InterruptOccurred(parts[1]),
+            KMSG_NEW_CHANNEL_MESSAGE => Self::NewChannelMessage(CapabilityPtr::new(parts[1])),
+            _ => unreachable!(),
+        }
+    }
+}
+
+pub fn read_kernel_message() -> KernelMessage {
+    KernelMessage::construct(read_message(KERNEL_CHANNEL, &mut [], ChannelReadFlags::NONE).unwrap().0.0)
+}

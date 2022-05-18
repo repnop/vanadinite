@@ -7,7 +7,6 @@
 
 use super::{mem::MemoryPermissions, Syscall};
 use crate::{capabilities::CapabilityPtr, error::{SyscallError, RawSyscallError}, task::Tid};
-use core::num::NonZeroUsize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
@@ -86,7 +85,7 @@ pub fn spawn_vmspace(
     id: VmspaceObjectId,
     name: &str,
     env: VmspaceSpawnEnv,
-) -> Result<(Tid, CapabilityPtr), SyscallError> {
+) -> Result<CapabilityPtr, SyscallError> {
     let error: usize;
     let tid: usize;
     let cptr: usize;
@@ -95,8 +94,8 @@ pub fn spawn_vmspace(
         core::arch::asm!(
             "ecall",
             inlateout("a0") Syscall::SpawnVmspace as usize => error,
-            inlateout("a1") id.value() => tid,
-            inlateout("a2") name.as_ptr() => cptr,
+            inlateout("a1") id.value() => cptr,
+            in("a2") name.as_ptr(),
             in("a3") name.len(),
             in("t0") env.pc,
             in("t1") env.a0,
@@ -109,6 +108,6 @@ pub fn spawn_vmspace(
 
     match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
-        None => Ok((Tid::new(NonZeroUsize::new(tid).unwrap()), CapabilityPtr::new(cptr))),
+        None => Ok(CapabilityPtr::new(cptr)),
     }
 }
