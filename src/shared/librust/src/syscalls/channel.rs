@@ -6,10 +6,12 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    capabilities::{Capability, CapabilityPtr},
+    capabilities::{Capability, CapabilityPtr, CapabilityWithDescription},
     error::{RawSyscallError, SyscallError},
     syscalls::Syscall,
 };
+
+use super::mem::MemoryPermissions;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -74,22 +76,28 @@ pub fn send_message(cptr: CapabilityPtr, message: ChannelMessage, caps: &[Capabi
     }
 }
 
+pub struct ReadResult {
+    pub message: ChannelMessage,
+    pub capabilities_read: usize,
+    pub capabilities_remaining: usize,
+}
+
 pub fn read_message(
     cptr: CapabilityPtr,
-    cap_buffer: &mut [Capability],
+    cap_buffer: &mut [CapabilityWithDescription],
     flags: ChannelReadFlags,
-) -> Result<(ChannelMessage, usize, usize), SyscallError> {
+) -> Result<ReadResult, SyscallError> {
     let error: usize;
-    let read_caps: usize;
-    let remaining_caps: usize;
+    let capabilities_read: usize;
+    let capabilities_remaining: usize;
     let mut message = [0; 7];
 
     unsafe {
         core::arch::asm!(
             "ecall",
             inlateout("a0") Syscall::ReadChannel as usize => error,
-            inlateout("a1") cptr.value() => read_caps,
-            inlateout("a2") cap_buffer.as_mut_ptr() => remaining_caps,
+            inlateout("a1") cptr.value() => capabilities_read,
+            inlateout("a2") cap_buffer.as_mut_ptr() => capabilities_remaining,
             in("a3") cap_buffer.len(),
             in("a4") flags.0,
             lateout("t0") message[0],
@@ -104,7 +112,7 @@ pub fn read_message(
 
     match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
-        None => Ok((ChannelMessage(message), read_caps, remaining_caps)),
+        None => Ok(ReadResult { message: ChannelMessage(message), capabilities_read, capabilities_remaining }),
     }
 }
 
@@ -123,18 +131,8 @@ pub enum KernelMessage {
 impl KernelMessage {
     pub const fn into_parts(self) -> [usize; 7] {
         match self {
-            Self::InterruptOccurred(n) => [
-                KMSG_INTERRUPT_OCCURRED,
-                n,
-                0,
-                0, 0, 0, 0
-            ],
-            Self::NewChannelMessage(cptr) => [
-                KMSG_NEW_CHANNEL_MESSAGE,
-                cptr.value(),
-                0,
-                0, 0, 0, 0
-            ],
+            Self::InterruptOccurred(n) => [KMSG_INTERRUPT_OCCURRED, n, 0, 0, 0, 0, 0],
+            Self::NewChannelMessage(cptr) => [KMSG_NEW_CHANNEL_MESSAGE, cptr.value(), 0, 0, 0, 0, 0],
         }
     }
 
@@ -147,6 +145,12 @@ impl KernelMessage {
     }
 }
 
+impl From<KernelMessage> for [usize; 7] {
+    fn from(km: KernelMessage) -> Self {
+        km.into_parts()
+    }
+}
+
 pub fn read_kernel_message() -> KernelMessage {
-    KernelMessage::construct(read_message(KERNEL_CHANNEL, &mut [], ChannelReadFlags::NONE).unwrap().0.0)
+    KernelMessage::construct(read_message(KERNEL_CHANNEL, &mut [], ChannelReadFlags::NONE).unwrap().message.0)
 }

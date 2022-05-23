@@ -6,19 +6,17 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    io::{ConsoleDevice},
+    io::ConsoleDevice,
     mem::{paging::VirtualAddress, user::RawUserSlice},
     task::Task,
 };
-use librust::{
-    error::{SyscallError},
-};
+use librust::error::SyscallError;
 
-pub fn print(task: &mut Task, start: VirtualAddress, len: usize)-> Result<(), SyscallError> {
+pub fn print(task: &mut Task, start: VirtualAddress, len: usize) -> Result<(), SyscallError> {
     let user_slice = RawUserSlice::readable(start, len);
     let user_slice = match unsafe { user_slice.validate(&task.memory_manager) } {
         Ok(slice) => slice,
-        Err((addr, e)) => {
+        Err((_, e)) => {
             log::error!("Bad memory from process: {:?}", e);
             return Err(SyscallError::InvalidArgument(0));
         }

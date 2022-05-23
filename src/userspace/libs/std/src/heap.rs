@@ -13,6 +13,7 @@ use core::{
 };
 use librust::{
     syscalls::mem::{self, AllocationOptions, MemoryPermissions},
+    units::Bytes,
 };
 
 #[derive(Clone, Copy)]
@@ -79,14 +80,14 @@ impl TaskLocalAllocator {
 
             let mem_size = slab.0 * 64;
             let perms = MemoryPermissions::READ | MemoryPermissions::WRITE;
-            let mut options = AllocationOptions::NONE;
+            let mut options = AllocationOptions::PRIVATE;
 
             if mem_size >= 2 * 1024 * 1024 {
                 //println!("Asking for large pages");
                 options = options | AllocationOptions::LARGE_PAGE;
             }
 
-            let new_mem = match mem::alloc_virtual_memory(mem_size, options, perms) {
+            let (_, new_mem) = match mem::alloc_virtual_memory(Bytes(mem_size), options, perms) {
                 Result::Ok(new_mem) => new_mem,
                 Result::Err(_) => return Err(AllocError),
             };
@@ -94,17 +95,17 @@ impl TaskLocalAllocator {
             //println!("New mem is at {:#p}", new_mem);
 
             for i in 0..63 {
-                let curr = unsafe { new_mem.add(i * slab.0).cast::<usize>() };
-                let next = unsafe { new_mem.add((i + 1) * slab.0) };
+                let curr = unsafe { new_mem.cast::<u8>().add(i * slab.0).cast::<usize>() };
+                let next = unsafe { new_mem.cast::<u8>().add((i + 1) * slab.0) };
 
                 //println!("Setting {:#p} to point to {:#p}", curr, next);
 
                 unsafe { *curr = next as usize };
             }
 
-            unsafe { *new_mem.add(63 * slab.0).cast::<usize>() = 0 };
+            unsafe { *new_mem.cast::<u8>().add(63 * slab.0).cast::<usize>() = 0 };
 
-            slab_head = new_mem;
+            slab_head = new_mem.cast::<u8>();
         }
 
         let next_ptr = unsafe { *slab_head.cast::<usize>() } as *mut u8;

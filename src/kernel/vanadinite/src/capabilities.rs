@@ -5,12 +5,20 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{mem::{manager::AddressRegionKind, paging::{VirtualAddress, PhysicalAddress}, region::SharedPhysicalRegion}, syscall::channel::UserspaceChannel};
+use crate::{
+    mem::{
+        manager::AddressRegionKind,
+        paging::{PhysicalAddress, VirtualAddress},
+        region::SharedPhysicalRegion,
+    },
+    syscall::channel::UserspaceChannel,
+};
 use alloc::collections::BTreeMap;
 use core::ops::Range;
-use librust::{
-    capabilities::{CapabilityPtr, CapabilityRights},
-};
+use librust::capabilities::{CapabilityPtr, CapabilityRights};
+
+#[derive(Debug, Clone, Copy)]
+pub struct Occupied;
 
 pub struct CapabilitySpace {
     inner: BTreeMap<CapabilityPtr, Capability>,
@@ -25,9 +33,9 @@ impl CapabilitySpace {
     // caps? unsure
     /// Mint a new capability with the given [`CapabilityPtr`] value. Returns
     /// `Err(())` if the [`CapabilityPtr`] value already exists.
-    pub fn mint_with_id(&mut self, cptr: CapabilityPtr, capability: Capability) -> Result<(), ()> {
+    pub fn mint_with_id(&mut self, cptr: CapabilityPtr, capability: Capability) -> Result<(), Occupied> {
         match self.inner.get(&cptr).is_some() {
-            true => return Err(()),
+            true => Err(Occupied),
             false => {
                 self.inner.insert(cptr, capability);
                 Ok(())

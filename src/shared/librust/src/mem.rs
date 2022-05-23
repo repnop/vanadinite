@@ -6,10 +6,52 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    capabilities::CapabilityPtr,
     error::SyscallError,
-    syscalls::mem::{alloc_dma_memory, DmaAllocationOptions},
+    syscalls::mem::{alloc_dma_memory, AllocationOptions, DmaAllocationOptions, MemoryPermissions},
+    units::Bytes,
 };
-use core::{mem::MaybeUninit, ptr::Pointee};
+use core::{
+    mem::MaybeUninit,
+    ptr::{NonNull, Pointee},
+};
+
+pub struct MemoryAllocation {
+    pub cptr: CapabilityPtr,
+    pub ptr: NonNull<[u8]>,
+}
+
+impl MemoryAllocation {
+    pub fn new(size: Bytes, options: AllocationOptions, permissions: MemoryPermissions) -> Result<Self, SyscallError> {
+        let (cptr, ptr) = crate::syscalls::mem::alloc_virtual_memory(size, options, permissions)?;
+
+        Ok(Self {
+            cptr,
+            // SAFETY: The kernel will never return us a null pointer if the
+            // syscall succeeds
+            ptr: unsafe { NonNull::new_unchecked(ptr) },
+        })
+    }
+
+    pub fn public_rw(size: Bytes) -> Result<Self, SyscallError> {
+        Self::new(size, AllocationOptions::NONE, MemoryPermissions::READ | MemoryPermissions::WRITE)
+    }
+
+    pub fn private_rw(size: Bytes) -> Result<Self, SyscallError> {
+        Self::new(size, AllocationOptions::PRIVATE, MemoryPermissions::READ | MemoryPermissions::WRITE).map(|mut s| {
+            s.cptr = CapabilityPtr::new(usize::MAX);
+            s
+        })
+    }
+
+    pub unsafe fn as_mut(&mut self) -> &mut [u8] {
+        self.ptr.as_mut()
+    }
+
+    pub unsafe fn as_ref(&self) -> &[u8] {
+        self.ptr.as_ref()
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum FenceMode {

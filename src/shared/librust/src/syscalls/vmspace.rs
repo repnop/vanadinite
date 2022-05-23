@@ -6,7 +6,10 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{mem::MemoryPermissions, Syscall};
-use crate::{capabilities::CapabilityPtr, error::{SyscallError, RawSyscallError}, task::Tid};
+use crate::{
+    capabilities::CapabilityPtr,
+    error::{RawSyscallError, SyscallError},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
@@ -81,13 +84,8 @@ pub struct VmspaceSpawnEnv {
     pub tp: usize,
 }
 
-pub fn spawn_vmspace(
-    id: VmspaceObjectId,
-    name: &str,
-    env: VmspaceSpawnEnv,
-) -> Result<CapabilityPtr, SyscallError> {
+pub fn spawn_vmspace(id: VmspaceObjectId, name: &str, env: VmspaceSpawnEnv) -> Result<CapabilityPtr, SyscallError> {
     let error: usize;
-    let tid: usize;
     let cptr: usize;
 
     unsafe {

@@ -8,7 +8,7 @@
 use core::num::NonZeroUsize;
 
 use crate::{
-    capabilities::{CapabilitySpace, Capability, CapabilityResource},
+    capabilities::{Capability, CapabilityResource, CapabilitySpace},
     mem::{
         manager::{AddressRegionKind, FillOption, MemoryManager, RegionDescription},
         paging::{
@@ -17,7 +17,7 @@ use crate::{
         },
     },
     platform::FDT,
-    syscall::{vmspace::VmspaceObject, channel::UserspaceChannel},
+    syscall::{channel::UserspaceChannel, vmspace::VmspaceObject},
     trap::{FloatingPointRegisters, GeneralRegisters},
     utils::{round_up_to_next, Units},
 };
@@ -29,8 +29,9 @@ use alloc::{
 use elf64::{Elf, ProgramSegmentType, Relocation};
 use fdt::Fdt;
 use librust::{
-    syscalls::{vmspace::VmspaceObjectId, channel::KERNEL_CHANNEL},
-    task::Tid, capabilities::{CapabilityPtr, CapabilityRights},
+    capabilities::{CapabilityPtr, CapabilityRights},
+    syscalls::{channel::KERNEL_CHANNEL, vmspace::VmspaceObjectId},
+    task::Tid,
 };
 
 #[derive(Debug)]
@@ -98,8 +99,7 @@ impl Task {
         I: Iterator<Item = &'a str> + Clone,
     {
         let mut memory_manager = MemoryManager::new();
-
-        let cspace = CapabilitySpace::new();
+        let mut cspace = CapabilitySpace::new();
 
         let relocations = elf
             .relocations()
@@ -334,10 +334,12 @@ impl Task {
         };
 
         let (kernel_channel, user_read) = UserspaceChannel::new();
-        cspace.mint_with_id(KERNEL_CHANNEL, Capability {
-            resource: CapabilityResource::Channel(user_read),
-            rights: CapabilityRights::READ,
-        }).expect("[BUG] parent channel cap already created?");
+        cspace
+            .mint_with_id(
+                KERNEL_CHANNEL,
+                Capability { resource: CapabilityResource::Channel(user_read), rights: CapabilityRights::READ },
+            )
+            .expect("[BUG] parent channel cap already created?");
 
         Self {
             tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),

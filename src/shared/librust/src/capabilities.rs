@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::syscalls::mem::MemoryPermissions;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct CapabilityPtr(usize);
@@ -77,5 +79,33 @@ pub struct Capability {
 impl Capability {
     pub fn new(cptr: CapabilityPtr, rights: CapabilityRights) -> Self {
         Self { cptr, rights }
+    }
+}
+
+impl Default for Capability {
+    fn default() -> Self {
+        Self { cptr: CapabilityPtr(usize::MAX), rights: CapabilityRights::NONE }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
+pub struct CapabilityWithDescription {
+    pub capability: Capability,
+    pub description: CapabilityDescription,
+}
+
+// FIXME: perhaps use a safer representation? hmm
+#[derive(Debug, Clone, Copy)]
+#[repr(C, usize)]
+pub enum CapabilityDescription {
+    Channel,
+    Memory { ptr: *mut u8, len: usize, permissions: MemoryPermissions },
+    MappedMmio { ptr: *mut u8, len: usize, n_interrupts: usize },
+}
+
+impl Default for CapabilityDescription {
+    fn default() -> Self {
+        Self::Channel
     }
 }

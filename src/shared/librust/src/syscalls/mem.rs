@@ -5,11 +5,12 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Syscall};
+use super::Syscall;
 use crate::{
     capabilities::CapabilityPtr,
     error::{RawSyscallError, SyscallError},
     mem::PhysicalAddress,
+    units::Bytes,
 };
 
 pub fn query_memory_capability(cptr: CapabilityPtr) -> Result<(*mut u8, usize, MemoryPermissions), SyscallError> {
@@ -60,6 +61,12 @@ impl core::ops::BitOr for MemoryPermissions {
     }
 }
 
+impl core::ops::BitOrAssign for MemoryPermissions {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
 impl core::ops::BitAnd for MemoryPermissions {
     type Output = bool;
 
@@ -79,6 +86,7 @@ impl AllocationOptions {
     pub const ZERO_ON_DROP: Self = Self(1 << 2);
     pub const LAZY: Self = Self(1 << 3);
     pub const JOB_GROUP_AVAILABLE: Self = Self(1 << 4);
+    pub const PRIVATE: Self = Self(1 << 5);
 
     pub fn new(flags: usize) -> Self {
         Self(flags)
@@ -105,29 +113,30 @@ impl core::ops::BitAnd for AllocationOptions {
     }
 }
 
-// TODO: return `*mut [u8]`?
 #[inline]
 pub fn alloc_virtual_memory(
-    size_in_bytes: usize,
+    size: Bytes,
     options: AllocationOptions,
     perms: MemoryPermissions,
-) -> Result<*mut u8, SyscallError> {
+) -> Result<(CapabilityPtr, *mut [u8]), SyscallError> {
     let error: usize;
     let virt: *mut u8;
+    let real_size: usize;
+    let cptr: usize;
 
     unsafe {
         core::arch::asm!(
             "ecall",
             inlateout("a0") Syscall::AllocVirtualMemory as usize => error,
-            inlateout("a1") size_in_bytes => virt,
-            in("a2") options.0,
-            in("a3") perms.0,
+            inlateout("a1") size.0 => cptr,
+            inlateout("a2") options.0 => virt,
+            inlateout("a3") perms.0 => real_size,
         );
     }
 
     match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
-        None => Ok(virt),
+        None => Ok((CapabilityPtr::new(cptr), core::ptr::slice_from_raw_parts_mut(virt, real_size))),
     }
 }
 

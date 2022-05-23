@@ -9,7 +9,7 @@ use core::marker::PhantomData;
 
 use librust::{
     capabilities::{Capability, CapabilityPtr, CapabilityRights},
-    error::{SyscallError},
+    error::SyscallError,
     syscalls::{
         mem::MemoryPermissions,
         vmspace::{self, VmspaceObjectId, VmspaceObjectMapping, VmspaceSpawnEnv},
@@ -47,8 +47,8 @@ impl Vmspace {
         }
     }
 
-    pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<(Tid, CapabilityPtr), SyscallError> {
-        let (tid, cptr) = vmspace::spawn_vmspace(self.id, &self.name, env)?;
+    pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<CapabilityPtr, SyscallError> {
+        let cptr = vmspace::spawn_vmspace(self.id, &self.name, env)?;
 
         let mut channel = crate::ipc::IpcChannel::new(cptr);
 
@@ -63,7 +63,7 @@ impl Vmspace {
         message.write(DONE.as_bytes());
         message.send(&[]).unwrap();
 
-        Ok((tid, cptr))
+        Ok(cptr)
     }
 
     pub fn grant(&mut self, name: &str, cptr: CapabilityPtr, rights: CapabilityRights) {

@@ -11,8 +11,13 @@ pub mod mem;
 pub mod misc;
 pub mod vmspace;
 
-use librust::{syscalls::Syscall, error::SyscallError};
-use crate::{trap::{TrapFrame}, scheduler::{SCHEDULER, Scheduler}, task::TaskState, mem::paging::VirtualAddress};
+use crate::{
+    mem::paging::VirtualAddress,
+    scheduler::{Scheduler, SCHEDULER},
+    task::TaskState,
+    trap::TrapFrame,
+};
+use librust::{error::SyscallError, syscalls::Syscall};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -20,7 +25,7 @@ pub enum Outcome {
     Completed,
 }
 
-pub fn handle(frame: &mut TrapFrame, sepc: usize) -> Outcome {
+pub fn handle(frame: &mut TrapFrame, _: usize) -> Outcome {
     let task_lock = SCHEDULER.active_on_cpu().unwrap();
     let mut task_lock = task_lock.lock();
     let task = &mut *task_lock;
@@ -45,7 +50,7 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> Outcome {
         Syscall::GetTid => {
             regs.a1 = task.tid.value();
             Ok(())
-        },
+        }
         Syscall::DebugPrint => misc::print(task, VirtualAddress::new(regs.a1), regs.a2),
         Syscall::AllocDmaMemory => mem::alloc_dma_memory(task, regs),
         Syscall::AllocVirtualMemory => mem::alloc_virtual_memory(task, regs),
@@ -62,7 +67,7 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> Outcome {
                 drop(task_lock);
                 SCHEDULER.block(tid);
                 return Outcome::Blocked;
-            },
+            }
             Ok(Outcome::Completed) => Ok(()),
             Err(e) => Err(e),
         },

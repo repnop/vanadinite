@@ -14,20 +14,18 @@ use crate::{
     },
     scheduler::{Scheduler, WakeToken, SCHEDULER, TASKS},
     task::Task,
-    HART_ID, trap::GeneralRegisters,
+    trap::GeneralRegisters,
+    HART_ID,
 };
-use alloc::{
-    collections::VecDeque,
-    sync::Arc,
-    vec::Vec,
-};
-use core::{
-    ops::Range,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-};
+use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
+use core::sync::atomic::{AtomicBool, Ordering};
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
-    error::SyscallError, syscalls::channel::ChannelReadFlags,
+    error::SyscallError,
+    syscalls::{
+        channel::{ChannelReadFlags, KernelMessage},
+        mem::MemoryPermissions,
+    },
 };
 use sync::{SpinMutex, SpinRwLock};
 
@@ -39,7 +37,6 @@ pub struct UserspaceChannel {
 
 impl UserspaceChannel {
     pub fn new() -> (Self, Self) {
-        let message_id_counter = Arc::new(AtomicUsize::new(1));
         let (sender1, receiver1) = {
             let message_queue = Arc::new(SpinRwLock::new(VecDeque::new()));
             let alive = Arc::new(AtomicBool::new(true));
@@ -64,10 +61,7 @@ impl UserspaceChannel {
             (sender, receiver)
         };
 
-        let first = Self {
-            sender: sender1,
-            receiver: receiver2,
-        };
+        let first = Self { sender: sender1, receiver: receiver2 };
         let second = Self { sender: sender2, receiver: receiver1 };
 
         (first, second)
@@ -81,11 +75,11 @@ pub struct ChannelMessage {
 }
 
 #[derive(Debug, Clone)]
-struct Receiver {
+pub(super) struct Receiver {
     // FIXME: Replace these with something like a lockfree ring buffer
-    inner: Arc<SpinRwLock<VecDeque<ChannelMessage>>>,
-    alive: Arc<AtomicBool>,
-    wake: Arc<SpinMutex<Option<WakeToken>>>,
+    pub(super) inner: Arc<SpinRwLock<VecDeque<ChannelMessage>>>,
+    pub(super) alive: Arc<AtomicBool>,
+    pub(super) wake: Arc<SpinMutex<Option<WakeToken>>>,
 }
 
 impl Receiver {
@@ -142,23 +136,12 @@ impl Drop for Sender {
     }
 }
 
-pub fn send_message(
-    task: &mut Task,
-    frame: &mut GeneralRegisters,
-) -> Result<(), SyscallError> {
+pub fn send_message(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let cptr = CapabilityPtr::new(frame.a1);
-    let caps = RawUserSlice::<user::Read, librust::capabilities::Capability>::new(VirtualAddress::new(frame.a2), frame.a3);
-    let data = [
-        frame.t0,
-        frame.t1,
-        frame.t2,
-        frame.t3,
-        frame.t4,
-        frame.t5,
-        frame.t6,
-    ];
+    let caps =
+        RawUserSlice::<user::Read, librust::capabilities::Capability>::new(VirtualAddress::new(frame.a2), frame.a3);
+    let data = [frame.t0, frame.t1, frame.t2, frame.t3, frame.t4, frame.t5, frame.t6];
 
-    let current_tid = task.tid;
     let channel = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::WRITE =>
@@ -189,7 +172,16 @@ pub fn send_message(
             let mut cloned_caps = Vec::with_capacity(2);
             for librust::capabilities::Capability { cptr, rights } in cap_slice.iter().copied() {
                 match task.cspace.resolve(cptr) {
-                    Some(cap) if cap.rights.is_superset(rights) && cap.rights & CapabilityRights::GRANT => cloned_caps.push(cap.clone()),
+                    Some(cap) if cap.rights.is_superset(rights) && cap.rights & CapabilityRights::GRANT => {
+                        // Can't allow sending invalid memory permissions
+                        if let CapabilityResource::Memory(..) = &cap.resource {
+                            if cap.rights & CapabilityRights::WRITE && !(cap.rights & CapabilityRights::READ) {
+                                return Err(SyscallError::InvalidArgument(2));
+                            }
+                        }
+
+                        cloned_caps.push(cap.clone())
+                    }
                     _ => return Err(SyscallError::InvalidArgument(2)),
                 }
             }
@@ -204,19 +196,19 @@ pub fn send_message(
     Ok(())
 }
 
-pub fn read_message(
-    task: &mut Task,
-    regs: &mut GeneralRegisters,
-) -> Result<super::Outcome, SyscallError> {
+pub fn read_message(task: &mut Task, regs: &mut GeneralRegisters) -> Result<super::Outcome, SyscallError> {
     let cptr = CapabilityPtr::new(regs.a1);
-    let cap_buffer = RawUserSlice::<user::ReadWrite, librust::capabilities::Capability>::new(VirtualAddress::new(regs.a2), regs.a3);
+    let cap_buffer = RawUserSlice::<user::ReadWrite, librust::capabilities::CapabilityWithDescription>::new(
+        VirtualAddress::new(regs.a2),
+        regs.a3,
+    );
     let flags = ChannelReadFlags::new(regs.a4);
 
     let channel = match task.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::READ =>
         {
-            channel
+            channel.clone()
         }
         _ => return Err(SyscallError::InvalidArgument(0)),
     };
@@ -229,7 +221,7 @@ pub fn read_message(
     let mut receiver = channel.receiver.inner.write();
     let mut wake_lock = channel.receiver.wake.lock();
     match receiver.pop_front() {
-        None if flags & ChannelReadFlags::NONBLOCKING => return Err(SyscallError::WouldBlock),
+        None if flags & ChannelReadFlags::NONBLOCKING => Err(SyscallError::WouldBlock),
         None => {
             log::debug!("Registering wake for channel::read_message");
             SCHEDULER.block(task.tid);
@@ -241,7 +233,7 @@ pub fn read_message(
                     Ok(super::Outcome::Completed) => {
                         regs.a0 = 0;
                         task.context.gp_regs = regs;
-                    },
+                    }
                     _ => todo!("is this even possible?"),
                 }
             }));
@@ -261,27 +253,64 @@ pub fn read_message(
                     let mut cap_slice = cap_slice.guarded();
                     for (target, cap) in cap_slice.iter_mut().zip(caps.drain(..n_caps_to_write)) {
                         let rights = cap.rights;
-                        let cptr = match cap.resource {
-                            CapabilityResource::Channel(channel) => task.cspace.mint(cap),
+                        let (cptr, description) = match cap.resource {
+                            CapabilityResource::Channel(_) => {
+                                (task.cspace.mint(cap), librust::capabilities::CapabilityDescription::Channel)
+                            }
                             CapabilityResource::Memory(region, _, kind) => {
-                                let addr = task.memory_manager.apply_shared_region(None, flags::USER | flags::READ | flags::WRITE, region, kind);
-                                task.cspace.mint(Capability { resource: CapabilityResource::Memory(region, addr, kind), rights })
+                                let mut permissions = MemoryPermissions::new(0);
+
+                                if rights & CapabilityRights::READ {
+                                    permissions |= MemoryPermissions::READ;
+                                }
+
+                                if rights & CapabilityRights::WRITE {
+                                    permissions |= MemoryPermissions::WRITE;
+                                }
+
+                                if rights & CapabilityRights::EXECUTE {
+                                    permissions |= MemoryPermissions::EXECUTE;
+                                }
+
+                                let addr = task.memory_manager.apply_shared_region(
+                                    None,
+                                    flags::USER | flags::READ | flags::WRITE,
+                                    region.clone(),
+                                    kind,
+                                );
+
+                                let cptr = task.cspace.mint(Capability {
+                                    resource: CapabilityResource::Memory(region, addr.clone(), kind),
+                                    rights,
+                                });
+
+                                (
+                                    cptr,
+                                    librust::capabilities::CapabilityDescription::Memory {
+                                        ptr: addr.start.as_mut_ptr(),
+                                        len: addr.end.as_usize() - addr.start.as_usize(),
+                                        permissions,
+                                    },
+                                )
                             }
                             CapabilityResource::Mmio(phys, _, interrupts) => {
                                 // FIXME: check if this device has already been mapped
-                                let virt = unsafe { task.memory_manager.map_mmio_device(phys.start, None, phys.end.as_usize() - phys.start.as_usize()) };
+                                let virt = unsafe {
+                                    task.memory_manager.map_mmio_device(
+                                        phys.start,
+                                        None,
+                                        phys.end.as_usize() - phys.start.as_usize(),
+                                    )
+                                };
 
                                 let plic = PLIC.lock();
                                 let plic = plic.as_ref().unwrap();
                                 let tid = task.tid;
-                                for interrupt in interrupts {
+                                let n_interrupts = interrupts.len();
+                                for interrupt in interrupts.iter().copied() {
                                     // FIXME: This is copy/pasted from the `ClaimDevice` syscall, maybe
                                     // refactor them both out to a function or something?
-                                    log::debug!(
-                                        "Reregistering interrupt {} to task {}",
-                                        interrupt,
-                                        task.name,
-                                    );
+                                    log::debug!("Reregistering interrupt {} to task {}", interrupt, task.name,);
                                     plic.enable_interrupt(crate::platform::current_plic_context(), interrupt);
                                     plic.set_context_threshold(crate::platform::current_plic_context(), 0);
                                     plic.set_interrupt_priority(interrupt, 7);
@@ -290,16 +319,27 @@ pub fn read_message(
                                         let task = TASKS.get(tid).unwrap();
                                         let mut task = task.lock();
 
-                                        log::debug!("Interrupt {} triggered (hart: {}), notifying task {}", id, HART_ID.get(), task.name);
+                                        log::debug!(
+                                            "Interrupt {} triggered (hart: {}), notifying task {}",
+                                            id,
+                                            HART_ID.get(),
+                                            task.name
+                                        );
 
                                         task.claimed_interrupts.insert(id, HART_ID.get());
 
                                         // FIXME: not sure if this is entirely correct..
-                                        let send_lock = task.kernel_channel.sender.inner.write();
-                                        send_lock.push_back(ChannelMessage { data: Into::into(KernelMessage::InterruptOccurred(id)), caps: Vec::new() });
-                                        if let Some(token) = task.kernel_channel.sender.wake.lock().take() {
-                                            drop(task);
+                                        let mut send_lock = task.kernel_channel.sender.inner.write();
+                                        send_lock.push_back(ChannelMessage {
+                                            data: Into::into(KernelMessage::InterruptOccurred(id)),
+                                            caps: Vec::new(),
+                                        });
+
+                                        let token = task.kernel_channel.sender.wake.lock().take();
+
+                                        if let Some(token) = token {
                                             drop(send_lock);
+                                            drop(task);
                                             SCHEDULER.unblock(token);
                                         }
 
@@ -307,11 +347,26 @@ pub fn read_message(
                                     });
                                 }
 
-                                task.cspace.mint(Capability { resource: CapabilityResource::Mmio(phys, virt, interrupts), rights })
+                                let cptr = task.cspace.mint(Capability {
+                                    resource: CapabilityResource::Mmio(phys.clone(), virt.clone(), interrupts),
+                                    rights,
+                                });
+
+                                (
+                                    cptr,
+                                    librust::capabilities::CapabilityDescription::MappedMmio {
+                                        ptr: virt.start.as_mut_ptr(),
+                                        len: phys.end.as_usize() - phys.start.as_usize(),
+                                        n_interrupts,
+                                    },
+                                )
                             }
                         };
 
-                        *target = librust::capabilities::Capability { cptr, rights };
+                        *target = librust::capabilities::CapabilityWithDescription {
+                            capability: librust::capabilities::Capability { cptr, rights },
+                            description,
+                        };
                     }
 
                     (n_caps_to_write, caps.len())

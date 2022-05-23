@@ -5,8 +5,10 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::ipc::ReadChannelMessage;
-use librust::{capabilities::{Capability, CapabilityPtr, CapabilityRights}, syscalls::channel::PARENT_CHANNEL};
+use librust::{
+    capabilities::{Capability, CapabilityPtr, CapabilityRights},
+    syscalls::channel::PARENT_CHANNEL,
+};
 
 #[no_mangle]
 unsafe extern "C" fn _start(argc: isize, argv: *const *const u8, a2: usize) -> ! {
@@ -53,7 +55,7 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize 
 
     // FIXME: Wowie is this some awful code!
     while let Ok(ReadChannelMessage { message: msg, .. }) = channel.read(&mut cap[..]) {
-        let _ = librust::syscalls::receive_message();
+        let _ = librust::syscalls::channel::read_kernel_message();
         let name = match core::str::from_utf8(msg.as_bytes()) {
             Ok(name) => name,
             Err(_) => break,

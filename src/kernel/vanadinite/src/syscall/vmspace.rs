@@ -17,14 +17,14 @@ use crate::{
     scheduler::{Scheduler, SCHEDULER},
     syscall::channel::UserspaceChannel,
     task::{Context, Task},
-    trap::{GeneralRegisters},
+    trap::GeneralRegisters,
     utils::{self, Units},
 };
 use alloc::{collections::BTreeMap, vec::Vec};
 use librust::{
-    capabilities::{CapabilityRights, CapabilityPtr},
-    error::{SyscallError},
-    syscalls::{mem::MemoryPermissions, vmspace::VmspaceObjectId, channel::KERNEL_CHANNEL},
+    capabilities::{CapabilityPtr, CapabilityRights},
+    error::SyscallError,
+    syscalls::{channel::KERNEL_CHANNEL, mem::MemoryPermissions, vmspace::VmspaceObjectId},
     task::Tid,
 };
 
@@ -49,10 +49,7 @@ pub fn create_vmspace(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(
     Ok(())
 }
 
-pub fn alloc_vmspace_object(
-    task: &mut Task,
-    frame: &mut GeneralRegisters,
-) -> Result<(), SyscallError> {
+pub fn alloc_vmspace_object(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let id = frame.a1;
     let address = VirtualAddress::new(frame.a2);
     let size = frame.a3;
@@ -128,12 +125,7 @@ pub fn alloc_vmspace_object(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn spawn_vmspace(
-    task: &mut Task,
-    frame: &mut GeneralRegisters,
-) -> Result<(), SyscallError> {
-    let current_tid = task.tid;
-
+pub fn spawn_vmspace(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let id: VmspaceObjectId = VmspaceObjectId::new(frame.a1);
     let name: VirtualAddress = VirtualAddress::new(frame.a2);
     let len: usize = frame.a3;
@@ -152,7 +144,7 @@ pub fn spawn_vmspace(
     let user_slice = RawUserSlice::readable(name, len);
     let user_slice = match unsafe { user_slice.validate(&task.memory_manager) } {
         Ok(slice) => slice,
-        Err((addr, e)) => {
+        Err((_, e)) => {
             log::error!("Bad memory from process: {:?}", e);
             return Err(SyscallError::InvalidArgument(1));
         }
@@ -198,15 +190,24 @@ pub fn spawn_vmspace(
 
     let (channel1, channel2) = UserspaceChannel::new();
 
-    new_task.cspace.mint_with_id(KERNEL_CHANNEL, Capability {
-        resource: CapabilityResource::Channel(user_read),
-        rights: CapabilityRights::READ,
-    }).expect("[BUG] parent channel cap already created?");
+    new_task
+        .cspace
+        .mint_with_id(
+            KERNEL_CHANNEL,
+            Capability { resource: CapabilityResource::Channel(user_read), rights: CapabilityRights::READ },
+        )
+        .expect("[BUG] parent channel cap already created?");
 
-    new_task.cspace.mint_with_id(CapabilityPtr::new(1), Capability {
-        resource: CapabilityResource::Channel(channel2),
-        rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
-    }).expect("[BUG] parent channel cap already created?");
+    new_task
+        .cspace
+        .mint_with_id(
+            CapabilityPtr::new(1),
+            Capability {
+                resource: CapabilityResource::Channel(channel2),
+                rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
+            },
+        )
+        .expect("[BUG] parent channel cap already created?");
 
     for region in object.inprocess_mappings {
         task.memory_manager.dealloc_region(region);

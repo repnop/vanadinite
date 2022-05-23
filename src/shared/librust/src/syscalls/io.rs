@@ -55,7 +55,6 @@ unsafe impl Sync for MmioCapabilityInfo {}
 pub struct MmioCapabilityInfo {
     address: *mut u8,
     len: usize,
-    mem_perms: MemoryPermissions,
     n_interrupts: usize,
 }
 
@@ -66,10 +65,6 @@ impl MmioCapabilityInfo {
 
     pub fn len(&self) -> usize {
         self.len
-    }
-
-    pub fn memory_permissions(&self) -> MemoryPermissions {
-        self.mem_perms
     }
 
     pub fn total_interrupts(&self) -> usize {
@@ -84,7 +79,6 @@ pub fn query_mmio_cap(
     let error: usize;
     let address: *mut u8;
     let len: usize;
-    let mem_perms: usize;
     let n_interrupts: usize;
     let read_interrupts: usize;
 
@@ -94,18 +88,14 @@ pub fn query_mmio_cap(
             inlateout("a0") Syscall::QueryMmioCapability as usize => error,
             inlateout("a1") cptr.value() => address,
             inlateout("a2") interrupt_buffer.as_ptr() => len,
-            inlateout("a3") interrupt_buffer.len() => mem_perms,
-            lateout("a4") n_interrupts,
-            lateout("a5") read_interrupts,
+            inlateout("a3") interrupt_buffer.len() => n_interrupts,
+            lateout("a4") read_interrupts,
         );
     }
 
     match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
-        None => Ok((
-            MmioCapabilityInfo { address, len, mem_perms: MemoryPermissions::new(mem_perms), n_interrupts },
-            read_interrupts,
-        )),
+        None => Ok((MmioCapabilityInfo { address, len, n_interrupts }, read_interrupts)),
     }
 }
 

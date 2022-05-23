@@ -1,6 +1,28 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2022 The vanadinite developers
+//
+// This Source Code Form is subject to the terms of the Mozilla Public License,
+// v. 2.0. If a copy of the MPL was not distributed with this file, You can
+// obtain one at https://mozilla.org/MPL/2.0/.
+
+use crate::{
+    capabilities::{Capability, CapabilityResource},
+    interrupts::PLIC,
+    io::CLAIMED_DEVICES,
+    mem::{
+        paging::{PhysicalAddress, VirtualAddress},
+        user::RawUserSlice,
+    },
+    platform::FDT,
+    scheduler::{Scheduler, SCHEDULER, TASKS},
+    syscall::channel::ChannelMessage,
+    task::Task,
+    trap::GeneralRegisters,
+    HART_ID,
+};
+use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
-use librust::{error::SyscallError, capabilities::CapabilityRights};
-use crate::{task::Task, trap::GeneralRegisters, mem::{paging::{VirtualAddress, PhysicalAddress}, user::RawUserSlice}, io::CLAIMED_DEVICES, platform::FDT, capabilities::{Capability, CapabilityResource}, interrupts::PLIC, scheduler::{TASKS, SCHEDULER, Scheduler}, HART_ID, syscall::channel::ChannelMessage};
+use librust::{capabilities::CapabilityRights, error::SyscallError, syscalls::channel::KernelMessage};
 
 pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let start = VirtualAddress::new(regs.a1);
@@ -8,10 +30,9 @@ pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), 
     let user_slice = RawUserSlice::readable(start, len);
     let user_slice = match unsafe { user_slice.validate(&task.memory_manager) } {
         Ok(slice) => slice,
-        Err((addr, e)) => {
+        Err((_, e)) => {
             log::error!("Bad memory from process: {:?}", e);
-            return 
-                Err(SyscallError::InvalidArgument(0));
+            return Err(SyscallError::InvalidArgument(0));
         }
     };
 
@@ -45,17 +66,13 @@ pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), 
                 Some(fdt::standard_nodes::MemoryRegion { size: Some(len), starting_address }) => {
                     claimed.upgrade().insert(node_path.into(), task.tid);
                     let map_to = unsafe {
-                        task.memory_manager.map_mmio_device(
-                            PhysicalAddress::from_ptr(starting_address),
-                            None,
-                            len,
-                        )
+                        task.memory_manager.map_mmio_device(PhysicalAddress::from_ptr(starting_address), None, len)
                     };
 
                     // FIXME: this probably needs marked as `Clone` in
                     // `fdt` or something
                     let interrupts = node.interrupts().into_iter().flatten();
-                    let phys_range =  {
+                    let phys_range = {
                         let start = PhysicalAddress::from_ptr(starting_address);
                         start..start.offset(len)
                     };
@@ -88,11 +105,16 @@ pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), 
 
                             task.claimed_interrupts.insert(id, HART_ID.get());
                             // FIXME: not sure if this is entirely correct..
-                            let send_lock = task.kernel_channel.sender.inner.write();
-                            send_lock.push_back(ChannelMessage { data: Into::into(KernelMessage::InterruptOccurred(id)), caps: Vec::new() });
-                            if let Some(token) = task.kernel_channel.sender.wake.lock().take() {
-                                drop(task);
+                            let mut send_lock = task.kernel_channel.sender.inner.write();
+                            send_lock.push_back(ChannelMessage {
+                                data: Into::into(KernelMessage::InterruptOccurred(id)),
+                                caps: Vec::new(),
+                            });
+
+                            let token = task.kernel_channel.sender.wake.lock().take();
+                            if let Some(token) = token {
                                 drop(send_lock);
+                                drop(task);
                                 SCHEDULER.unblock(token);
                             }
 
@@ -103,7 +125,7 @@ pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), 
                     regs.a1 = cptr.value();
                     Ok(())
                 }
-                _ => return Err(SyscallError::InvalidArgument(0)),
+                _ => Err(SyscallError::InvalidArgument(0)),
             }
         }
         None => Err(SyscallError::InvalidArgument(0)),
