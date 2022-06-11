@@ -6,8 +6,8 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use librust::{
-    capabilities::{Capability, CapabilityPtr, CapabilityRights},
-    syscalls::channel::PARENT_CHANNEL,
+    capabilities::{Capability, CapabilityPtr, CapabilityRights, CapabilityWithDescription},
+    syscalls::channel::{ReadResult, PARENT_CHANNEL},
 };
 
 #[no_mangle]
@@ -46,15 +46,15 @@ extern "C" {
 }
 
 #[lang = "start"]
-fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize {
+fn lang_start<T>(main: fn(usize) -> T, argc: isize, argv: *const *const u8) -> isize {
     unsafe { ARGS = [argc as usize, argv as usize] };
 
     let mut map = crate::env::CAP_MAP.borrow_mut();
     let channel = crate::ipc::IpcChannel::new(PARENT_CHANNEL);
-    let mut cap = [Capability::new(CapabilityPtr::new(0), CapabilityRights::new(0))];
+    let mut cap = [CapabilityWithDescription::default()];
 
     // FIXME: Wowie is this some awful code!
-    while let Ok(ReadChannelMessage { message: msg, .. }) = channel.read(&mut cap[..]) {
+    while let Ok(ReadResult { message: msg, .. }) = channel.read(&mut cap[..]) {
         let _ = librust::syscalls::channel::read_kernel_message();
         let name = match core::str::from_utf8(msg.as_bytes()) {
             Ok(name) => name,
@@ -71,6 +71,6 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize 
     map.insert("parent".into(), PARENT_CHANNEL);
     drop(map);
 
-    main();
+    main(0);
     0
 }

@@ -7,11 +7,7 @@
 
 mod drivers;
 
-use librust::{
-    capabilities::{Capability, CapabilityPtr},
-    message::KernelNotification,
-    syscalls::ReadMessage,
-};
+use librust::capabilities::{Capability, CapabilityPtr};
 use std::ipc::IpcChannel;
 
 json::derive! {
@@ -45,7 +41,7 @@ struct BlockDevice {
     device: drivers::virtio::BlockDevice,
 }
 
-fn main() {
+fn main(n: usize) {
     let mut block_devices = Vec::new();
     let mut virtiomgr = IpcChannel::new(std::env::lookup_capability("virtiomgr").unwrap());
 
