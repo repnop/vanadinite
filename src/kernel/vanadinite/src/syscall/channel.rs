@@ -121,7 +121,6 @@ impl Sender {
 
         // FIXME: set a buffer limit at some point
         self.inner.write().push_back(message);
-
         if let Some(token) = self.wake.lock().take() {
             SCHEDULER.unblock(token);
         }
@@ -190,8 +189,8 @@ pub fn send_message(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(),
         }
     };
 
-    // FIXME: get rid of unwrap, maybe eventually block at a certain limit?
-    channel.sender.try_send(ChannelMessage { data, caps }).unwrap();
+    // FIXME: this should notify the sender the channel is dead if it is
+    let _ = channel.sender.try_send(ChannelMessage { data, caps });
 
     Ok(())
 }
@@ -224,7 +223,6 @@ pub fn read_message(task: &mut Task, regs: &mut GeneralRegisters) -> Result<supe
         None if flags & ChannelReadFlags::NONBLOCKING => Err(SyscallError::WouldBlock),
         None => {
             log::debug!("Registering wake for channel::read_message");
-            SCHEDULER.block(task.tid);
             wake_lock.replace(WakeToken::new(task.tid, move |task| {
                 log::debug!("Waking task {:?} (TID: {:?}) for channel::read_message!", task.name, task.tid.value());
                 let mut regs = task.context.gp_regs;
@@ -259,25 +257,25 @@ pub fn read_message(task: &mut Task, regs: &mut GeneralRegisters) -> Result<supe
                             }
                             CapabilityResource::Memory(region, _, kind) => {
                                 let mut permissions = MemoryPermissions::new(0);
+                                let mut memflags = flags::VALID | flags::USER;
 
                                 if rights & CapabilityRights::READ {
                                     permissions |= MemoryPermissions::READ;
+                                    memflags |= flags::READ;
                                 }
 
                                 if rights & CapabilityRights::WRITE {
                                     permissions |= MemoryPermissions::WRITE;
+                                    memflags |= flags::WRITE;
                                 }
 
                                 if rights & CapabilityRights::EXECUTE {
                                     permissions |= MemoryPermissions::EXECUTE;
+                                    memflags |= flags::EXECUTE;
                                 }
 
-                                let addr = task.memory_manager.apply_shared_region(
-                                    None,
-                                    flags::USER | flags::READ | flags::WRITE,
-                                    region.clone(),
-                                    kind,
-                                );
+                                let addr =
+                                    task.memory_manager.apply_shared_region(None, memflags, region.clone(), kind);
 
                                 let cptr = task.cspace.mint(Capability {
                                     resource: CapabilityResource::Memory(region, addr.clone(), kind),

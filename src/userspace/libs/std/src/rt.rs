@@ -6,8 +6,11 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use librust::{
-    capabilities::{Capability, CapabilityPtr, CapabilityRights, CapabilityWithDescription},
-    syscalls::channel::{ReadResult, PARENT_CHANNEL},
+    capabilities::{Capability, CapabilityDescription, CapabilityPtr, CapabilityRights, CapabilityWithDescription},
+    syscalls::{
+        channel::{ReadResult, PARENT_CHANNEL},
+        mem::MemoryPermissions,
+    },
 };
 
 #[no_mangle]
@@ -46,31 +49,27 @@ extern "C" {
 }
 
 #[lang = "start"]
-fn lang_start<T>(main: fn(usize) -> T, argc: isize, argv: *const *const u8) -> isize {
+fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize {
     unsafe { ARGS = [argc as usize, argv as usize] };
 
     let mut map = crate::env::CAP_MAP.borrow_mut();
     let channel = crate::ipc::IpcChannel::new(PARENT_CHANNEL);
-    let mut cap = [CapabilityWithDescription::default()];
-
     // FIXME: Wowie is this some awful code!
-    while let Ok(ReadResult { message: msg, .. }) = channel.read(&mut cap[..]) {
-        let _ = librust::syscalls::channel::read_kernel_message();
-        let name = match core::str::from_utf8(msg.as_bytes()) {
-            Ok(name) => name,
-            Err(_) => break,
-        };
-
-        if name == "done" {
-            break;
+    if let Ok((names, _, caps)) = channel.temp_read_json::<Vec<String>>() {
+        for (name, cap) in names.into_iter().zip(caps) {
+            map.insert(name, cap);
         }
-
-        map.insert(name.into(), cap[0].cptr);
     }
 
-    map.insert("parent".into(), PARENT_CHANNEL);
+    map.insert(
+        "parent".into(),
+        CapabilityWithDescription {
+            capability: Capability { cptr: PARENT_CHANNEL, rights: CapabilityRights::READ | CapabilityRights::WRITE },
+            description: CapabilityDescription::Channel,
+        },
+    );
     drop(map);
 
-    main(0);
+    main();
     0
 }

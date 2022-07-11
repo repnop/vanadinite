@@ -5,21 +5,17 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{
-    collections::BTreeMap,
-    librust::{
-        capabilities::CapabilityPtr,
-        message::KernelNotification,
-        syscalls::{receive_message, ReadMessage},
-    },
-    sync::SyncRefCell,
-    task::Waker,
+use librust::{
+    capabilities::CapabilityPtr,
+    syscalls::channel::{read_kernel_message, KernelMessage},
 };
+use std::{collections::BTreeMap, sync::SyncRefCell, task::Waker};
 use sync::Lazy;
 
+pub(crate) static EVENT_REGISTRY: EventRegistry = EventRegistry::new();
+pub(crate) static SEEN_IPC_CHANNELS: SyncRefCell<BTreeMap<CapabilityPtr, ()>> = SyncRefCell::new(BTreeMap::new());
 pub(crate) static NEW_IPC_CHANNELS: SyncRefCell<Lazy<VecDeque<CapabilityPtr>>> =
     SyncRefCell::new(Lazy::new(VecDeque::new));
-pub(crate) static EVENT_REGISTRY: EventRegistry = EventRegistry::new();
 
 pub struct EventRegistry {
     waiting_for_event: SyncRefCell<BTreeMap<BlockType, Waker>>,
@@ -88,28 +84,28 @@ pub struct Reactor;
 
 impl Reactor {
     pub fn wait() {
-        match receive_message() {
-            ReadMessage::Kernel(KernelNotification::InterruptOccurred(id)) => {
+        match read_kernel_message() {
+            KernelMessage::InterruptOccurred(id) => {
                 EVENT_REGISTRY.add_interested_event(BlockType::Interrupt(id));
                 if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::Interrupt(id)) {
                     waker.wake();
                 }
             }
-            ReadMessage::Kernel(KernelNotification::NewChannelMessage(cptr)) => {
-                EVENT_REGISTRY.add_interested_event(BlockType::IpcChannelMessage(cptr));
-                if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::IpcChannelMessage(cptr)) {
-                    waker.wake();
+            KernelMessage::NewChannelMessage(cptr) => match SEEN_IPC_CHANNELS.borrow().get(&cptr).is_some() {
+                true => {
+                    EVENT_REGISTRY.add_interested_event(BlockType::IpcChannelMessage(cptr));
+                    if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::IpcChannelMessage(cptr)) {
+                        waker.wake();
+                    }
                 }
-            }
-            ReadMessage::Kernel(KernelNotification::ChannelOpened(cptr)) => {
-                let mut new_ipc_channels = NEW_IPC_CHANNELS.borrow_mut();
-                new_ipc_channels.push_back(cptr);
-                if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::NewIpcChannel) {
-                    drop(new_ipc_channels);
-                    waker.wake();
+                false => {
+                    SEEN_IPC_CHANNELS.borrow_mut().insert(cptr, ());
+                    NEW_IPC_CHANNELS.borrow_mut().push_back(cptr);
+                    if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::NewIpcChannel) {
+                        waker.wake();
+                    }
                 }
-            }
-            _ => {}
+            },
         }
     }
 }

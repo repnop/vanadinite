@@ -9,5 +9,7 @@ edition = "2021"
 [features]
 
 [dependencies]
+# Cursed, TODO: remove this once IDL is ready
+json = { path = "../json" }
 librust = { path = "../../../shared/librust", features = ["alloc"] }
 sync = { path = "../../../shared/sync" }

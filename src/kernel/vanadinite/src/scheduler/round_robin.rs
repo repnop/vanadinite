@@ -19,12 +19,14 @@ use sync::Lazy;
 
 type SpinMutex<T> = sync::SpinMutex<T, SameHartDeadlockDetection>;
 
+#[derive(Debug)]
 struct QueuedTask {
     tid: Tid,
     task: Arc<SpinMutex<Task>>,
     token: Option<WakeToken>,
 }
 
+#[derive(Debug)]
 struct Queue {
     active: Option<Arc<SpinMutex<Task>>>,
     queue: VecDeque<QueuedTask>,

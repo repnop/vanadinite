@@ -109,3 +109,6 @@ impl Default for CapabilityDescription {
         Self::Channel
     }
 }
+
+unsafe impl Send for CapabilityDescription {}
+unsafe impl Sync for CapabilityDescription {}

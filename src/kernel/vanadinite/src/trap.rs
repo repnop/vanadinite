@@ -18,7 +18,7 @@ use crate::{
     task::TaskState,
 };
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Clone, Copy, Default)]
 #[repr(C)]
 pub struct GeneralRegisters {
     pub ra: usize,
@@ -57,6 +57,51 @@ pub struct GeneralRegisters {
 impl GeneralRegisters {
     pub fn sp(&self) -> *mut u8 {
         self.sp as *mut u8
+    }
+}
+
+impl core::fmt::Debug for GeneralRegisters {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        struct Hex<T: core::fmt::LowerHex>(T);
+        impl<T: core::fmt::LowerHex> core::fmt::Debug for Hex<T> {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                write!(f, "{:#x}", self.0)
+            }
+        }
+
+        f.debug_struct("GeneralRegisters")
+            .field("ra", &Hex(self.ra))
+            .field("sp", &Hex(self.sp))
+            .field("gp", &Hex(self.gp))
+            .field("tp", &Hex(self.tp))
+            .field("t0", &Hex(self.t0))
+            .field("t1", &Hex(self.t1))
+            .field("t2", &Hex(self.t2))
+            .field("s0", &Hex(self.s0))
+            .field("s1", &Hex(self.s1))
+            .field("a0", &Hex(self.a0))
+            .field("a1", &Hex(self.a1))
+            .field("a2", &Hex(self.a2))
+            .field("a3", &Hex(self.a3))
+            .field("a4", &Hex(self.a4))
+            .field("a5", &Hex(self.a5))
+            .field("a6", &Hex(self.a6))
+            .field("a7", &Hex(self.a7))
+            .field("s2", &Hex(self.s2))
+            .field("s3", &Hex(self.s3))
+            .field("s4", &Hex(self.s4))
+            .field("s5", &Hex(self.s5))
+            .field("s6", &Hex(self.s6))
+            .field("s7", &Hex(self.s7))
+            .field("s8", &Hex(self.s8))
+            .field("s9", &Hex(self.s9))
+            .field("s10", &Hex(self.s10))
+            .field("s11", &Hex(self.s11))
+            .field("t3", &Hex(self.t3))
+            .field("t4", &Hex(self.t4))
+            .field("t5", &Hex(self.t5))
+            .field("t6", &Hex(self.t6))
+            .finish()
     }
 }
 
@@ -302,7 +347,7 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                                 stval,
                                 sepc,
                             );
-                            log::error!("Register dump:\n{:#x?}", regs);
+                            log::error!("Register dump:\n{:?}", regs);
                             // log::error!("Stack dump (last 32 values):\n");
                             // let mut sp = regs.registers.sp as *const u64;
                             // for _ in 0..32 {
@@ -313,6 +358,7 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                                 "Memory map:\n{:#?}",
                                 active_task.memory_manager.address_map_debug(Some(stval))
                             );
+                            log::error!("Phys addr (if any): {:?}", active_task.memory_manager.resolve(stval));
                             active_task.state = TaskState::Dead;
 
                             drop(active_task);

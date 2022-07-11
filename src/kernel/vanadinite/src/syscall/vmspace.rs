@@ -24,7 +24,11 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
     error::SyscallError,
-    syscalls::{channel::KERNEL_CHANNEL, mem::MemoryPermissions, vmspace::VmspaceObjectId},
+    syscalls::{
+        channel::{KERNEL_CHANNEL, PARENT_CHANNEL},
+        mem::MemoryPermissions,
+        vmspace::VmspaceObjectId,
+    },
     task::Tid,
 };
 
@@ -196,12 +200,12 @@ pub fn spawn_vmspace(task: &mut Task, frame: &mut GeneralRegisters) -> Result<()
             KERNEL_CHANNEL,
             Capability { resource: CapabilityResource::Channel(user_read), rights: CapabilityRights::READ },
         )
-        .expect("[BUG] parent channel cap already created?");
+        .expect("[BUG] kernel channel cap already created?");
 
     new_task
         .cspace
         .mint_with_id(
-            CapabilityPtr::new(1),
+            PARENT_CHANNEL,
             Capability {
                 resource: CapabilityResource::Channel(channel2),
                 rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,

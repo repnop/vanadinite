@@ -41,63 +41,14 @@ struct BlockDevice {
     device: drivers::virtio::BlockDevice,
 }
 
-fn main(n: usize) {
-    let mut block_devices = Vec::new();
-    let mut virtiomgr = IpcChannel::new(std::env::lookup_capability("virtiomgr").unwrap());
+fn main() {
+    // let mut block_devices = Vec::new();
+    // let mut virtiomgr = IpcChannel::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr);
 
-    virtiomgr
-        .send_bytes(&json::to_bytes(&VirtIoDeviceRequest { ty: virtio::DeviceType::BlockDevice as u32 }), &[])
-        .unwrap();
-    // println!("[filesystem] Sent device request");
-    let (message, capabilities) = virtiomgr.read_with_all_caps().unwrap();
-    let response: VirtIoDeviceResponse = json::deserialize(message.as_bytes()).unwrap();
-
-    if response.devices.is_empty() {
-        return;
-    }
-
-    for (Capability { cptr: mmio_cap, .. }, device) in capabilities.into_iter().zip(response.devices) {
-        let info = librust::syscalls::io::query_mmio_cap(mmio_cap).unwrap();
-
-        // println!("[filesystem] Got a VirtIO block device!");
-
-        block_devices.push(BlockDevice {
-            mmio_cap,
-            interrupts: device.interrupts,
-            device: drivers::virtio::BlockDevice::new(unsafe {
-                &*(info.address() as *const virtio::devices::block::VirtIoBlockDevice)
-            })
-            .unwrap(),
-        });
-    }
-
-    let drv = &mut block_devices[0].device;
-
-    drv.queue_read(0);
-
-    let id = loop {
-        match librust::syscalls::receive_message() {
-            ReadMessage::Kernel(KernelNotification::InterruptOccurred(id)) => {
-                break id;
-            }
-            _ => continue,
-        }
-    };
-
-    println!("[filesystem] Sector 0 = {:?}", drv.finish_command());
-    librust::syscalls::io::complete_interrupt(id).unwrap();
-
-    drv.queue_write(0, &[1; 512][..]);
-
-    let id = loop {
-        match librust::syscalls::receive_message() {
-            ReadMessage::Kernel(KernelNotification::InterruptOccurred(id)) => {
-                break id;
-            }
-            _ => continue,
-        }
-    };
-
-    println!("[filesystem] Sector 0 = {:?}", drv.finish_command());
-    librust::syscalls::io::complete_interrupt(id).unwrap();
+    // virtiomgr
+    //     .send_bytes(&json::to_bytes(&VirtIoDeviceRequest { ty: virtio::DeviceType::BlockDevice as u32 }), &[])
+    //     .unwrap();
+    // // println!("[filesystem] Sent device request");
+    // let (message, capabilities) = virtiomgr.read_with_all_caps().unwrap();
+    // let response: VirtIoDeviceResponse = json::deserialize(message.as_bytes()).unwrap();
 }

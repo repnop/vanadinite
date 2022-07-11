@@ -33,7 +33,6 @@ mod task_local;
 pub mod vmspace;
 
 pub use alloc::collections;
-pub use librust;
 
 #[prelude_import]
 pub use prelude::rust_2021::*;

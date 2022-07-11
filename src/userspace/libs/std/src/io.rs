@@ -26,32 +26,33 @@ static STDOUT: StdoutInner = StdoutInner::new();
 pub struct Stdout;
 impl core::fmt::Write for Stdout {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        let mut stdio = match crate::env::lookup_capability("stdio") {
-            Some(stdio) => crate::ipc::IpcChannel::new(stdio),
-            None => return Ok(()),
-        };
+        // let stdio = match crate::env::lookup_capability("stdio") {
+        //     Some(stdio) => crate::ipc::IpcChannel::new(stdio.capability.cptr),
+        //     None => return Ok(()),
+        // };
 
-        let inner = STDOUT.0.borrow_mut();
+        // let mut inner = STDOUT.0.borrow_mut();
 
-        if inner.is_none() {
-            *inner = Some((0, MemoryAllocation::public_rw(Bytes(4096)).expect("failed to allocate memory for stdout")));
-        }
+        // if inner.is_none() {
+        //     *inner = Some((0, MemoryAllocation::public_rw(Bytes(4096)).expect("failed to allocate memory for stdout")));
+        // }
 
-        let (position, mem) = inner.as_mut().unwrap();
-        // SAFETY: we don't ever copy the pointer out
-        let buffer = unsafe { mem.as_mut() };
-        for byte in s.bytes() {
-            buffer[*position] = byte;
+        // let (position, mem) = inner.as_mut().unwrap();
+        // let cptr = mem.cptr;
+        // // SAFETY: we don't ever copy the pointer out
+        // let buffer = unsafe { mem.as_mut() };
+        // for byte in s.bytes() {
+        //     buffer[*position] = byte;
 
-            if byte == b'\n' || *position == buffer.len() - 1 {
-                let msg = ChannelMessage([1, *position, 0, 0, 0, 0, 0]);
-                let _ = stdio.send(msg, &[Capability { cptr: mem.cptr, rights: CapabilityRights::READ }]);
-            } else {
-                *position += 1;
-            }
-        }
+        //     if byte == b'\n' || *position == buffer.len() - 1 {
+        //         let msg = ChannelMessage([1, *position, 0, 0, 0, 0, 0]);
+        //         let _ = stdio.send(msg, &[Capability { cptr, rights: CapabilityRights::READ }]);
+        //     } else {
+        //         *position += 1;
+        //     }
+        // }
 
-        // let _ = librust::syscalls::print(s.as_bytes());
+        let _ = librust::syscalls::io::debug_print(s.as_bytes());
         Ok(())
     }
 }

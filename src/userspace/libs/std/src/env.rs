@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use alloc::{collections::BTreeMap, string::String};
-use librust::capabilities::CapabilityPtr;
+use librust::capabilities::{CapabilityPtr, CapabilityWithDescription};
 
 use crate::sync::SyncRefCell;
 
@@ -30,12 +30,12 @@ pub fn a2() -> usize {
     unsafe { A2 }
 }
 
-pub(crate) static CAP_MAP: SyncRefCell<BTreeMap<String, CapabilityPtr>> = SyncRefCell::new(BTreeMap::new());
+pub(crate) static CAP_MAP: SyncRefCell<BTreeMap<String, CapabilityWithDescription>> = SyncRefCell::new(BTreeMap::new());
 
-pub fn lookup_capability(service: &str) -> Option<CapabilityPtr> {
+pub fn lookup_capability(service: &str) -> Option<CapabilityWithDescription> {
     CAP_MAP.borrow().get(service).copied()
 }
 
-pub fn register_capability(service: &str, cptr: CapabilityPtr) {
+pub fn register_capability(service: &str, cptr: CapabilityWithDescription) {
     CAP_MAP.borrow_mut().insert(service.into(), cptr);
 }

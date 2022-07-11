@@ -52,11 +52,11 @@ macro_rules! derive {
         {
             fn deserialize<'a, D: $crate::deser::Deserializer<'a>>(deserializer: &mut D) -> Result<Self, $crate::deser::DeserializeError> {
                 $(
-                    let mut $field = <$t>::init();
+                    let mut $field: core::option::Option<$t> = <$t as $crate::deser::Deserialize>::init();
                 )+
 
-                deserializer.deserialize_object(|name, deserializer| {
-                    Ok(match name {
+                deserializer.deserialize_object(|___name, deserializer| {
+                    Ok(match ___name {
                         $(
                             stringify!($field) => $field = Some(<$t>::deserialize(deserializer)?),
                         )+
@@ -356,13 +356,13 @@ impl<'a> parser::Parseable<'a> for List {
     }
 }
 
-pub fn to_bytes<S: deser::Serialize<Vec<u8>>>(data: &S) -> Vec<u8> {
+pub fn to_bytes<S: deser::Serialize<Vec<u8>> + ?Sized>(data: &S) -> Vec<u8> {
     let mut v = Vec::new();
     serialize(&mut v, data);
     v
 }
 
-pub fn serialize<Sr: deser::Serializer, S: deser::Serialize<Sr>>(serializer: &mut Sr, data: &S) {
+pub fn serialize<Sr: deser::Serializer, S: deser::Serialize<Sr> + ?Sized>(serializer: &mut Sr, data: &S) {
     data.serialize(serializer)
 }
 

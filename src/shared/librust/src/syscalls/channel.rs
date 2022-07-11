@@ -11,9 +11,7 @@ use crate::{
     syscalls::Syscall,
 };
 
-use super::mem::MemoryPermissions;
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
 pub struct ChannelMessage(pub [usize; 7]);
 

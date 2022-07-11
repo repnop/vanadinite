@@ -102,7 +102,7 @@ pub fn alloc_virtual_memory(task: &mut Task, frame: &mut GeneralRegisters) -> Re
                         allocated_at.clone(),
                         AddressRegionKind::UserAllocated,
                     ),
-                    rights,
+                    rights: rights | CapabilityRights::GRANT,
                 });
 
                 (cptr, allocated_at)

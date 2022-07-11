@@ -11,16 +11,19 @@ use librust::{
     capabilities::{Capability, CapabilityPtr, CapabilityRights},
     error::SyscallError,
     syscalls::{
-        mem::MemoryPermissions,
+        channel::ChannelMessage,
+        mem::{AllocationOptions, MemoryPermissions},
         vmspace::{self, VmspaceObjectId, VmspaceObjectMapping, VmspaceSpawnEnv},
     },
     task::Tid,
+    units::Bytes,
 };
 
 pub struct Vmspace {
     name: String,
     id: VmspaceObjectId,
-    caps_to_send: Vec<(String, CapabilityPtr, CapabilityRights)>,
+    names: Vec<String>,
+    caps_to_send: Vec<Capability>,
 }
 
 impl Vmspace {
@@ -28,7 +31,7 @@ impl Vmspace {
     pub fn new(name: &str) -> Self {
         let id = vmspace::create_vmspace().unwrap();
 
-        Self { name: name.to_string(), id, caps_to_send: Vec::new() }
+        Self { name: name.to_string(), id, names: Vec::new(), caps_to_send: Vec::new() }
     }
 
     pub fn create_object<'b>(
@@ -50,24 +53,15 @@ impl Vmspace {
     pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<CapabilityPtr, SyscallError> {
         let cptr = vmspace::spawn_vmspace(self.id, &self.name, env)?;
 
-        let mut channel = crate::ipc::IpcChannel::new(cptr);
-
-        for (name, cap, rights) in self.caps_to_send {
-            let mut message = channel.new_message(name.len()).unwrap();
-            message.write(name.as_bytes());
-            message.send(&[Capability::new(cap, rights)]).unwrap();
-        }
-
-        const DONE: &str = "done";
-        let mut message = channel.new_message(DONE.len()).unwrap();
-        message.write(DONE.as_bytes());
-        message.send(&[]).unwrap();
+        let channel = crate::ipc::IpcChannel::new(cptr);
+        channel.temp_send_json(ChannelMessage::default(), &self.names, &self.caps_to_send[..])?;
 
         Ok(cptr)
     }
 
     pub fn grant(&mut self, name: &str, cptr: CapabilityPtr, rights: CapabilityRights) {
-        self.caps_to_send.push((name.into(), cptr, rights));
+        self.names.push(name.into());
+        self.caps_to_send.push(Capability { cptr, rights });
     }
 }
 
