@@ -9,6 +9,7 @@
 pub struct Flags(u8);
 
 impl Flags {
+    pub const NONE: Flags = Flags(0b0000_0000);
     pub const VALID: Flags = Flags(0b0000_0001);
     pub const READ: Flags = Flags(0b0000_0010);
     pub const WRITE: Flags = Flags(0b0000_0100);

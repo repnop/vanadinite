@@ -15,7 +15,7 @@ use crate::{
     },
     utils::{self, Units},
 };
-use address_map::AddressMap;
+use address_map::{AddressMap, Userspace};
 pub use address_map::{AddressRegion, AddressRegionKind};
 use core::ops::Range;
 
@@ -44,7 +44,7 @@ pub struct RegionDescription<'a> {
 #[derive(Debug)]
 pub struct MemoryManager {
     table: PageTable,
-    address_map: AddressMap,
+    address_map: AddressMap<Userspace>,
 }
 
 impl MemoryManager {
