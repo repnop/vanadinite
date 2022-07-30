@@ -6,109 +6,92 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use librust::{
-    message::{KernelNotification, SyscallResult},
+    error::SyscallError,
     syscalls::{
-        self,
-        channel::{self, ChannelId, ChannelMessage},
-        ReadMessage,
+        channel::{self, ReadResult},
+        mem::{AllocationOptions, MemoryPermissions},
     },
-    task::Tid,
+    units::Bytes,
 };
+
+pub use librust::capabilities::{
+    Capability, CapabilityDescription, CapabilityPtr, CapabilityRights, CapabilityWithDescription,
+};
+pub use librust::syscalls::channel::{ChannelMessage, ChannelReadFlags};
 
 #[derive(Debug)]
 pub struct IpcChannel {
-    id: ChannelId,
+    cptr: CapabilityPtr,
 }
 
 impl IpcChannel {
-    pub fn new(id: ChannelId) -> Self {
-        Self { id }
+    pub fn new(cptr: CapabilityPtr) -> Self {
+        Self { cptr }
     }
 
-    pub fn open(with: Tid) -> Result<Self, OpenChannelError> {
-        if let SyscallResult::Err(_) = channel::request_channel(with) {
-            return Err(OpenChannelError::InvalidTask);
+    pub fn read(
+        &self,
+        cap_buffer: &mut [CapabilityWithDescription],
+        flags: ChannelReadFlags,
+    ) -> Result<ReadResult, SyscallError> {
+        channel::read_message(self.cptr, cap_buffer, flags)
+    }
+
+    pub fn read_with_all_caps(
+        &self,
+        flags: ChannelReadFlags,
+    ) -> Result<(ChannelMessage, Vec<CapabilityWithDescription>), SyscallError> {
+        let mut caps = Vec::new();
+        let ReadResult { message, capabilities_remaining, .. } = self.read(&mut caps[..], flags)?;
+
+        if capabilities_remaining > 0 {
+            caps.resize(capabilities_remaining, CapabilityWithDescription::default());
+            self.read(&mut caps[..], flags)?;
         }
 
-        match syscalls::receive_message() {
-            Some(ReadMessage::Kernel(KernelNotification::ChannelRequestDenied)) => Err(OpenChannelError::Rejected),
-            Some(ReadMessage::Kernel(KernelNotification::ChannelOpened(id))) => Ok(Self { id }),
-            t => unreachable!("{:?}", t),
+        Ok((message, caps))
+    }
+
+    pub fn send(&self, msg: ChannelMessage, caps: &[Capability]) -> Result<(), SyscallError> {
+        channel::send_message(self.cptr, msg, caps)
+    }
+
+    pub fn temp_send_json<T: json::deser::Serialize<Vec<u8>>>(
+        &self,
+        message: ChannelMessage,
+        t: &T,
+        other_caps: &[Capability],
+    ) -> Result<(), SyscallError> {
+        let serialized = json::to_bytes(t);
+        let (cptr, ptr) = librust::syscalls::mem::alloc_virtual_memory(
+            Bytes(serialized.len()),
+            AllocationOptions::NONE,
+            MemoryPermissions::READ | MemoryPermissions::WRITE,
+        )?;
+        unsafe { (*ptr)[..serialized.len()].copy_from_slice(&serialized) };
+        if other_caps.is_empty() {
+            channel::send_message(self.cptr, message, &[Capability { cptr, rights: CapabilityRights::READ }])
+        } else {
+            let mut all_caps = vec![Capability { cptr, rights: CapabilityRights::READ }];
+            all_caps.extend_from_slice(other_caps);
+            channel::send_message(self.cptr, message, &all_caps)
         }
     }
 
-    // FIXME: use a real error
-    #[allow(clippy::result_unit_err)]
-    pub fn new_message(&mut self, size: usize) -> Result<NewMessage<'_>, ()> {
-        let message = match channel::create_message(self.id, size) {
-            SyscallResult::Ok(msg) => msg,
-            SyscallResult::Err(_) => return Err(()),
+    pub fn temp_read_json<T: json::deser::Deserialize>(
+        &self,
+        flags: ChannelReadFlags,
+    ) -> Result<(T, ChannelMessage, Vec<CapabilityWithDescription>), SyscallError> {
+        let (msg, mut caps) = self.read_with_all_caps(flags)?;
+        let t = match caps.remove(0) {
+            CapabilityWithDescription {
+                capability: _,
+                description: CapabilityDescription::Memory { ptr, len, permissions: _ },
+            } => json::deserialize(unsafe { core::slice::from_raw_parts(ptr, len) })
+                .expect("failed to deserialize JSON in channel message"),
+            _ => panic!("no or invalid mem cap"),
         };
 
-        Ok(NewMessage { channel: self, message, cursor: 0 })
-    }
-
-    // FIXME: use a real error
-    #[allow(clippy::result_unit_err)]
-    pub fn read(&self) -> Result<Option<Message>, ()> {
-        match channel::read_message(self.id) {
-            SyscallResult::Ok(maybe_msg) => Ok(maybe_msg.map(|m| Message(self.id, m))),
-            SyscallResult::Err(_) => Err(()),
-        }
-    }
-
-    fn send(&mut self, msg: ChannelMessage, written_len: usize) -> Result<(), SendMessageError> {
-        let _ = channel::send_message(self.id, msg.id, written_len);
-        // FIXME: check for failure
-        Ok(())
+        Ok((t, msg, caps))
     }
 }
-
-pub struct Message(ChannelId, ChannelMessage);
-
-impl Message {
-    pub fn as_bytes(&self) -> &[u8] {
-        unsafe { core::slice::from_raw_parts(self.1.ptr, self.1.len) }
-    }
-}
-
-impl core::ops::Drop for Message {
-    fn drop(&mut self) {
-        let _ = channel::retire_message(self.0, self.1.id);
-    }
-}
-
-pub struct NewMessage<'a> {
-    channel: &'a mut IpcChannel,
-    message: ChannelMessage,
-    cursor: usize,
-}
-
-impl NewMessage<'_> {
-    pub fn send(self) -> Result<(), SendMessageError> {
-        self.channel.send(self.message, self.cursor)
-    }
-
-    pub fn write(&mut self, buffer: &[u8]) {
-        assert!(self.cursor + buffer.len() < self.message.len);
-        let slice = unsafe {
-            core::slice::from_raw_parts_mut(self.message.ptr.add(self.cursor), self.message.len - self.cursor)
-        };
-        slice[..buffer.len()].copy_from_slice(buffer);
-
-        self.cursor += buffer.len();
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        unsafe { core::slice::from_raw_parts(self.message.ptr, self.message.len) }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum OpenChannelError {
-    InvalidTask,
-    Rejected,
-}
-
-#[derive(Debug)]
-pub enum SendMessageError {}

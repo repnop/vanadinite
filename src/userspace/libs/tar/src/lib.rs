@@ -25,7 +25,7 @@ impl<'a> Archive<'a> {
     pub fn file(&self, filename: &str) -> Option<File<'a>> {
         let mut archive_index = 0;
 
-        while let Some(header) = self.data.get(archive_index..).and_then(|s| FileHeader::from_bytes(s)) {
+        while let Some(header) = self.data.get(archive_index..).and_then(FileHeader::from_bytes) {
             log::debug!("found file: {:?}", header.file_name);
 
             let content_start = archive_index + 512;

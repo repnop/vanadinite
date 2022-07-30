@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::drivers::CompatibleWith;
+pub use registers::InterruptClaim;
 use volatile::{Read, ReadWrite, Volatile};
 
 #[repr(C)]
@@ -70,6 +71,10 @@ impl Plic {
 
     pub fn claim(&self, context: usize) -> Option<registers::InterruptClaim<'_>> {
         self.threshold_and_claim[context].claim_complete.claim()
+    }
+
+    pub fn complete(&self, context: usize, interrupt_id: usize) {
+        self.threshold_and_claim[context].claim_complete.complete(interrupt_id);
     }
 
     pub const fn max_priority() -> usize {
@@ -158,6 +163,12 @@ mod registers {
                 0 => None,
                 interrupt_id => Some(InterruptClaim { interrupt_id, register: self }),
             }
+        }
+
+        // Don't make this public to other consumers, they either need to
+        // complete the claim as normal or go through the PLIC method explicitly
+        pub(super) fn complete(&self, interrupt_id: usize) {
+            self.0.write(interrupt_id as u32);
         }
     }
 

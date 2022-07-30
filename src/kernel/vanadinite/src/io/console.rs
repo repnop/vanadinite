@@ -112,10 +112,10 @@ impl ConsoleDevices {
         }
     }
 
-    pub fn register_isr(&self, interrupt_id: usize, private: usize) {
+    pub fn register_isr(&self, interrupt_id: usize) {
         match self {
-            ConsoleDevices::Uart16550 => register_isr(interrupt_id, private, console_interrupt),
-            ConsoleDevices::SifiveUart => register_isr(interrupt_id, private, console_interrupt),
+            ConsoleDevices::Uart16550 => register_isr(interrupt_id, console_interrupt),
+            ConsoleDevices::SifiveUart => register_isr(interrupt_id, console_interrupt),
         }
 
         if let Some(plic) = &*crate::interrupts::PLIC.lock() {
@@ -125,8 +125,14 @@ impl ConsoleDevices {
     }
 }
 
-fn console_interrupt(_: usize, _: usize) -> Result<(), &'static str> {
-    super::INPUT_QUEUE.push(CONSOLE.lock().read()).map_err(|_| "failed to write to input queue")
+fn console_interrupt(
+    _: &crate::drivers::generic::plic::Plic,
+    claim: crate::drivers::generic::plic::InterruptClaim<'_>,
+    _: usize,
+) -> Result<(), &'static str> {
+    let c = CONSOLE.lock().read();
+    claim.complete();
+    Ok(())
 }
 
 pub struct LegacySbiConsoleOut;
@@ -135,10 +141,7 @@ impl ConsoleDevice for LegacySbiConsoleOut {
     fn init(&mut self) {}
 
     fn read(&self) -> u8 {
-        match sbi::legacy::console_getchar() {
-            -1 => 0,
-            n => n as u8,
-        }
+        sbi::legacy::console_getchar().unwrap_or(0)
     }
 
     fn write(&mut self, n: u8) {

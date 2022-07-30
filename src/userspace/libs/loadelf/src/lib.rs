@@ -7,15 +7,13 @@
 
 pub use elf64::Elf;
 use elf64::{ProgramSegmentType, Relocation};
-use std::{
-    librust::syscalls::{allocation::MemoryPermissions, vmspace::VmspaceSpawnEnv},
-    vmspace::Vmspace,
-};
+use librust::syscalls::{mem::MemoryPermissions, vmspace::VmspaceSpawnEnv};
+use std::vmspace::Vmspace;
 
 const PAGE_SIZE: usize = 4096;
 
 #[allow(clippy::result_unit_err)]
-pub fn load_elf(elf: &Elf) -> Result<(Vmspace, VmspaceSpawnEnv), ()> {
+pub fn load_elf(name: &str, elf: &Elf) -> Result<(Vmspace, VmspaceSpawnEnv), ()> {
     let relocations = elf
         .relocations()
         .map(|reloc| match reloc {
@@ -29,7 +27,7 @@ pub fn load_elf(elf: &Elf) -> Result<(Vmspace, VmspaceSpawnEnv), ()> {
         .program_headers()
         .find(|header| header.r#type == ProgramSegmentType::GnuRelro)
         .map(|header| header.vaddr as usize);
-    let vmspace = Vmspace::new();
+    let vmspace = Vmspace::new(name);
     let mut task_load_base = 0;
     let mut segment_offset = 0;
     let mut pc = 0;
@@ -101,6 +99,7 @@ pub fn load_elf(elf: &Elf) -> Result<(Vmspace, VmspaceSpawnEnv), ()> {
                         // RELATIVE
                         3 => {
                             // FIXME: Should prob check for negative addends?
+                            assert!(rela.addend.is_positive());
                             let fixup = task_load_base + rela.addend as usize;
                             object.as_slice()[offset_into..][..8].copy_from_slice(&fixup.to_le_bytes());
                         }
@@ -114,31 +113,35 @@ pub fn load_elf(elf: &Elf) -> Result<(Vmspace, VmspaceSpawnEnv), ()> {
     }
 
     let tls = elf.program_headers().find(|header| header.r#type == elf64::ProgramSegmentType::Tls).map(|header| {
-        // This is mostly the same as the above, just force 4 KiB alignment
-        // because its not like we can have 8-byte aligned pages.
-        //
-        // TODO: `.tbss`?
-
-        // This might actually not be necessary, since in the end the
-        // thread-local loads are done with `tp + offset` but in case this
-        // is important for any possible TLS relocations later, keeping it
-        // the same as above
-        let segment_load_offset = (header.vaddr as usize & (PAGE_SIZE - 1)) as usize;
-
         let mut tls_base = vmspace
             .create_object(
                 core::ptr::null(),
-                header.memory_size as usize + segment_load_offset,
+                header.memory_size as usize
+                // This +8 represents the fact that the first 8 bytes represent
+                // the Thread Control Block of the TLS, which is necessary for
+                // `__tls_get_addr`
+                + 8
+                // This +16 represents the dynamic thread vector (dtv) entries
+                // which are composed of a generation and an array of modules
+                // which contain pointers to the various TLS blocks, but seeing
+                // as how we don't have module loading of any kind, we should
+                // just need a single pointer
+                + 16,
                 MemoryPermissions::READ | MemoryPermissions::WRITE,
             )
             .unwrap();
 
         let segment_file_size = header.file_size as usize;
+        let tls_base_addr = tls_base.vmspace_address() as usize;
         let data = tls_base.as_slice();
-        data[segment_load_offset..][..segment_file_size].copy_from_slice(elf.program_segment_data(&header));
-        data[segment_load_offset..][segment_file_size..].fill(0);
+        data[0..][..8].copy_from_slice(&(tls_base_addr + 8).to_le_bytes()[..]);
+        data[8..][..8].copy_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]);
+        data[16..][..8].copy_from_slice(&(tls_base_addr + 24).to_le_bytes()[..]);
 
-        tls_base.vmspace_address() as usize + segment_load_offset
+        data[24..][..segment_file_size].copy_from_slice(elf.program_segment_data(&header));
+        data[segment_file_size..].fill(0);
+
+        tls_base_addr + 24
     });
 
     let sp = vmspace

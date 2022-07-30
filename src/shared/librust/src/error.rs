@@ -5,51 +5,85 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::message::Message;
+use core::num::NonZeroUsize;
 
-pub const INVALID_ACCESS: usize = 1;
-pub const INVALID_MESSAGE: usize = 2;
-pub const INVALID_RECIPIENT: usize = 3;
-pub const INVALID_SYSCALL: usize = 4;
-pub const INVALID_ARGUMENT: usize = 5;
-pub const NO_MESSAGES: usize = 6;
+pub const INSUFFICIENT_RIGHTS: usize = 1;
+pub const INVALID_OPERATION: usize = 2;
+pub const INVALID_ARGUMENT: usize = 3;
+pub const WOULD_BLOCK: usize = 4;
+pub const UNKNOWN_SYSCALL: usize = 5;
 
-pub const IS_KERROR: usize = 1;
-
-#[derive(Debug)]
-pub enum KError {
-    InvalidAccess(AccessError),
-    InvalidMessage,
-    InvalidRecipient,
-    InvalidSyscall(usize),
-    InvalidArgument(usize),
-    NoMessages,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SyscallError {
+    InsufficientRights(u32),
+    InvalidOperation(u32),
+    InvalidArgument(u32),
+    UnknownSyscall,
+    WouldBlock,
 }
 
-impl From<Message> for KError {
-    fn from(msg: Message) -> Self {
-        match msg.contents[0] {
-            const { INVALID_MESSAGE } => Self::InvalidMessage,
-            const { INVALID_RECIPIENT } => Self::InvalidRecipient,
-            const { INVALID_SYSCALL } => Self::InvalidSyscall(msg.contents[1]),
-            const { INVALID_ARGUMENT } => Self::InvalidArgument(msg.contents[1]),
-            const { INVALID_ACCESS } => Self::InvalidAccess(match msg.contents[1] {
-                0 => AccessError::Read(msg.contents[2] as _),
-                1 => AccessError::Write(msg.contents[2] as _),
-                _ => unreachable!(),
-            }),
-            const { NO_MESSAGES } => Self::NoMessages,
-            _ => unreachable!(),
+impl SyscallError {
+    pub const fn uncook(self) -> RawSyscallError {
+        match self {
+            Self::InsufficientRights(n) => {
+                RawSyscallError::new(NonZeroUsize::new(((n as usize) << 8) | INSUFFICIENT_RIGHTS).unwrap())
+            }
+            Self::InvalidOperation(n) => {
+                RawSyscallError::new(NonZeroUsize::new(((n as usize) << 8) | INVALID_OPERATION).unwrap())
+            }
+            Self::InvalidArgument(n) => {
+                RawSyscallError::new(NonZeroUsize::new(((n as usize) << 8) | INVALID_ARGUMENT).unwrap())
+            }
+            Self::UnknownSyscall => {
+                RawSyscallError::new(NonZeroUsize::new(UNKNOWN_SYSCALL).unwrap())
+            }
+            Self::WouldBlock => RawSyscallError::new(NonZeroUsize::new(WOULD_BLOCK).unwrap()),
         }
     }
 }
 
-#[derive(Debug)]
-#[repr(C, usize)]
-pub enum AccessError {
-    Read(*const u8),
-    Write(*mut u8),
+impl From<SyscallError> for usize {
+    fn from(e: SyscallError) -> Self {
+        e.uncook().value()
+    }
 }
 
-pub const ACCESS_ERROR_READ: usize = 0;
-pub const ACCESS_ERROR_WRITE: usize = 1;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct RawSyscallError(NonZeroUsize);
+
+impl RawSyscallError {
+    pub const fn optional(value: usize) -> Option<Self> {
+        match value {
+            0 => None,
+            _ => Some(Self(unsafe { NonZeroUsize::new_unchecked(value) })),
+        }
+    }
+
+    pub const fn value(self) -> usize {
+        self.0.get()
+    }
+
+    pub const fn new(value: NonZeroUsize) -> Self {
+        Self(value)
+    }
+
+    pub const fn kind(self) -> usize {
+        self.0.get() & 0xFF
+    }
+
+    pub const fn context(self) -> usize {
+        self.0.get() >> 8
+    }
+
+    pub const fn cook(self) -> SyscallError {
+        match self.kind() {
+            INSUFFICIENT_RIGHTS => SyscallError::InsufficientRights(self.context() as u32),
+            INVALID_OPERATION => SyscallError::InvalidOperation(self.context() as u32),
+            INVALID_ARGUMENT => SyscallError::InvalidArgument(self.context() as u32),
+            UNKNOWN_SYSCALL => SyscallError::UnknownSyscall,
+            WOULD_BLOCK => SyscallError::WouldBlock,
+            _ => panic!("invalid syscall error kind"),
+        }
+    }
+}

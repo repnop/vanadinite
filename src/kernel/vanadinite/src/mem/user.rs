@@ -186,6 +186,11 @@ impl<Mode: UserPtrMode, T> RawUserSlice<Mode, T> {
             return Err((self.addr, InvalidUserPtr::Unaligned));
         }
 
+        if self.len == 0 {
+            // FIXME: I think this is fine?
+            return Ok(ValidatedUserSlice { addr: self.addr, len: self.len, typë: self.typë, mode: self.mode });
+        }
+
         let addr_range = self.addr..self.addr.add(core::mem::size_of::<T>() * self.len);
 
         match manager.is_user_region_valid(addr_range, |f| f & Mode::FLAGS) {
@@ -193,6 +198,18 @@ impl<Mode: UserPtrMode, T> RawUserSlice<Mode, T> {
             Err((addr, InvalidRegion::NotMapped)) => Err((addr, InvalidUserPtr::NotMapped)),
             Err((addr, InvalidRegion::InvalidPermissions)) => Err((addr, InvalidUserPtr::InvalidAccess)),
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn addr(&self) -> VirtualAddress {
+        self.addr
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -208,12 +225,20 @@ impl<T> RawUserSlice<ReadWrite, T> {
     }
 }
 
+unsafe impl<Mode: UserPtrMode, T> Send for RawUserSlice<Mode, T> {}
+
 #[derive(Debug)]
 pub struct ValidatedUserSlice<Mode: UserPtrMode, T> {
     addr: VirtualAddress,
     len: usize,
     typë: PhantomData<*mut T>,
     mode: PhantomData<Mode>,
+}
+
+impl<Mode: UserPtrMode, T> ValidatedUserSlice<Mode, T> {
+    pub fn len(&self) -> usize {
+        self.len
+    }
 }
 
 impl<T> ValidatedUserSlice<Read, T> {

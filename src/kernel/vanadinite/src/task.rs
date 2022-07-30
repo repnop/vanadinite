@@ -5,8 +5,10 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use core::num::NonZeroUsize;
+
 use crate::{
-    capabilities::CapabilitySpace,
+    capabilities::{Capability, CapabilityResource, CapabilitySpace},
     mem::{
         manager::{AddressRegionKind, FillOption, MemoryManager, RegionDescription},
         paging::{
@@ -19,16 +21,12 @@ use crate::{
     trap::{FloatingPointRegisters, GeneralRegisters},
     utils::{round_up_to_next, Units},
 };
-use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    vec::Vec,
-};
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 use elf64::{Elf, ProgramSegmentType, Relocation};
 use fdt::Fdt;
 use librust::{
-    message::{Message, Sender},
-    syscalls::{channel::ChannelId, vmspace::VmspaceObjectId},
+    capabilities::CapabilityRights,
+    syscalls::{channel::KERNEL_CHANNEL, vmspace::VmspaceObjectId},
     task::Tid,
 };
 
@@ -37,8 +35,10 @@ use librust::{
 pub struct ThreadControlBlock {
     pub kernel_stack: *mut u8,
     pub kernel_thread_local: *mut u8,
+    pub kernel_global_ptr: *mut u8,
     pub saved_sp: usize,
     pub saved_tp: usize,
+    pub saved_gp: usize,
     pub kernel_stack_size: usize,
 }
 
@@ -47,8 +47,10 @@ impl ThreadControlBlock {
         Self {
             kernel_stack: core::ptr::null_mut(),
             kernel_thread_local: core::ptr::null_mut(),
+            kernel_global_ptr: core::ptr::null_mut(),
             saved_sp: 0,
             saved_tp: 0,
+            saved_gp: 0,
             kernel_stack_size: 0,
         }
     }
@@ -58,7 +60,7 @@ impl ThreadControlBlock {
     /// in the `sstatus` register
     pub unsafe fn the() -> *mut Self {
         let ret;
-        asm!("csrr {}, sstatus", out(reg) ret);
+        core::arch::asm!("csrr {}, sstatus", out(reg) ret);
         ret
     }
 }
@@ -75,17 +77,17 @@ pub struct Context {
 }
 
 pub struct Task {
+    pub tid: Tid,
     pub name: Box<str>,
     pub context: Context,
     pub memory_manager: MemoryManager,
     pub state: TaskState,
-    pub message_queue: VecDeque<(Sender, Message)>,
-    pub promiscuous: bool,
-    pub incoming_channel_request: BTreeSet<Tid>,
-    pub channels: BTreeMap<ChannelId, UserspaceChannel>,
     pub vmspace_objects: BTreeMap<VmspaceObjectId, VmspaceObject>,
     pub vmspace_next_id: usize,
     pub cspace: CapabilitySpace,
+    pub kernel_channel: UserspaceChannel,
+    pub claimed_interrupts: BTreeMap<usize, usize>,
+    pub subscribes_to_events: bool,
 }
 
 impl Task {
@@ -94,8 +96,7 @@ impl Task {
         I: Iterator<Item = &'a str> + Clone,
     {
         let mut memory_manager = MemoryManager::new();
-
-        let cspace = CapabilitySpace::new();
+        let mut cspace = CapabilitySpace::new();
 
         let relocations = elf
             .relocations()
@@ -220,27 +221,23 @@ impl Task {
         }
 
         let tls = elf.program_headers().find(|header| header.r#type == elf64::ProgramSegmentType::Tls).map(|header| {
-            // This is mostly the same as the above, just force 4 KiB alignment
-            // because its not like we can have 8-byte aligned pages.
-            //
-            // TODO: `.tbss`?
-            let n_pages_needed = round_up_to_next(header.memory_size as usize, 4.kib()) / 4.kib();
+            let n_pages_needed = round_up_to_next(header.memory_size as usize + 8 + 16, 4.kib()) / 4.kib();
             let tls_base = memory_manager.find_free_region(PageSize::Kilopage, n_pages_needed);
 
-            // This might actually not be necessary, since in the end the
-            // thread-local loads are done with `tp + offset` but in case this
-            // is important for any possible TLS relocations later, keeping it
-            // the same as above
-            let segment_load_offset = (header.vaddr & (4.kib() - 1)) as usize;
-            let segment_len = header.file_size as usize + segment_load_offset;
+            let segment_len = header.file_size as usize + 8 + 16;
 
             if segment_data.len() < segment_len {
                 segment_data.resize(segment_len, 0);
             }
 
             let segment_file_size = header.file_size as usize;
-            segment_data[segment_load_offset..][..segment_file_size].copy_from_slice(elf.program_segment_data(&header));
-            segment_data[segment_load_offset..][segment_file_size..].fill(0);
+            let tls_base_addr = tls_base.as_usize();
+            segment_data[0..][..8].copy_from_slice(&(tls_base_addr + 8).to_le_bytes()[..]); // ->|
+            segment_data[8..][..8].copy_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]); // <-|
+            segment_data[16..][..8].copy_from_slice(&(tls_base_addr + 24).to_le_bytes()[..]);
+
+            segment_data[24..][..segment_file_size].copy_from_slice(elf.program_segment_data(&header));
+            segment_data[segment_file_size..segment_len].fill(0);
 
             memory_manager.alloc_region(
                 Some(tls_base),
@@ -254,7 +251,7 @@ impl Task {
                 },
             );
 
-            tls_base.add(segment_load_offset).as_usize()
+            tls_base_addr + 24
         });
 
         // We guard the stack on both ends, though a stack underflow is
@@ -262,7 +259,7 @@ impl Task {
         let sp = memory_manager
             .alloc_guarded_region(RegionDescription {
                 size: PageSize::Kilopage,
-                len: 4,
+                len: 16,
                 contiguous: false,
                 flags: USER | READ | WRITE | VALID,
                 fill: FillOption::Unitialized,
@@ -333,18 +330,26 @@ impl Task {
             fp_regs: FloatingPointRegisters::default(),
         };
 
+        let (kernel_channel, user_read) = UserspaceChannel::new();
+        cspace
+            .mint_with_id(
+                KERNEL_CHANNEL,
+                Capability { resource: CapabilityResource::Channel(user_read), rights: CapabilityRights::READ },
+            )
+            .expect("[BUG] kernel channel cap already created?");
+
         Self {
+            tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),
             name: Box::from(name),
             context,
             memory_manager,
             state: TaskState::Running,
-            promiscuous: true,
-            incoming_channel_request: BTreeSet::new(),
-            channels: BTreeMap::new(),
-            message_queue: VecDeque::new(),
             vmspace_objects: BTreeMap::new(),
             vmspace_next_id: 0,
             cspace,
+            kernel_channel,
+            claimed_interrupts: BTreeMap::new(),
+            subscribes_to_events: false,
         }
     }
 }

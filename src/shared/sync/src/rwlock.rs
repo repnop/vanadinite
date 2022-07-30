@@ -83,6 +83,12 @@ impl<T: Send> SpinRwLock<T> {
 unsafe impl<T: Send> Send for SpinRwLock<T> {}
 unsafe impl<T: Send> Sync for SpinRwLock<T> {}
 
+impl<T: Send> core::fmt::Debug for SpinRwLock<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SpinRwLock").finish_non_exhaustive()
+    }
+}
+
 pub struct WriteGuard<'a, T: Send> {
     lock: &'a SpinRwLock<T>,
 }

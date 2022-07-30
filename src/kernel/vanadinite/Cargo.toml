@@ -2,17 +2,15 @@
 name = "vanadinite"
 version = "0.1.0"
 authors = ["Wesley Norris <repnop@outlook.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
-crossbeam-queue = { version = "0.3.2", default-features = false, features = [
-    "alloc",
-] }
+crossbeam-queue = { version = "0.3.2", default-features = false, features = ["alloc"] }
 elf64 = { path = "../../shared/elf64" }
 fdt = "0.1.3"
 librust = { path = "../../shared/librust" }
 log = "0.4.14"
-sbi = { path = "../sbi" }
+sbi = "0.2.0"
 sync = { path = "../../shared/sync" }
 vanadinite_macros = { path = "../vanadinite_macros" }
 volatile = { path = "../../shared/volatile" }

@@ -93,7 +93,7 @@ impl MemoryManager {
 
         let range = at..at.add(size.to_byte_size() * len);
         self.address_map
-            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), kind)
+            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), kind, flags)
             .expect("bad address mapping");
 
         range
@@ -146,12 +146,57 @@ impl MemoryManager {
         let range = at..at.add(size.to_byte_size() * len);
 
         self.address_map
-            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(shared.clone())), kind)
+            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(shared.clone())), kind, flags)
             .unwrap();
 
         (range, shared)
     }
 
+    /// # Safety
+    /// This function is meant to map MMIO devices into userspace processes, and
+    /// will allow aliasing physical memory if used incorrectly.
+    ///
+    /// Memory regions will be mapped using kilopages (TODO: is larger
+    /// granularity necessary?)
+    pub unsafe fn map_mmio_device(
+        &mut self,
+        from: PhysicalAddress,
+        to: Option<VirtualAddress>,
+        len: usize,
+    ) -> Range<VirtualAddress> {
+        let n_pages = crate::utils::round_up_to_next(4.kib(), len) / 4.kib();
+        let at = to.unwrap_or_else(|| self.find_free_region(PageSize::Kilopage, n_pages));
+
+        log::debug!(
+            "Mapping MMIO region at {:#p}: phys={:#p} size={:?} n_pages={}",
+            at,
+            from,
+            PageSize::Kilopage,
+            n_pages
+        );
+
+        let backing = UniquePhysicalRegion::mmio(from, PageSize::Kilopage, n_pages);
+
+        let flags = flags::READ | flags::WRITE | flags::USER | flags::VALID;
+        let iter = backing
+            .physical_addresses()
+            .enumerate()
+            .map(|(i, phys)| (phys, at.add(i * PageSize::Kilopage.to_byte_size())));
+        for (phys_addr, virt_addr) in iter {
+            log::trace!("Mapping {:#p} -> {:#p}", phys_addr, virt_addr);
+            self.table.map(phys_addr, virt_addr, flags, PageSize::Kilopage);
+        }
+
+        let range = at..at.add(PageSize::Kilopage.to_byte_size() * n_pages);
+        self.address_map
+            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), AddressRegionKind::Mmio, flags)
+            .expect("bad address mapping");
+
+        log::trace!("Mapped MMIO at {:#p}-{:#p}", range.start, range.end);
+        range
+    }
+
+    #[track_caller]
     pub fn apply_shared_region(
         &mut self,
         at: Option<VirtualAddress>,
@@ -160,6 +205,17 @@ impl MemoryManager {
         kind: AddressRegionKind,
     ) -> Range<VirtualAddress> {
         let at = at.unwrap_or_else(|| self.find_free_region(region.page_size(), region.n_pages()));
+
+        // FIXME: I suspect there's a bug with the address map where its giving
+        // back a kilopage region inside of a megapage region, but need further
+        // testing to verify. This assert seems to make it go away, probably
+        // because the `time` CSR is used for the random offset.
+        assert!(
+            self.address_map.find(at).unwrap().is_unoccupied(),
+            "Page already mapped at {:#p}:\n{:#?}",
+            at,
+            self.address_map_debug(Some(at))
+        );
 
         let iter = region
             .physical_addresses()
@@ -173,14 +229,18 @@ impl MemoryManager {
 
         let range = at..at.add(region.page_size().to_byte_size() * region.n_pages());
 
-        self.address_map.alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(region)), kind).unwrap();
+        self.address_map
+            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(region)), kind, flags)
+            .unwrap();
 
         range
     }
 
     /// Place a guard page at the given [`VirtualAddress`]
     pub fn guard(&mut self, at: VirtualAddress) {
-        self.address_map.alloc(at..at.add(4.kib()), MemoryRegion::GuardPage, AddressRegionKind::Guard).unwrap();
+        self.address_map
+            .alloc(at..at.add(4.kib()), MemoryRegion::GuardPage, AddressRegionKind::Guard, flags::USER)
+            .unwrap();
         self.table.map(PhysicalAddress::null(), at, flags::USER | flags::VALID, PageSize::Kilopage);
     }
 
@@ -196,6 +256,8 @@ impl MemoryManager {
         let iter = (0..region.page_count()).map(|i| at.add(i * region.page_size().to_byte_size()));
         for virt_addr in iter {
             self.table.unmap(virt_addr);
+            // FIXME: this is unnecessary when unmapping from other tasks than
+            // the current one? need IPIs for that?
             sfence(Some(virt_addr), None);
         }
 
@@ -281,9 +343,10 @@ impl MemoryManager {
         self.table.debug()
     }
 
-    /// Debug printable representation of the [`AddressMap`]
-    pub fn address_map_debug(&self) -> &AddressMap {
-        &self.address_map
+    /// Debug printable representation of the [`AddressMap`] with an optional
+    /// [`VirtualAddress`] to search for
+    pub fn address_map_debug(&self, faulting_addr: Option<VirtualAddress>) -> impl core::fmt::Debug + '_ {
+        self.address_map.debug(faulting_addr)
     }
 
     /// Search for an unoccupied memory region that satisfies the given

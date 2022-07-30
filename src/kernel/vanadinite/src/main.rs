@@ -5,24 +5,23 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![allow(clippy::match_bool, clippy::identity_op, clippy::never_loop, clippy::new_without_default)]
+#![allow(clippy::match_bool, clippy::identity_op, clippy::never_loop, clippy::new_without_default, clippy::unit_arg)]
 #![allow(incomplete_features)]
 #![feature(
     alloc_error_handler,
     allocator_api,
     arbitrary_self_types,
-    asm,
+    asm_sym,
     const_btree_new,
-    const_fn_fn_ptr_basics,
-    const_fn_trait_bound,
     custom_test_frameworks,
-    destructuring_assignment,
     extern_types,
     fn_align,
     inline_const,
+    inline_const_pat,
     map_first_last,
     naked_functions,
     new_uninit,
+    sync_unsafe_cell,
     thread_local
 )]
 #![no_std]
@@ -72,7 +71,7 @@ use core::sync::atomic::AtomicU64;
 use alloc::boxed::Box;
 use fdt::Fdt;
 use mem::kernel_patching::kernel_section_v2p;
-use sbi::{hart_state_management::hart_start, probe_extension, ExtensionAvailability};
+use sbi::{base::probe_extension, base::ExtensionAvailability, hart_state_management::hart_start};
 use scheduler::Scheduler;
 pub use vanadinite_macros::{debug, error, info, trace, warn};
 
@@ -80,9 +79,8 @@ static N_CPUS: AtomicUsize = AtomicUsize::new(1);
 static TIMER_FREQ: AtomicU64 = AtomicU64::new(0);
 static INIT: &[u8] = include_bytes!("../../../../build/init");
 
-cpu_local! {
-    static HART_ID: core::cell::Cell<usize> = core::cell::Cell::new(0);
-}
+#[thread_local]
+static HART_ID: core::cell::Cell<usize> = core::cell::Cell::new(0);
 
 #[no_mangle]
 #[repr(align(4))]
@@ -120,7 +118,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
             if let Some(interrupts) = node.interrupts() {
                 // Try to get stdout loaded ASAP, so register interrupts later
                 // on if there are any
-                stdout_interrupts = Some((device, interrupts, ptr));
+                stdout_interrupts = Some((device, interrupts));
             }
         }
     }
@@ -162,7 +160,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
                                 if let Some(interrupts) = node.interrupts() {
                                     // Try to get stdout loaded ASAP, so register interrupts later
                                     // on if there are any
-                                    stdout_interrupts = Some((device, interrupts, ptr));
+                                    stdout_interrupts = Some((device, interrupts));
                                 }
                             }
                         }
@@ -209,6 +207,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     let n_cpus = fdt.cpus().count();
     N_CPUS.store(n_cpus, Ordering::Release);
+    let mut first_mem_resv = true;
 
     info!("vanadinite version {#brightgreen}", env!("CARGO_PKG_VERSION"));
     info!(blue, "=== Machine Info ===");
@@ -216,6 +215,17 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     info!(" Total CPUs: {}", n_cpus);
     info!(" RAM: {} MiB @ {:#X}", mem_size, mem_start as usize);
     info!(" Timer Clock: {}Hz", timebase_frequency);
+    for memory_reservation in fdt.memory_reservations() {
+        if first_mem_resv {
+            info!(" Reserved Memory Regions:");
+            first_mem_resv = false;
+        }
+
+        let size = memory_reservation.size();
+        let start = memory_reservation.address() as usize;
+        let end = start + size;
+        info!("   {:#p}..{:#p} ({} KiB)", start as *const u8, end as *const u8, size / 4.kib());
+    }
     info!(blue, "=== SBI Implementation ===");
     info!(" Implementor: {:?} (version: {#green'{}.{}})", sbi::base::impl_id(), impl_major, impl_minor);
     info!(" Spec Version: {#green'{}.{}}", spec_major, spec_minor);
@@ -252,22 +262,26 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
         plic.init(ndevs, contexts);
         plic.set_context_threshold(platform::current_plic_context(), 0);
+        plic.enable_interrupt(platform::current_plic_context(), 8);
+        plic.set_interrupt_priority(8, 7);
 
         debug!("Registering PLIC @ {:#p}", ic_virt);
         interrupts::register_plic(plic);
     }
 
-    if let Some((device, interrupts, ptr)) = stdout_interrupts {
+    if let Some((device, interrupts)) = stdout_interrupts {
         for interrupt in interrupts {
-            device.register_isr(interrupt, ptr.as_usize());
+            device.register_isr(interrupt);
         }
     }
 
     let ptr = Box::leak(Box::new(task::ThreadControlBlock {
         kernel_stack: mem::alloc_kernel_stack(8.kib()),
         kernel_thread_local: cpu_local::tp(),
+        kernel_global_ptr: asm::gp(),
         saved_sp: 0,
         saved_tp: 0,
+        saved_gp: 0,
         kernel_stack_size: 8.kib(),
     }));
 
@@ -322,8 +336,10 @@ extern "C" fn kalt(hart_id: usize) -> ! {
     let ptr = Box::leak(Box::new(task::ThreadControlBlock {
         kernel_stack: mem::alloc_kernel_stack(8.kib()),
         kernel_thread_local: cpu_local::tp(),
+        kernel_global_ptr: asm::gp(),
         saved_sp: 0,
         saved_tp: 0,
+        saved_gp: 0,
         kernel_stack_size: 8.kib(),
     }));
 
@@ -338,7 +354,7 @@ extern "C" fn kalt(hart_id: usize) -> ! {
 #[no_mangle]
 unsafe extern "C" fn other_hart_boot() -> ! {
     #[rustfmt::skip]
-    asm!(
+    core::arch::asm!(
         "
             # We start here with only two registers in a defined state:
             #  a0: hart id
@@ -448,14 +464,16 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
         unsafe { uart.write_volatile(b'\n') };
         loop {
-            unsafe { asm!("wfi") };
+            unsafe { core::arch::asm!("wfi") };
         }
     }
 
     error!("{}", info);
     error!("Shutting hart down");
 
-    sbi::hart_state_management::hart_stop().unwrap()
+    sbi::hart_state_management::hart_stop().unwrap();
+    #[allow(unreachable_code)]
+    loop {}
 }
 
 #[no_mangle]

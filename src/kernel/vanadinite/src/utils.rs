@@ -9,7 +9,7 @@
 macro_rules! dbg {
     ($e:expr) => {{
         let value = $e;
-        crate::println!(concat!(stringify!($e), " = {:?}"), value);
+        crate::println!(concat!("[", file!(), ":", line!(), "] ", stringify!($e), " = {:?}"), value);
         value
     }};
 }
@@ -79,7 +79,7 @@ pub fn ticks_per_us(target_us: u64, hz: u64) -> u64 {
 pub fn manual_debug_point() {
     unsafe {
         loop {
-            asm!("nop");
+            core::arch::asm!("nop");
         }
     }
 }
@@ -97,14 +97,17 @@ pub fn round_up_to_next(n: usize, size: usize) -> usize {
 pub trait Units: core::ops::Mul<Self, Output = Self> + Sized {
     const KIB: Self;
 
+    #[must_use]
     fn kib(self) -> Self {
         self * <Self as Units>::KIB
     }
 
+    #[must_use]
     fn mib(self) -> Self {
         self * Self::KIB * Self::KIB
     }
 
+    #[must_use]
     fn gib(self) -> Self {
         self * Self::KIB * Self::KIB * Self::KIB
     }
@@ -121,3 +124,15 @@ macro_rules! impl_units {
 }
 
 impl_units!(u16, u32, u64, u128, i16, i32, i64, i128, usize, isize);
+
+pub struct SameHartDeadlockDetection;
+
+impl sync::DeadlockDetection for SameHartDeadlockDetection {
+    fn would_deadlock(metadata: usize) -> bool {
+        crate::HART_ID.get() == metadata
+    }
+
+    fn gather_metadata() -> usize {
+        crate::HART_ID.get()
+    }
+}

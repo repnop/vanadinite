@@ -5,11 +5,16 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-pub mod rust_2018 {
+pub mod rust_2021 {
     pub use crate::{dbg, print, println};
-    pub use alloc::prelude::v1::*;
-    pub use alloc::{collections::VecDeque, format, vec};
-    pub use core::prelude::rust_2018::*;
-    pub use core::{assert, assert_eq, assert_ne, panic, todo, unreachable};
-    pub use librust::{task::Tid, taskgroup::TaskGroupShareable};
+    pub use alloc::{
+        boxed::Box,
+        collections::VecDeque,
+        format,
+        string::{String, ToString},
+        vec,
+        vec::Vec,
+    };
+    pub use core::prelude::rust_2021::*;
+    pub use core::{assert, assert_eq, assert_ne, matches, panic, todo, unreachable};
 }

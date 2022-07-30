@@ -7,12 +7,12 @@
 
 use crate::{Result, VanadiniteBuildOptions};
 use anyhow::Context;
-use clap::Clap;
+use clap::{ArgEnum, Subcommand};
 use std::fs;
 use tar::{Builder, Header};
 use xshell::{cmd, cp, mkdir_p, pushd, pushenv, rm_rf};
 
-#[derive(Clap, Clone, Copy)]
+#[derive(ArgEnum, Clone, Copy)]
 #[clap(rename_all = "snake_case")]
 pub enum Platform {
     Virt,
@@ -28,7 +28,7 @@ impl std::fmt::Display for Platform {
     }
 }
 
-#[derive(Clap)]
+#[derive(Subcommand)]
 #[clap(rename_all = "snake_case")]
 pub enum BuildTarget {
     /// The `vanadinite` kernel
@@ -88,7 +88,7 @@ pub fn build(target: BuildTarget) -> Result<()> {
             rm_rf(&init_tar)?;
 
             let _dir = pushd("src/userspace")?;
-            cmd!("cargo build --release --workspace").run()?;
+            cmd!("cargo build --release --workspace --target riscv64gc-unknown-none-elf").run()?;
 
             let out = fs::File::create(init_tar)?;
             let mut archive = Builder::new(out);
@@ -124,9 +124,11 @@ pub fn build(target: BuildTarget) -> Result<()> {
         BuildTarget::Vanadinite(build_opts) => {
             let features = format!("platform.{} {}", build_opts.platform, build_opts.kernel_features);
 
+            let opt_level = if build_opts.debug_build { "--profile=dev" } else { "--release" };
+            let opt_level = &[opt_level][..];
             let (subcmd, test) = match build_opts.test {
                 true => ("rustc", &["--", "--test"][..]),
-                false => ("build", &["--release"][..]),
+                false => ("build", opt_level),
             };
 
             let _dir = pushd("./src/kernel");
@@ -163,7 +165,7 @@ pub fn build(target: BuildTarget) -> Result<()> {
             cmd!("git submodule update --remote submodules/opensbi").run()?;
             let _dir = pushd("./submodules/opensbi")?;
 
-            cmd!("make PLATFORM=generic FW_PIC=no FW_PAYLOAD_PATH=../../src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite.bin").run()?;
+            cmd!("make PLATFORM=generic LLVM=1 FW_PAYLOAD_PATH=../../src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite.bin").run()?;
 
             cp("build/platform/generic/firmware/fw_jump.bin", "../../build/opensbi-riscv64-generic-fw_jump.bin")?;
             cp("build/platform/generic/firmware/fw_jump.elf", "../../build/opensbi-riscv64-generic-fw_jump.elf")?;

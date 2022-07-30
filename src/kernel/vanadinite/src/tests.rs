@@ -94,8 +94,10 @@ pub extern "C" fn ktest(hart_id: usize, fdt: *const u8) -> ! {
     let ptr = Box::leak(Box::new(task::ThreadControlBlock {
         kernel_stack: mem::alloc_kernel_stack(8.kib()),
         kernel_thread_local: cpu_local::tp(),
+        kernel_global_ptr: crate::asm::gp(),
         saved_sp: 0,
         saved_tp: 0,
+        saved_gp: 0,
         kernel_stack_size: 8.kib(),
     }));
 

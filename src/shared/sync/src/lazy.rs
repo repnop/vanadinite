@@ -77,5 +77,11 @@ impl<T, F: Fn() -> T> core::ops::Deref for Lazy<T, F> {
     }
 }
 
+impl<T, F: Fn() -> T> core::ops::DerefMut for Lazy<T, F> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.get_mut()
+    }
+}
+
 unsafe impl<T: Send, F: Fn() -> T> Send for Lazy<T, F> {}
 unsafe impl<T: Send, F: Fn() -> T> Sync for Lazy<T, F> {}

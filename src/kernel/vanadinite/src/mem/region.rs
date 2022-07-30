@@ -70,6 +70,7 @@ impl PhysicalRegion {
 #[derive(Debug, PartialEq)]
 enum PhysicalRegionKind {
     Contiguous(PhysicalPage),
+    Mmio(PhysicalPage),
     Sparse(Vec<PhysicalPage>),
 }
 
@@ -81,9 +82,16 @@ pub struct UniquePhysicalRegion {
 }
 
 impl UniquePhysicalRegion {
+    /// This function allows aliasing physical memory at arbitrary addresses,
+    /// bypassing the physical frame allocator.
+    #[track_caller]
+    pub fn mmio(at: PhysicalAddress, page_size: PageSize, n_pages: usize) -> Self {
+        Self { kind: PhysicalRegionKind::Mmio(PhysicalPage::from_ptr(at.as_mut_ptr())), page_size, n_pages }
+    }
+
     #[track_caller]
     pub fn alloc_contiguous(page_size: PageSize, n_pages: usize) -> Self {
-        log::debug!("Allocating page for contiguous region");
+        // log::trace!("Allocating page for contiguous region");
         let mut lock = PHYSICAL_MEMORY_ALLOCATOR.lock();
 
         let kind = PhysicalRegionKind::Contiguous(unsafe {
@@ -104,7 +112,7 @@ impl UniquePhysicalRegion {
             let mut pages = Vec::with_capacity(n_pages);
 
             for _ in 0..n_pages {
-                log::debug!("Allocating page for sparse region");
+                // log::trace!("Allocating page for sparse region");
                 pages.push(allocator.alloc(page_size).expect("couldn't alloc sparse region"));
             }
 
@@ -116,7 +124,7 @@ impl UniquePhysicalRegion {
 
     pub fn physical_addresses(&self) -> impl Iterator<Item = PhysicalAddress> + '_ {
         let contig = match &self.kind {
-            PhysicalRegionKind::Contiguous(start) => {
+            PhysicalRegionKind::Contiguous(start) | PhysicalRegionKind::Mmio(start) => {
                 Some((0..self.n_pages).map(move |i| start.as_phys_address().offset(i * self.page_size.to_byte_size())))
             }
             PhysicalRegionKind::Sparse(_) => None,
@@ -124,7 +132,7 @@ impl UniquePhysicalRegion {
 
         let sparse = match &self.kind {
             PhysicalRegionKind::Sparse(pages) => Some(pages.iter().map(|p| p.as_phys_address())),
-            PhysicalRegionKind::Contiguous(_) => None,
+            PhysicalRegionKind::Contiguous(_) | PhysicalRegionKind::Mmio(_) => None,
         };
 
         contig.into_iter().flatten().chain(sparse.into_iter().flatten())
@@ -132,9 +140,11 @@ impl UniquePhysicalRegion {
 
     pub fn copy_data_into(&mut self, data: &[u8]) {
         for (phys_addr, data) in self.physical_addresses().zip(data.chunks(self.page_size.to_byte_size())) {
-            let copy_to = unsafe {
-                core::slice::from_raw_parts_mut(phys2virt(phys_addr).as_mut_ptr(), self.page_size.to_byte_size())
-            };
+            let virt_addr = phys2virt(phys_addr).as_mut_ptr();
+
+            log::trace!("copy_data_into: phys_addr={:#p} virt_addr={:#p} len={}", phys_addr, virt_addr, data.len());
+
+            let copy_to = unsafe { core::slice::from_raw_parts_mut(virt_addr, self.page_size.to_byte_size()) };
 
             copy_to[..data.len()].copy_from_slice(data);
         }
@@ -142,9 +152,11 @@ impl UniquePhysicalRegion {
 
     pub fn zero(&mut self) {
         for phys_addr in self.physical_addresses() {
-            let copy_to = unsafe {
-                core::slice::from_raw_parts_mut(phys2virt(phys_addr).as_mut_ptr(), self.page_size.to_byte_size())
-            };
+            let virt_addr = phys2virt(phys_addr).as_mut_ptr();
+
+            log::trace!("zero: phys_addr={:#p} virt_addr={:#p}", phys_addr, virt_addr);
+
+            let copy_to = unsafe { core::slice::from_raw_parts_mut(virt_addr, self.page_size.to_byte_size()) };
 
             copy_to.fill(0);
         }
@@ -176,6 +188,8 @@ impl Drop for UniquePhysicalRegion {
                     unsafe { allocator.dealloc(page, self.page_size) };
                 }
             }
+            // These are directly mapped, so we don't need to deallocate pages
+            PhysicalRegionKind::Mmio(_) => {}
         }
     }
 }

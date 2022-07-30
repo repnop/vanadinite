@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod stvec {
+    use core::arch::asm;
     #[inline(always)]
     pub fn set(ptr: unsafe extern "C" fn() -> !) {
         unsafe { asm!("csrw stvec, {}", in(reg) ptr) };
@@ -13,6 +14,7 @@ pub mod stvec {
 }
 
 pub mod sie {
+    use core::arch::asm;
     #[inline(always)]
     pub fn enable() {
         unsafe { asm!("csrw sie, {}", in(reg) 0x222) };
@@ -29,6 +31,7 @@ pub mod sie {
 }
 
 pub mod sip {
+    use core::arch::asm;
     #[inline(always)]
     pub fn read() -> usize {
         let val: usize;
@@ -40,6 +43,7 @@ pub mod sip {
 }
 
 pub mod sstatus {
+    use core::arch::asm;
     pub fn enable_interrupts() {
         unsafe { asm!("csrsi sstatus, 2") };
     }
@@ -48,18 +52,23 @@ pub mod sstatus {
         unsafe { asm!("csrci sstatus, 2") };
     }
 
-    pub struct TemporaryUserMemoryAccess(());
+    pub struct TemporaryUserMemoryAccess(bool);
 
     impl TemporaryUserMemoryAccess {
         pub fn new() -> Self {
+            let disable_on_drop: usize;
+            unsafe { asm!("csrr {}, sstatus", out(reg) disable_on_drop) };
             unsafe { asm!("csrs sstatus, {}", inout(reg) 1 << 18 => _) };
-            Self(())
+
+            Self((disable_on_drop >> 18) & 1 == 0)
         }
     }
 
     impl Drop for TemporaryUserMemoryAccess {
         fn drop(&mut self) {
-            unsafe { asm!("csrc sstatus, {}", inout(reg) 1 << 18 => _) };
+            if self.0 {
+                unsafe { asm!("csrc sstatus, {}", inout(reg) 1 << 18 => _) };
+            }
         }
     }
 
@@ -98,6 +107,7 @@ pub mod sstatus {
 }
 
 pub mod time {
+    use core::arch::asm;
     pub fn read() -> u64 {
         let value: u64;
 
@@ -108,6 +118,7 @@ pub mod time {
 }
 
 pub mod cycle {
+    use core::arch::asm;
     pub fn read() -> usize {
         let value: usize;
 
@@ -118,6 +129,7 @@ pub mod cycle {
 }
 
 pub mod sscratch {
+    use core::arch::asm;
     pub fn read() -> usize {
         let value: usize;
 
@@ -133,6 +145,7 @@ pub mod sscratch {
 
 pub mod satp {
     use crate::mem::paging::PhysicalAddress;
+    use core::arch::asm;
 
     #[derive(Debug, Clone, Copy)]
     pub struct Satp {
@@ -153,7 +166,7 @@ pub mod satp {
         unsafe { asm!("csrr {}, satp", out(reg) value) };
 
         let asid = ((value >> 44) & 0xFFFF) as u16;
-        let root_page_table = PhysicalAddress::new(value << 12);
+        let root_page_table = PhysicalAddress::new((value & ((1 << 44) - 1)) << 12);
         let mode = match value >> 60 {
             0 => SatpMode::Bare,
             8 => SatpMode::Sv39,

@@ -2,13 +2,14 @@
 name = "std"
 version = "0.1.0"
 authors = ["repnop <repnop@repnop.dev>"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["rt0"]
 
 [dependencies]
+# Cursed, TODO: remove this once IDL is ready
+json = { path = "../json" }
 librust = { path = "../../../shared/librust", features = ["alloc"] }
-rt0 = { path = "../rt0", optional = true }
+sync = { path = "../../../shared/sync" }

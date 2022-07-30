@@ -5,14 +5,15 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::sync::SyncRefCell;
 use core::{
     alloc::{AllocError, Allocator, GlobalAlloc, Layout},
     cell::Cell,
     ptr::{self, NonNull},
 };
 use librust::{
-    message::SyscallResult,
-    syscalls::allocation::{self, AllocationOptions, MemoryPermissions},
+    syscalls::mem::{self, AllocationOptions, MemoryPermissions},
+    units::Bytes,
 };
 
 #[derive(Clone, Copy)]
@@ -26,17 +27,17 @@ impl TaskLocal {
 
 unsafe impl Allocator for TaskLocal {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, core::alloc::AllocError> {
-        TASK_LOCAL_ALLOCATOR.allocate(layout)
+        TASK_LOCAL_ALLOCATOR.borrow().allocate(layout)
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        TASK_LOCAL_ALLOCATOR.deallocate(ptr, layout)
+        TASK_LOCAL_ALLOCATOR.borrow().deallocate(ptr, layout)
     }
 }
 
-#[thread_local]
-static TASK_LOCAL_ALLOCATOR: TaskLocalAllocator = TaskLocalAllocator::new();
+static TASK_LOCAL_ALLOCATOR: SyncRefCell<TaskLocalAllocator> = SyncRefCell::new(TaskLocalAllocator::new());
 
+unsafe impl Send for TaskLocalAllocator {}
 struct TaskLocalAllocator {
     slabs: [(usize, Cell<*mut u8>); 16],
     // TODO: have a catch-all backup for allocations >32KiB
@@ -79,32 +80,32 @@ impl TaskLocalAllocator {
 
             let mem_size = slab.0 * 64;
             let perms = MemoryPermissions::READ | MemoryPermissions::WRITE;
-            let mut options = AllocationOptions::None;
+            let mut options = AllocationOptions::PRIVATE;
 
             if mem_size >= 2 * 1024 * 1024 {
                 //println!("Asking for large pages");
-                options = options | AllocationOptions::LargePage;
+                options = options | AllocationOptions::LARGE_PAGE;
             }
 
-            let new_mem = match allocation::alloc_virtual_memory(mem_size, options, perms) {
-                SyscallResult::Ok(new_mem) => new_mem,
-                SyscallResult::Err(_) => return Err(AllocError),
+            let (_, new_mem) = match mem::alloc_virtual_memory(Bytes(mem_size), options, perms) {
+                Result::Ok(new_mem) => new_mem,
+                Result::Err(_) => return Err(AllocError),
             };
 
             //println!("New mem is at {:#p}", new_mem);
 
             for i in 0..63 {
-                let curr = unsafe { new_mem.add(i * slab.0).cast::<usize>() };
-                let next = unsafe { new_mem.add((i + 1) * slab.0) };
+                let curr = unsafe { new_mem.cast::<u8>().add(i * slab.0).cast::<usize>() };
+                let next = unsafe { new_mem.cast::<u8>().add((i + 1) * slab.0) };
 
                 //println!("Setting {:#p} to point to {:#p}", curr, next);
 
                 unsafe { *curr = next as usize };
             }
 
-            unsafe { *new_mem.add(63 * slab.0).cast::<usize>() = 0 };
+            unsafe { *new_mem.cast::<u8>().add(63 * slab.0).cast::<usize>() = 0 };
 
-            slab_head = new_mem;
+            slab_head = new_mem.cast::<u8>();
         }
 
         let next_ptr = unsafe { *slab_head.cast::<usize>() } as *mut u8;
@@ -126,7 +127,7 @@ struct GlobalTaskLocalAllocator;
 
 unsafe impl GlobalAlloc for GlobalTaskLocalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        match TASK_LOCAL_ALLOCATOR.allocate(layout) {
+        match TASK_LOCAL_ALLOCATOR.borrow().allocate(layout) {
             Ok(ptr) => ptr.as_ptr() as *mut u8,
             Err(_) => core::ptr::null_mut(),
         }
@@ -134,7 +135,7 @@ unsafe impl GlobalAlloc for GlobalTaskLocalAllocator {
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         if !ptr.is_null() {
-            TASK_LOCAL_ALLOCATOR.deallocate(NonNull::new_unchecked(ptr), layout)
+            TASK_LOCAL_ALLOCATOR.borrow().deallocate(NonNull::new_unchecked(ptr), layout)
         }
     }
 }

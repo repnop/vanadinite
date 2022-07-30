@@ -8,13 +8,12 @@
 pub mod round_robin;
 
 use crate::{
-    cpu_local, csr,
+    csr,
     task::{Context, Task},
-    utils::ticks_per_us,
+    utils::{ticks_per_us, SameHartDeadlockDetection},
 };
-use alloc::{collections::BTreeMap, sync::Arc};
+use alloc::{boxed::Box, collections::BTreeMap, sync::Arc};
 use core::{
-    cell::Cell,
     num::NonZeroUsize,
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -31,8 +30,58 @@ static N_TASKS: AtomicUsize = AtomicUsize::new(0);
 //    SCHEDULER.0.write().replace(scheduler).expect("reinitialized scheduler!");
 //}
 
+#[derive(Debug, Clone)]
+#[repr(transparent)]
+pub struct LockedTask(Arc<SpinMutex<Task, SameHartDeadlockDetection>>);
+pub struct LockedTaskGuard<'a>(sync::mutex::SpinMutexGuard<'a, Task, SameHartDeadlockDetection>);
+
+impl core::ops::Deref for LockedTaskGuard<'_> {
+    type Target = Task;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+impl core::ops::DerefMut for LockedTaskGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl LockedTask {
+    pub fn new(task: Task) -> Self {
+        Self(Arc::new(SpinMutex::new(task)))
+    }
+
+    pub fn lock(&self) -> LockedTaskGuard<'_> {
+        LockedTaskGuard(self.0.lock())
+    }
+
+    pub fn try_lock(&self) -> Option<LockedTaskGuard<'_>> {
+        self.0.try_lock().map(LockedTaskGuard)
+    }
+}
+
+pub struct WakeToken {
+    tid: Tid,
+    work: Box<dyn FnOnce(&mut Task) + Send>,
+}
+
+impl WakeToken {
+    pub fn new(tid: Tid, work: impl FnOnce(&mut Task) + Send + 'static) -> Self {
+        Self { tid, work: Box::new(work) }
+    }
+}
+
+impl core::fmt::Debug for WakeToken {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("WakeToken").field("tid", &self.tid).finish_non_exhaustive()
+    }
+}
+
 pub struct TaskList {
-    map: SpinRwLock<BTreeMap<Tid, Arc<SpinMutex<Task>>>>,
+    map: SpinRwLock<BTreeMap<Tid, LockedTask>>,
     next_id: AtomicUsize,
 }
 
@@ -41,11 +90,12 @@ impl TaskList {
         Self { map: SpinRwLock::new(BTreeMap::new()), next_id: AtomicUsize::new(1) }
     }
 
-    pub fn insert(&self, task: Task) -> (Tid, Arc<SpinMutex<Task>>) {
+    pub fn insert(&self, mut task: Task) -> (Tid, LockedTask) {
         let tid = Tid::new(NonZeroUsize::new(self.next_id.load(Ordering::Acquire)).unwrap());
-        let task = Arc::new(SpinMutex::new(task));
+        task.tid = tid;
+        let task: LockedTask = LockedTask::new(task);
         // FIXME: reuse older pids at some point
-        let _ = self.map.write().insert(tid, Arc::clone(&task));
+        let _ = self.map.write().insert(tid, LockedTask::clone(&task));
         if self.next_id.fetch_add(1, Ordering::AcqRel) == usize::MAX {
             todo!("something something overflow");
         }
@@ -55,7 +105,12 @@ impl TaskList {
         (tid, task)
     }
 
-    pub fn remove(&self, tid: Tid) -> Option<Arc<SpinMutex<Task>>> {
+    pub fn insert_with(&self, f: impl FnOnce(Tid) -> Task) -> (Tid, LockedTask) {
+        let tid = Tid::new(NonZeroUsize::new(self.next_id.load(Ordering::Acquire)).unwrap());
+        self.insert(f(tid))
+    }
+
+    pub fn remove(&self, tid: Tid) -> Option<LockedTask> {
         let res = self.map.write().remove(&tid);
 
         if res.is_some() {
@@ -65,26 +120,19 @@ impl TaskList {
         res
     }
 
-    pub fn get(&self, tid: Tid) -> Option<Arc<SpinMutex<Task>>> {
+    pub fn get(&self, tid: Tid) -> Option<LockedTask> {
         self.map.read().get(&tid).cloned()
     }
-
-    pub fn active_on_cpu(&self) -> Option<Arc<SpinMutex<Task>>> {
-        match CURRENT_TASK.get() {
-            Some(tid) => self.get(tid),
-            None => None,
-        }
-    }
-}
-
-cpu_local! {
-    pub static CURRENT_TASK: Cell<Option<Tid>> = Cell::new(None);
 }
 
 pub trait Scheduler: Send {
     fn schedule(&self) -> !;
     fn enqueue(&self, task: Task) -> Tid;
+    fn enqueue_with(&self, f: impl FnOnce(Tid) -> Task) -> Tid;
     fn dequeue(&self, tid: Tid);
+    fn block(&self, tid: Tid);
+    fn unblock(&self, token: WakeToken);
+    fn active_on_cpu(&self) -> Option<LockedTask>;
 }
 
 fn sleep() -> ! {
@@ -94,7 +142,7 @@ fn sleep() -> ! {
 
     #[rustfmt::skip]
     unsafe {
-        asm!("
+        core::arch::asm!("
             1: wfi
                j 1b
         ", options(noreturn))
@@ -105,7 +153,7 @@ fn sleep() -> ! {
 #[no_mangle]
 unsafe extern "C" fn return_to_usermode(_registers: &Context) -> ! {
     #[rustfmt::skip]
-    asm!("
+    core::arch::asm!("
         li t0, 1 << 8
         csrc sstatus, t0
         li t0, 1 << 19

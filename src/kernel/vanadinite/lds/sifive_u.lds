@@ -59,7 +59,7 @@ SECTIONS {
         . = ALIGN(4K);
         PROVIDE(__tdata_start = .);
         
-        *(.tdata .tdata.*)
+        *(.tdata .tdata.* .tbss .tbss.*);
 
         . = ALIGN(4K);
         PROVIDE(__tdata_end = .);

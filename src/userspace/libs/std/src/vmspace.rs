@@ -8,25 +8,30 @@
 use core::marker::PhantomData;
 
 use librust::{
-    error::KError,
-    message::SyscallResult,
+    capabilities::{Capability, CapabilityPtr, CapabilityRights},
+    error::SyscallError,
     syscalls::{
-        allocation::MemoryPermissions,
+        channel::ChannelMessage,
+        mem::{AllocationOptions, MemoryPermissions},
         vmspace::{self, VmspaceObjectId, VmspaceObjectMapping, VmspaceSpawnEnv},
     },
     task::Tid,
+    units::Bytes,
 };
 
 pub struct Vmspace {
+    name: String,
     id: VmspaceObjectId,
+    names: Vec<String>,
+    caps_to_send: Vec<Capability>,
 }
 
 impl Vmspace {
     #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
+    pub fn new(name: &str) -> Self {
         let id = vmspace::create_vmspace().unwrap();
 
-        Self { id }
+        Self { name: name.to_string(), id, names: Vec::new(), caps_to_send: Vec::new() }
     }
 
     pub fn create_object<'b>(
@@ -34,22 +39,29 @@ impl Vmspace {
         address: *const u8,
         size: usize,
         permissions: MemoryPermissions,
-    ) -> Result<VmspaceObject<'b, '_>, KError> {
+    ) -> Result<VmspaceObject<'b, '_>, SyscallError> {
         match vmspace::alloc_vmspace_object(self.id, VmspaceObjectMapping { address, size, permissions }) {
-            SyscallResult::Ok((ours, theirs)) => Ok(VmspaceObject {
+            Ok((ours, theirs)) => Ok(VmspaceObject {
                 vmspace_address: theirs,
                 mapped_memory: unsafe { core::slice::from_raw_parts_mut(ours, size) },
                 _vmspace: PhantomData,
             }),
-            SyscallResult::Err(e) => Err(e),
+            Err(e) => Err(e),
         }
     }
 
-    pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<Tid, KError> {
-        match vmspace::spawn_vmspace(self.id, env) {
-            SyscallResult::Ok(tid) => Ok(tid),
-            SyscallResult::Err(e) => Err(e),
-        }
+    pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<CapabilityPtr, SyscallError> {
+        let cptr = vmspace::spawn_vmspace(self.id, &self.name, env)?;
+
+        let channel = crate::ipc::IpcChannel::new(cptr);
+        channel.temp_send_json(ChannelMessage::default(), &self.names, &self.caps_to_send[..])?;
+
+        Ok(cptr)
+    }
+
+    pub fn grant(&mut self, name: &str, cptr: CapabilityPtr, rights: CapabilityRights) {
+        self.names.push(name.into());
+        self.caps_to_send.push(Capability { cptr, rights });
     }
 }
 

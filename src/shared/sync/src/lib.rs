@@ -5,12 +5,11 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(const_fn_trait_bound)]
 #![no_std]
 
-mod lazy;
-mod mutex;
-mod rwlock;
+pub mod lazy;
+pub mod mutex;
+pub mod rwlock;
 
 use core::{
     marker::PhantomData,
@@ -34,5 +33,34 @@ impl<T> AtomicConstPtr<T> {
 
     pub fn load(&self, ordering: Ordering) -> *const T {
         self.0.load(ordering)
+    }
+}
+
+pub trait DeadlockDetection {
+    fn would_deadlock(metadata: usize) -> bool;
+    fn gather_metadata() -> usize;
+}
+
+pub struct NoCheck;
+
+impl DeadlockDetection for NoCheck {
+    fn would_deadlock(_: usize) -> bool {
+        false
+    }
+
+    fn gather_metadata() -> usize {
+        0
+    }
+}
+
+pub struct Immediate;
+
+impl DeadlockDetection for Immediate {
+    fn would_deadlock(_: usize) -> bool {
+        true
+    }
+
+    fn gather_metadata() -> usize {
+        0
     }
 }

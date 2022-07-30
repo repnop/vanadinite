@@ -4,4 +4,5 @@ resolver = "2"
 exclude = ["init"]
 
 [profile.release]
-debug = true
+debug = 2
+lto = "fat"

@@ -92,6 +92,24 @@ impl PageTableEntry {
     }
 }
 
+impl core::fmt::Debug for PageTableEntry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "PageTableEntry(")?;
+        match self.kind() {
+            EntryKind::Leaf => {
+                write!(f, "Leaf, flags={:?}, ppn={:?}", self.flags(), self.ppn())?;
+            }
+            EntryKind::NotValid => {
+                write!(f, "NotValid")?;
+            }
+            EntryKind::Branch(next_level) => {
+                write!(f, "Branch, next_level={:#p}", next_level)?;
+            }
+        }
+        write!(f, ")")
+    }
+}
+
 pub enum EntryKind {
     NotValid,
     Leaf,
@@ -117,6 +135,7 @@ impl VirtualAddress {
     }
 
     #[allow(clippy::should_implement_trait)]
+    #[must_use]
     #[track_caller]
     pub fn add(self, bytes: usize) -> Self {
         match self.checked_add(bytes) {
@@ -140,6 +159,7 @@ impl VirtualAddress {
         Some(new)
     }
 
+    #[must_use]
     #[track_caller]
     pub fn offset(self, offset: isize) -> Self {
         match self.checked_offset(offset) {
@@ -172,6 +192,7 @@ impl VirtualAddress {
     ///
     /// You must ensure this cannot generate an invalid [`VirtualAddress`], e.g.
     /// that it does not lie in the address hole between user and kernel space
+    #[must_use]
     pub unsafe fn unchecked_offset(self, offset: isize) -> Self {
         if offset.is_positive() {
             Self(self.0 + offset as usize)
@@ -203,10 +224,12 @@ impl VirtualAddress {
         self.0 == 0
     }
 
+    #[must_use]
     pub fn align_down_to(self, size: PageSize) -> Self {
         Self(self.0 & !(size.to_byte_size() - 1))
     }
 
+    #[must_use]
     pub fn align_to_next(self, size: PageSize) -> Self {
         Self(self.align_down_to(size).0 + size.to_byte_size())
     }
@@ -301,8 +324,13 @@ impl PhysicalAddress {
         PhysicalAddress(addr)
     }
 
+    #[must_use]
+    #[track_caller]
     pub fn offset(self, bytes: usize) -> Self {
-        Self(self.0 + bytes)
+        match self.0.checked_add(bytes) {
+            Some(value) => Self(value),
+            None => panic!("physical address wrapped overflow: {:#p} + {:#x}", self, bytes),
+        }
     }
 
     pub fn from_ptr<T>(ptr: *const T) -> Self {

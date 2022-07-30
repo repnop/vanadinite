@@ -1,0 +1,18 @@
+[package]
+name = "network"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+alchemy = { path = "../../libs/alchemy" }
+dhcp = { path = "../../libs/dhcp" }
+librust = { path = "../../../shared/librust" }
+json = { path = "../../libs/json" }
+netstack = { path = "../../libs/netstack" }
+present = { path = "../../libs/present" }
+std = { path = "../../libs/std" }
+sync = { path = "../../../shared/sync" }
+virtio = { path = "../../libs/virtio" }
+volatile = { path = "../../../shared/volatile" }

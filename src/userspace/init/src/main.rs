@@ -5,82 +5,92 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(asm, naked_functions, start, lang_items)]
-
-mod rt_init;
-
-use std::{
-    ipc,
-    librust::{
-        self,
-        message::KernelNotification,
-        syscalls::{allocation::MemoryPermissions, channel, ReadMessage},
-    },
+use librust::{
+    self,
+    capabilities::{CapabilityPtr, CapabilityRights},
+    syscalls::mem::MemoryPermissions,
 };
 
-const HELLO_FRIEND: &str = "Hello, friend!";
-static mut FDT: *const u8 = core::ptr::null();
 static SERVERS: &[u8] = include_bytes!("../../../../build/initfs.tar");
 
+static INIT_ORDER: &str = r#"{
+    "servers": [
+        {
+            "name": "devicemgr",
+            "caps": ["fdt"],
+        },
+        {
+            "name": "stdio",
+            "caps": ["devicemgr"],
+        },
+        {
+            "name": "virtiomgr",
+            "caps": ["devicemgr", "stdio"],
+        },
+        {
+            "name": "filesystem",
+            "caps": ["virtiomgr", "stdio"],
+        },
+        {
+            "name": "network",
+            "caps": ["virtiomgr", "stdio"],
+        },
+        {
+            "name": "servicemgr",
+            "caps": ["devicemgr", "stdio", "network"],
+        },
+        {
+            "name": "echonet",
+            "caps": ["stdio", "network"],
+        },
+    ]
+}"#;
+
+json::derive! {
+    Deserialize,
+    struct InitOrder {
+        servers: Vec<Server>,
+    }
+}
+
+json::derive! {
+    Deserialize,
+    struct Server {
+        name: String,
+        caps: Vec<String>,
+    }
+}
+
 fn main() {
-    let fdt = unsafe { fdt::Fdt::from_ptr(FDT).unwrap() };
+    let fdt_ptr = std::env::a2() as *const u8;
+    let fdt = unsafe { fdt::Fdt::from_ptr(fdt_ptr).unwrap() };
     let fdt_size = fdt.total_size();
     let tar = tar::Archive::new(SERVERS).unwrap();
 
-    println!("[INIT] args: {:?}", std::env::args());
-    println!("[INIT] FDT @ {:#p}", unsafe { FDT });
+    let mut caps = std::collections::BTreeMap::<String, CapabilityPtr>::new();
+    let init_order: InitOrder = json::deserialize(INIT_ORDER.as_bytes()).unwrap();
 
-    let devicemgr = tar.file("devicemgr").unwrap();
-    let (space, mut env) = loadelf::load_elf(&loadelf::Elf::new(devicemgr.contents).unwrap()).unwrap();
+    for server in init_order.servers {
+        let file = tar.file(&server.name).unwrap();
+        let (mut space, mut env) = loadelf::load_elf(&server.name, &loadelf::Elf::new(file.contents).unwrap()).unwrap();
 
-    let mut fdt_obj = space.create_object(core::ptr::null(), fdt_size, MemoryPermissions::READ).unwrap();
-    fdt_obj.as_slice()[..fdt_size].copy_from_slice(unsafe { core::slice::from_raw_parts(FDT, fdt_size) });
-
-    let mut args = space.create_object(core::ptr::null(), 4096, MemoryPermissions::READ).unwrap();
-
-    // This makes me sad, but seems to be the easiest approach..
-    let ptr_str = format!("{:x}", fdt_obj.vmspace_address() as usize);
-    let ptr_str_addr = args.vmspace_address() as usize + 16;
-    args.as_slice()[..8].copy_from_slice(&ptr_str_addr.to_ne_bytes()[..]);
-    args.as_slice()[8..16].copy_from_slice(&ptr_str.len().to_ne_bytes()[..]);
-    args.as_slice()[16..][..ptr_str.len()].copy_from_slice(ptr_str.as_bytes());
-
-    env.a0 = 1;
-    env.a1 = args.vmspace_address() as usize;
-    env.a2 = fdt_obj.vmspace_address() as usize;
-
-    println!("[INIT] Spawning devicemgr");
-
-    space.spawn(env).unwrap();
-
-    println!("[INIT] Spawning shell");
-
-    let shell = tar.file("shell").unwrap();
-    let (space, env) = loadelf::load_elf(&loadelf::Elf::new(shell.contents).unwrap()).unwrap();
-
-    space.spawn(env).unwrap();
-
-    let mut channels = Vec::new();
-    loop {
-        let msg = librust::syscalls::receive_message();
-
-        if let Some(ReadMessage::Kernel(KernelNotification::ChannelRequest(tid))) = msg {
-            let channel_id = channel::create_channel(tid).unwrap();
-            let mut channel = ipc::IpcChannel::new(channel_id);
-
-            let mut msg = channel.new_message(HELLO_FRIEND.len()).unwrap();
-            msg.write(HELLO_FRIEND.as_bytes());
-            msg.send().unwrap();
-
-            channels.push(channel);
-        }
-
-        for channel in &channels {
-            match channel.read() {
-                Ok(Some(_)) => {} //println!("[INIT] Someone sent a message on {:?}", channel_id),
-                Ok(None) => {}
-                Err(_) => {} //println!("Error reading message from channel: {:?}", e),
+        for cap in server.caps {
+            if cap == "fdt" {
+                let mut fdt_obj = space.create_object(core::ptr::null(), fdt_size, MemoryPermissions::READ).unwrap();
+                fdt_obj.as_slice()[..fdt_size]
+                    .copy_from_slice(unsafe { core::slice::from_raw_parts(fdt_ptr, fdt_size) });
+                env.a2 = fdt_obj.vmspace_address() as usize;
+                continue;
             }
+
+            let cptr = *caps.get(&cap).unwrap();
+            space.grant(&cap, cptr, CapabilityRights::READ | CapabilityRights::WRITE);
         }
+
+        env.a0 = 0;
+        env.a1 = 0;
+
+        let cap = space.spawn(env).unwrap();
+        caps.insert(server.name, cap);
     }
 }

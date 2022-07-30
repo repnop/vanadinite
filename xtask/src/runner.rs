@@ -9,11 +9,11 @@ use crate::{
     build::{self, BuildTarget, Platform},
     Result, SbiImpl, Simulator, VanadiniteBuildOptions,
 };
-use clap::{ArgSettings, Clap};
+use clap::Parser;
 use std::path::PathBuf;
 use xshell::cmd;
 
-#[derive(Clap)]
+#[derive(Parser)]
 pub struct RunOptions {
     /// Number of CPUs
     #[clap(long, default_value = "4")]
@@ -23,12 +23,16 @@ pub struct RunOptions {
     #[clap(long)]
     debug_log: Option<PathBuf>,
 
+    /// Whether or not to enable debugging in the simulator
+    #[clap(long)]
+    debug: bool,
+
     /// Path to a disk image
     #[clap(long)]
     drive_file: Option<PathBuf>,
 
     /// Arguments passed to the kernel
-    #[clap(setting = ArgSettings::AllowEmptyValues)]
+    //#[clap(setting = clap::ArgSettings::AllowEmptyValues)]
     #[clap(long, default_value = "")]
     kernel_args: String,
 
@@ -57,6 +61,7 @@ impl Default for RunOptions {
         Self {
             cpus: 5,
             debug_log: None,
+            debug: false,
             drive_file: None,
             kernel_args: String::new(),
             no_build: false,
@@ -65,6 +70,7 @@ impl Default for RunOptions {
                 platform: Platform::Virt,
                 kernel_features: String::new(),
                 test: false,
+                debug_build: false,
             },
             with: Simulator::Qemu,
             sbi: SbiImpl::OpenSbi,
@@ -87,8 +93,6 @@ pub fn run(options: RunOptions) -> Result<()> {
 
     let enable_virtio_block_device = match (options.vanadinite_options.platform, &options.drive_file) {
         (Platform::Virt, Some(path)) => vec![
-            String::from("-global"),
-            String::from("virtio-mmio.force-legacy=false"),
             String::from("-drive"),
             format!("file={},if=none,format=raw,id=hd", path.display()),
             String::from("-device"),
@@ -97,19 +101,29 @@ pub fn run(options: RunOptions) -> Result<()> {
         _ => vec![],
     };
 
+    let kernel_path = match options.vanadinite_options.debug_build {
+        true => "src/kernel/target/riscv64gc-unknown-none-elf/debug/vanadinite",
+        false => "src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite",
+    };
     let sbi_firmware = match (options.sbi, options.with) {
-        (SbiImpl::OpenSbi, Simulator::Qemu) => "build/opensbi-riscv64-generic-fw_jump.bin",
-        (SbiImpl::OpenSbi, Simulator::Spike) => "build/opensbi-riscv64-generic-fw_payload.bin",
+        (SbiImpl::OpenSbi, Simulator::Qemu) => "build/opensbi-riscv64-generic-fw_jump.elf",
+        (SbiImpl::OpenSbi, Simulator::Spike) => "build/opensbi-riscv64-generic-fw_payload.elf",
         (SbiImpl::Vanadium, _) => "build/vanadium.bin",
     };
 
     #[rustfmt::skip]
     match options.with {
         Simulator::Qemu => {
+            let debug = match options.debug {
+                true => vec![String::from("-s"), String::from("-S")],
+                false => vec![],
+            };
             let debug_log = match &options.debug_log {
                 Some(path) => vec![
                     String::from("-d"),
-                    String::from("guest_errors,trace:riscv_trap,trace:pmpcfg_csr_write,trace:pmpaddr_csr_write,int"),
+                    String::from("guest_errors,\
+                                    trace:virtio*,\
+                                    int"),
                     String::from("-D"),
                     format!("{}", path.display()),
                     String::from("-monitor"), String::from("stdio"),
@@ -124,18 +138,28 @@ pub fn run(options: RunOptions) -> Result<()> {
                     -smp {cpu_count}
                     -m {ram}M
                     -append {kernel_args}
+                    -global virtio-mmio.force-legacy=false
                     {enable_virtio_block_device...}
+                    -netdev user,id=net1,hostfwd=udp:127.0.0.1:1111-10.0.2.15:1337
+                    -device virtio-net-device,netdev=net1
+                    -object filter-dump,id=f1,netdev=net1,file=testing_files/nettraffic.dat
                     -bios {sbi_firmware}
-                    -kernel src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite
+                    -kernel {kernel_path}
+                    {debug...}
                     {debug_log...}
             ").run()?;
         }
         Simulator::Spike => {
+            let debug = match options.debug {
+                true => vec!["-d"],
+                false => vec![],
+            };
+
             cmd!("
                 ./build/spike
                     -p{cpu_count}
                     -m{ram}
-                    -d
+                    {debug...}
                     --isa=rv64gc
                     --bootargs={kernel_args}
                     {sbi_firmware}

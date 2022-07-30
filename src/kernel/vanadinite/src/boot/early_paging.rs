@@ -34,7 +34,7 @@ extern "C" {
     static __tdata_end: LinkerSymbol;
     static __tmp_stack_bottom: LinkerSymbol;
     static __tmp_stack_top: LinkerSymbol;
-    static PHYS_OFFSET_VALUE: usize;
+    pub static PHYS_OFFSET_VALUE: usize;
 }
 
 pub static BOOTSTRAP_SATP: AtomicUsize = AtomicUsize::new(0);
@@ -42,7 +42,7 @@ pub static BOOTSTRAP_SATP: AtomicUsize = AtomicUsize::new(0);
 /// # Safety
 /// no
 #[no_mangle]
-pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load: usize) -> ! {
+pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8) -> ! {
     let fdt_struct: Fdt<'static> = match fdt::Fdt::from_ptr(fdt) {
         Ok(fdt) => fdt,
         Err(e) => crate::platform::exit(crate::platform::ExitStatus::Error(&e)),
@@ -50,7 +50,6 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
 
     let fdt_size = fdt_struct.total_size() as u64;
 
-    let page_offset_value = kernel_patching::page_offset();
     // These are physical addresses before paging is enabled
     let kernel_start = kernel_patching::kernel_start() as usize;
     let kernel_end = kernel_patching::kernel_end() as usize;
@@ -137,18 +136,18 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
         );
     }
 
-    let ktls_start = __tdata_start.as_usize();
-    let ktls_end = __tdata_end.as_usize();
+    // let ktls_start = __tdata_start.as_usize();
+    // let ktls_end = __tdata_end.as_usize();
 
-    for addr in (ktls_start..ktls_end).step_by(4096) {
-        let addr = PhysicalAddress::new(addr);
-        root_page_table.static_map(
-            addr,
-            crate::kernel_patching::kernel_section_p2v(addr),
-            ACCESSED | READ | VALID,
-            PageSize::Kilopage,
-        );
-    }
+    // for addr in (ktls_start..ktls_end).step_by(4096) {
+    //     let addr = PhysicalAddress::new(addr);
+    //     root_page_table.static_map(
+    //         addr,
+    //         crate::kernel_patching::kernel_section_p2v(addr),
+    //         ACCESSED | READ | VALID,
+    //         PageSize::Kilopage,
+    //     );
+    // }
 
     for addr in 0..64 {
         root_page_table.static_map(
@@ -172,10 +171,10 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     crate::mem::PHYSICAL_OFFSET.store(PHYS_OFFSET_VALUE, core::sync::atomic::Ordering::Relaxed);
 
     let gp: usize;
-    asm!("lla {}, __global_pointer$", out(reg) gp);
+    core::arch::asm!("lla {}, __global_pointer$", out(reg) gp);
 
-    let new_sp = (tmp_stack_end - phys_load) + page_offset_value;
-    let new_gp = (gp - phys_load) + page_offset_value;
+    let new_sp = kernel_section_p2v(PhysicalAddress::new(tmp_stack_end)).as_usize();
+    let new_gp = kernel_section_p2v(PhysicalAddress::new(gp)).as_usize();
 
     #[cfg(not(test))]
     let kmain = crate::kmain as *const u8;
@@ -188,7 +187,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
     let fdt = crate::mem::phys2virt(PhysicalAddress::from_ptr(fdt)).as_ptr();
 
     #[rustfmt::skip]
-    asm!(
+    core::arch::asm!(
         "
             # Set up stack pointer and global pointer
             mv sp, {new_sp}
@@ -199,7 +198,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8, phys_load:
             # Load new `satp` value
             csrw satp, {satp}
             sfence.vma
-            nop                 # we trap here and bounce to `kmain`!
+            unimp                 # we trap here and bounce to `kmain`!
         ",
         mxr = in(reg) 1 << 19,
         satp = in(reg) satp.as_usize(),
