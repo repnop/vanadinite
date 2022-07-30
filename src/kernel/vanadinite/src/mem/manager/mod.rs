@@ -93,7 +93,7 @@ impl MemoryManager {
 
         let range = at..at.add(size.to_byte_size() * len);
         self.address_map
-            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), kind)
+            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), kind, flags)
             .expect("bad address mapping");
 
         range
@@ -146,7 +146,7 @@ impl MemoryManager {
         let range = at..at.add(size.to_byte_size() * len);
 
         self.address_map
-            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(shared.clone())), kind)
+            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(shared.clone())), kind, flags)
             .unwrap();
 
         (range, shared)
@@ -177,23 +177,19 @@ impl MemoryManager {
 
         let backing = UniquePhysicalRegion::mmio(from, PageSize::Kilopage, n_pages);
 
+        let flags = flags::READ | flags::WRITE | flags::USER | flags::VALID;
         let iter = backing
             .physical_addresses()
             .enumerate()
             .map(|(i, phys)| (phys, at.add(i * PageSize::Kilopage.to_byte_size())));
         for (phys_addr, virt_addr) in iter {
             log::trace!("Mapping {:#p} -> {:#p}", phys_addr, virt_addr);
-            self.table.map(
-                phys_addr,
-                virt_addr,
-                flags::READ | flags::WRITE | flags::USER | flags::VALID,
-                PageSize::Kilopage,
-            );
+            self.table.map(phys_addr, virt_addr, flags, PageSize::Kilopage);
         }
 
         let range = at..at.add(PageSize::Kilopage.to_byte_size() * n_pages);
         self.address_map
-            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), AddressRegionKind::Mmio)
+            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), AddressRegionKind::Mmio, flags)
             .expect("bad address mapping");
 
         log::trace!("Mapped MMIO at {:#p}-{:#p}", range.start, range.end);
@@ -233,14 +229,18 @@ impl MemoryManager {
 
         let range = at..at.add(region.page_size().to_byte_size() * region.n_pages());
 
-        self.address_map.alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(region)), kind).unwrap();
+        self.address_map
+            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(region)), kind, flags)
+            .unwrap();
 
         range
     }
 
     /// Place a guard page at the given [`VirtualAddress`]
     pub fn guard(&mut self, at: VirtualAddress) {
-        self.address_map.alloc(at..at.add(4.kib()), MemoryRegion::GuardPage, AddressRegionKind::Guard).unwrap();
+        self.address_map
+            .alloc(at..at.add(4.kib()), MemoryRegion::GuardPage, AddressRegionKind::Guard, flags::USER)
+            .unwrap();
         self.table.map(PhysicalAddress::null(), at, flags::USER | flags::VALID, PageSize::Kilopage);
     }
 

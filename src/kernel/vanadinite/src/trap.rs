@@ -18,7 +18,7 @@ use crate::{
     task::TaskState,
 };
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Clone, Copy, Default)]
 #[repr(C)]
 pub struct GeneralRegisters {
     pub ra: usize,
@@ -57,6 +57,51 @@ pub struct GeneralRegisters {
 impl GeneralRegisters {
     pub fn sp(&self) -> *mut u8 {
         self.sp as *mut u8
+    }
+}
+
+impl core::fmt::Debug for GeneralRegisters {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        struct Hex<T: core::fmt::LowerHex>(T);
+        impl<T: core::fmt::LowerHex> core::fmt::Debug for Hex<T> {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                write!(f, "{:#x}", self.0)
+            }
+        }
+
+        f.debug_struct("GeneralRegisters")
+            .field("ra", &Hex(self.ra))
+            .field("sp", &Hex(self.sp))
+            .field("gp", &Hex(self.gp))
+            .field("tp", &Hex(self.tp))
+            .field("t0", &Hex(self.t0))
+            .field("t1", &Hex(self.t1))
+            .field("t2", &Hex(self.t2))
+            .field("s0", &Hex(self.s0))
+            .field("s1", &Hex(self.s1))
+            .field("a0", &Hex(self.a0))
+            .field("a1", &Hex(self.a1))
+            .field("a2", &Hex(self.a2))
+            .field("a3", &Hex(self.a3))
+            .field("a4", &Hex(self.a4))
+            .field("a5", &Hex(self.a5))
+            .field("a6", &Hex(self.a6))
+            .field("a7", &Hex(self.a7))
+            .field("s2", &Hex(self.s2))
+            .field("s3", &Hex(self.s3))
+            .field("s4", &Hex(self.s4))
+            .field("s5", &Hex(self.s5))
+            .field("s6", &Hex(self.s6))
+            .field("s7", &Hex(self.s7))
+            .field("s8", &Hex(self.s8))
+            .field("s9", &Hex(self.s9))
+            .field("s10", &Hex(self.s10))
+            .field("s11", &Hex(self.s11))
+            .field("t3", &Hex(self.t3))
+            .field("t4", &Hex(self.t4))
+            .field("t5", &Hex(self.t5))
+            .field("t6", &Hex(self.t6))
+            .finish()
     }
 }
 
@@ -104,10 +149,24 @@ pub struct TrapFrame {
     pub registers: GeneralRegisters,
 }
 
+impl core::ops::Deref for TrapFrame {
+    type Target = GeneralRegisters;
+
+    fn deref(&self) -> &Self::Target {
+        &self.registers
+    }
+}
+
+impl core::ops::DerefMut for TrapFrame {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.registers
+    }
+}
+
 const INTERRUPT_BIT: usize = 1 << 63;
 
 #[allow(clippy::enum_clike_unportable_variant)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(usize)]
 pub enum Trap {
     // Software interrupts
@@ -185,7 +244,19 @@ impl Trap {
 #[no_mangle]
 pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize, stval: usize) -> usize {
     log::trace!("we trappin' on hart {}: {:x?}", crate::HART_ID.get(), regs);
-    log::debug!("scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
+    if Trap::from_cause(scause) != Trap::UserModeEnvironmentCall
+        || regs.a0 != (librust::syscalls::Syscall::DebugPrint as usize)
+    {
+        log::debug!(
+            "scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p} (syscall? {:?})",
+            Trap::from_cause(scause),
+            sepc,
+            stval as *mut u8,
+            (Trap::from_cause(scause) == Trap::UserModeEnvironmentCall)
+                .then(|| librust::syscalls::Syscall::from_usize(regs.a0))
+                .flatten()
+        );
+    }
 
     let trap_kind = Trap::from_cause(scause);
     match trap_kind {
@@ -200,10 +271,12 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                     save_fp_registers(&mut lock.context.fp_regs);
                 }
             }
-
             SCHEDULER.schedule()
         }
-        Trap::UserModeEnvironmentCall => syscall::handle(regs, sepc),
+        Trap::UserModeEnvironmentCall => match syscall::handle(regs, sepc) {
+            syscall::Outcome::Completed => sepc + 4,
+            syscall::Outcome::Blocked => SCHEDULER.schedule(),
+        },
         Trap::SupervisorExternalInterrupt => {
             // FIXME: there has to be a better way
             if let Some(plic) = &*PLIC.lock() {
@@ -285,7 +358,7 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                                 stval,
                                 sepc,
                             );
-                            log::error!("Register dump:\n{:#x?}", regs);
+                            log::error!("Register dump:\n{:?}", regs);
                             // log::error!("Stack dump (last 32 values):\n");
                             // let mut sp = regs.registers.sp as *const u64;
                             // for _ in 0..32 {
@@ -296,6 +369,7 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                                 "Memory map:\n{:#?}",
                                 active_task.memory_manager.address_map_debug(Some(stval))
                             );
+                            log::error!("Phys addr (if any): {:?}", active_task.memory_manager.resolve(stval));
                             active_task.state = TaskState::Dead;
 
                             drop(active_task);
@@ -443,6 +517,8 @@ pub unsafe extern "C" fn stvec_trap_shim() -> ! {
 extern "C" fn save_fp_registers(fp_regs: &mut FloatingPointRegisters) {
     unsafe {
         core::arch::asm!("
+                .option push
+                .option arch, +d
                 fsd f0, 0({regs})
                 fsd f1, 8({regs})
                 fsd f2, 16({regs})
@@ -478,6 +554,7 @@ extern "C" fn save_fp_registers(fp_regs: &mut FloatingPointRegisters) {
 
                 frcsr {0}
                 sd {0}, 256({regs})
+                .option pop
             ",
             out(reg) _,
             regs = in(reg) fp_regs,

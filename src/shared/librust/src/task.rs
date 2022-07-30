@@ -18,8 +18,10 @@ impl Tid {
     pub fn value(self) -> usize {
         self.0
     }
+}
 
-    pub fn current() -> Self {
-        todo!("get tid")
+impl core::fmt::Display for Tid {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }

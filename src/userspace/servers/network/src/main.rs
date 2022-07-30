@@ -15,7 +15,7 @@ mod drivers;
 use crate::{arp::ARP_CACHE, drivers::NetworkDriver};
 use alchemy::PackedStruct;
 use dhcp::{options::DhcpMessageType, DhcpMessageParser, DhcpOption};
-use librust::capabilities::Capability;
+use librust::{capabilities::{Capability, CapabilityWithDescription}, syscalls::channel::ChannelMessage};
 use netstack::{
     arp::{ArpHeader, ArpOperation, ArpPacket, HardwareType},
     ethernet::EthernetHeader,
@@ -24,10 +24,10 @@ use netstack::{
     MacAddress,
 };
 use present::{
-    ipc::{IpcChannel, NewChannelListener},
+    ipc::{IpcChannel},
     sync::{mpsc::Sender, oneshot::OneshotTx},
 };
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ipc::ChannelReadFlags};
 
 json::derive! {
     #[derive(Debug, Clone)]
@@ -76,21 +76,20 @@ pub enum PortType {
 }
 
 async fn real_main() {
-    let mut virtiomgr = IpcChannel::new(std::env::lookup_capability("virtiomgr").unwrap());
+    let virtiomgr = std::ipc::IpcChannel::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr);
 
     virtiomgr
-        .send_bytes(&json::to_bytes(&VirtIoDeviceRequest { ty: virtio::DeviceType::NetworkCard as u32 }), &[])
+        .temp_send_json(ChannelMessage::default(), &VirtIoDeviceRequest { ty: virtio::DeviceType::NetworkCard as u32 }, &[])
         .unwrap();
 
-    let (message, capabilities) = virtiomgr.read_with_all_caps().await.unwrap();
-    let response: VirtIoDeviceResponse = json::deserialize(message.as_bytes()).unwrap();
+    let (response, _, capabilities): (VirtIoDeviceResponse, _, _) = virtiomgr.temp_read_json(ChannelReadFlags::NONE).unwrap();
 
     if response.devices.is_empty() {
         return;
     }
 
-    let (Capability { cptr: mmio_cap, .. }, device) = (capabilities[0], &response.devices[0]);
-    let info = librust::syscalls::io::query_mmio_cap(mmio_cap).unwrap();
+    let (CapabilityWithDescription { capability: Capability { cptr: mmio_cap, .. }, .. }, device) = (capabilities[0], &response.devices[0]);
+    let (info, _) = librust::syscalls::io::query_mmio_cap(mmio_cap, &mut []).unwrap();
 
     let interrupt_id = device.interrupts[0];
     let mut net_device = drivers::virtio::VirtIoNetDevice::new(unsafe {
@@ -102,7 +101,6 @@ async fn real_main() {
     let mut ports: BTreeMap<u16, (PortType, Sender<ClientMessage>)> = BTreeMap::new();
 
     let interrupt = present::interrupt::Interrupt::new(interrupt_id);
-    let channel_listener = NewChannelListener::new();
 
     let (dhcp_packet_task_tx, dhcp_packet_nic_rx) = present::sync::mpsc::unbounded();
     let (dhcp_packet_nic_tx, dhcp_packet_task_rx) = present::sync::mpsc::unbounded();
@@ -219,6 +217,7 @@ async fn real_main() {
         ARP_CACHE.resolve_and_cache(router_ip).await;
     });
 
+    let channel_listener = present::ipc::NewChannelListener::new();
     loop {
         present::select! {
             _ = interrupt.wait() => {

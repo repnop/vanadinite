@@ -5,13 +5,20 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::mem::{manager::AddressRegionKind, paging::VirtualAddress, region::SharedPhysicalRegion};
+use crate::{
+    mem::{
+        manager::AddressRegionKind,
+        paging::{PhysicalAddress, VirtualAddress},
+        region::SharedPhysicalRegion,
+    },
+    syscall::channel::UserspaceChannel,
+};
 use alloc::collections::BTreeMap;
 use core::ops::Range;
-use librust::{
-    capabilities::{CapabilityPtr, CapabilityRights},
-    syscalls::channel::ChannelId,
-};
+use librust::capabilities::{CapabilityPtr, CapabilityRights};
+
+#[derive(Debug, Clone, Copy)]
+pub struct Occupied;
 
 pub struct CapabilitySpace {
     inner: BTreeMap<CapabilityPtr, Capability>,
@@ -22,6 +29,27 @@ impl CapabilitySpace {
         Self { inner: BTreeMap::new() }
     }
 
+    // FIXME: is there a better method to use here? maybe split out special
+    // caps? unsure
+    /// Mint a new capability with the given [`CapabilityPtr`] value. Returns
+    /// `Err(())` if the [`CapabilityPtr`] value already exists.
+    pub fn mint_with_id(&mut self, cptr: CapabilityPtr, capability: Capability) -> Result<(), Occupied> {
+        match self.inner.get(&cptr).is_some() {
+            true => Err(Occupied),
+            false => {
+                self.inner.insert(cptr, capability);
+                Ok(())
+            }
+        }
+    }
+
+    pub fn mint_with(&mut self, f: impl FnOnce(CapabilityPtr) -> Capability) -> CapabilityPtr {
+        let cptr = CapabilityPtr::new(self.inner.keys().max().map(|c| c.value() + 1).unwrap_or(0));
+        self.inner.insert(cptr, f(cptr));
+        cptr
+    }
+
+    /// Create a new [`CapabilityPtr`] representing the given [`Capability`]
     pub fn mint(&mut self, capability: Capability) -> CapabilityPtr {
         // FIXME: Uncomment & improve
         // let time = crate::csr::time::read() as usize;
@@ -50,14 +78,15 @@ impl CapabilitySpace {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Capability {
     pub resource: CapabilityResource,
     pub rights: CapabilityRights,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CapabilityResource {
-    Channel(ChannelId),
+    Channel(UserspaceChannel),
     Memory(SharedPhysicalRegion, Range<VirtualAddress>, AddressRegionKind),
-    Mmio(Range<VirtualAddress>, alloc::vec::Vec<usize>),
+    Mmio(Range<PhysicalAddress>, Range<VirtualAddress>, alloc::vec::Vec<usize>),
 }

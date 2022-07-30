@@ -5,16 +5,18 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::syscalls::mem::MemoryPermissions;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct CapabilityPtr(usize);
 
 impl CapabilityPtr {
-    pub fn new(n: usize) -> Self {
+    pub const fn new(n: usize) -> Self {
         Self(n)
     }
 
-    pub fn value(self) -> usize {
+    pub const fn value(self) -> usize {
         self.0
     }
 }
@@ -24,6 +26,7 @@ impl CapabilityPtr {
 pub struct CapabilityRights(usize);
 
 impl CapabilityRights {
+    pub const NONE: Self = Self(0);
     pub const READ: Self = Self(1);
     pub const WRITE: Self = Self(2);
     pub const EXECUTE: Self = Self(4);
@@ -81,6 +84,31 @@ impl Capability {
 
 impl Default for Capability {
     fn default() -> Self {
-        Self { cptr: CapabilityPtr::new(0), rights: CapabilityRights::new(0) }
+        Self { cptr: CapabilityPtr(usize::MAX), rights: CapabilityRights::NONE }
     }
 }
+
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
+pub struct CapabilityWithDescription {
+    pub capability: Capability,
+    pub description: CapabilityDescription,
+}
+
+// FIXME: perhaps use a safer representation? hmm
+#[derive(Debug, Clone, Copy)]
+#[repr(C, usize)]
+pub enum CapabilityDescription {
+    Channel = 0,
+    Memory { ptr: *mut u8, len: usize, permissions: MemoryPermissions } = 1,
+    MappedMmio { ptr: *mut u8, len: usize, n_interrupts: usize } = 2,
+}
+
+impl Default for CapabilityDescription {
+    fn default() -> Self {
+        Self::Channel
+    }
+}
+
+unsafe impl Send for CapabilityDescription {}
+unsafe impl Sync for CapabilityDescription {}

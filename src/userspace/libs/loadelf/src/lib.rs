@@ -7,10 +7,8 @@
 
 pub use elf64::Elf;
 use elf64::{ProgramSegmentType, Relocation};
-use std::{
-    librust::syscalls::{allocation::MemoryPermissions, vmspace::VmspaceSpawnEnv},
-    vmspace::Vmspace,
-};
+use librust::syscalls::{mem::MemoryPermissions, vmspace::VmspaceSpawnEnv};
+use std::vmspace::Vmspace;
 
 const PAGE_SIZE: usize = 4096;
 

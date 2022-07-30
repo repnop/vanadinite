@@ -8,7 +8,7 @@
 use core::num::NonZeroUsize;
 
 use crate::{
-    capabilities::CapabilitySpace,
+    capabilities::{Capability, CapabilityResource, CapabilitySpace},
     mem::{
         manager::{AddressRegionKind, FillOption, MemoryManager, RegionDescription},
         paging::{
@@ -17,21 +17,16 @@ use crate::{
         },
     },
     platform::FDT,
-    scheduler::{Scheduler, WakeToken, SCHEDULER},
     syscall::{channel::UserspaceChannel, vmspace::VmspaceObject},
     trap::{FloatingPointRegisters, GeneralRegisters},
     utils::{round_up_to_next, Units},
 };
-use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    vec::Vec,
-};
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 use elf64::{Elf, ProgramSegmentType, Relocation};
 use fdt::Fdt;
 use librust::{
-    message::{Message, Sender},
-    syscalls::{channel::ChannelId, vmspace::VmspaceObjectId},
+    capabilities::CapabilityRights,
+    syscalls::{channel::KERNEL_CHANNEL, vmspace::VmspaceObjectId},
     task::Tid,
 };
 
@@ -81,47 +76,18 @@ pub struct Context {
     pub pc: usize,
 }
 
-pub struct MessageQueue {
-    queue: VecDeque<(Sender, Message)>,
-    wake: Option<WakeToken>,
-}
-
-impl MessageQueue {
-    pub fn new() -> Self {
-        Self { queue: VecDeque::new(), wake: None }
-    }
-
-    pub fn push(&mut self, sender: Sender, message: Message) {
-        self.queue.push_back((sender, message));
-
-        if let Some(token) = self.wake.take() {
-            SCHEDULER.unblock(token);
-        }
-    }
-
-    pub fn pop(&mut self) -> Option<(Sender, Message)> {
-        self.queue.pop_front()
-    }
-
-    pub fn register_wake(&mut self, token: WakeToken) {
-        assert!(self.wake.replace(token).is_none(), "replacing an already blocked message queue");
-    }
-}
-
 pub struct Task {
     pub tid: Tid,
     pub name: Box<str>,
     pub context: Context,
     pub memory_manager: MemoryManager,
     pub state: TaskState,
-    pub message_queue: MessageQueue,
-    pub promiscuous: bool,
-    pub incoming_channel_request: BTreeSet<Tid>,
-    pub channels: BTreeMap<ChannelId, (Tid, UserspaceChannel)>,
     pub vmspace_objects: BTreeMap<VmspaceObjectId, VmspaceObject>,
     pub vmspace_next_id: usize,
     pub cspace: CapabilitySpace,
+    pub kernel_channel: UserspaceChannel,
     pub claimed_interrupts: BTreeMap<usize, usize>,
+    pub subscribes_to_events: bool,
 }
 
 impl Task {
@@ -130,8 +96,7 @@ impl Task {
         I: Iterator<Item = &'a str> + Clone,
     {
         let mut memory_manager = MemoryManager::new();
-
-        let cspace = CapabilitySpace::new();
+        let mut cspace = CapabilitySpace::new();
 
         let relocations = elf
             .relocations()
@@ -365,20 +330,26 @@ impl Task {
             fp_regs: FloatingPointRegisters::default(),
         };
 
+        let (kernel_channel, user_read) = UserspaceChannel::new();
+        cspace
+            .mint_with_id(
+                KERNEL_CHANNEL,
+                Capability { resource: CapabilityResource::Channel(user_read), rights: CapabilityRights::READ },
+            )
+            .expect("[BUG] kernel channel cap already created?");
+
         Self {
             tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),
             name: Box::from(name),
             context,
             memory_manager,
             state: TaskState::Running,
-            promiscuous: true,
-            incoming_channel_request: BTreeSet::new(),
-            channels: BTreeMap::new(),
-            message_queue: MessageQueue::new(),
             vmspace_objects: BTreeMap::new(),
             vmspace_next_id: 0,
             cspace,
+            kernel_channel,
             claimed_interrupts: BTreeMap::new(),
+            subscribes_to_events: false,
         }
     }
 }

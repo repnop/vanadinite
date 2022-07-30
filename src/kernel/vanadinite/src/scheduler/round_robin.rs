@@ -7,7 +7,7 @@
 
 use core::sync::atomic::Ordering;
 
-use super::{Scheduler, Task, Tid, WakeToken, TASKS};
+use super::{LockedTask, Scheduler, Task, Tid, WakeToken, TASKS};
 use crate::{
     csr::{self, satp::Satp},
     mem::{self, paging::SATP_MODE},
@@ -19,14 +19,16 @@ use sync::Lazy;
 
 type SpinMutex<T> = sync::SpinMutex<T, SameHartDeadlockDetection>;
 
+#[derive(Debug)]
 struct QueuedTask {
     tid: Tid,
-    task: Arc<SpinMutex<Task>>,
+    task: LockedTask,
     token: Option<WakeToken>,
 }
 
+#[derive(Debug)]
 struct Queue {
-    active: Option<Arc<SpinMutex<Task>>>,
+    active: Option<LockedTask>,
     queue: VecDeque<QueuedTask>,
 }
 
@@ -89,8 +91,8 @@ impl Scheduler for RoundRobinScheduler {
 
         match to_run {
             Some(queued_task) => {
-                *active = Some(Arc::clone(&queued_task.task));
-                let task = Arc::clone(&queued_task.task);
+                *active = Some(LockedTask::clone(&queued_task.task));
+                let task = LockedTask::clone(&queued_task.task);
                 let mut task = task.lock();
                 let token = queued_task.token.take();
 
@@ -108,6 +110,7 @@ impl Scheduler for RoundRobinScheduler {
 
                 if let Some(token) = token {
                     (token.work)(&mut task);
+                    task.context.pc += 4;
                 }
 
                 let context = task.context.clone();
@@ -148,6 +151,17 @@ impl Scheduler for RoundRobinScheduler {
         tid
     }
 
+    fn enqueue_with(&self, f: impl FnOnce(Tid) -> Task) -> Tid {
+        let (tid, task) = TASKS.insert_with(f);
+
+        log::debug!("Trying to enqueue task");
+        let selected = self.queues.iter().min_by_key(|queue| queue.lock().queue.len()).unwrap_or(&self.queues[0]);
+        selected.lock().queue.push_back(QueuedTask { tid, task, token: None });
+        log::debug!("Enqueued task");
+
+        tid
+    }
+
     fn dequeue(&self, tid: Tid) {
         let mut queue = self.current_queue().lock();
         if let Some(index) = queue.queue.iter().position(|t| t.tid == tid) {
@@ -177,7 +191,7 @@ impl Scheduler for RoundRobinScheduler {
     }
 
     #[track_caller]
-    fn active_on_cpu(&self) -> Option<Arc<SpinMutex<Task>>> {
+    fn active_on_cpu(&self) -> Option<LockedTask> {
         self.current_queue().lock().active.clone()
     }
 }

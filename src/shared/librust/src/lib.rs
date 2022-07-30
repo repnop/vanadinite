@@ -6,13 +6,18 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 #![feature(
+    adt_const_params,
     allocator_api,
+    arbitrary_enum_discriminant,
+    const_option,
+    generic_const_exprs,
     inline_const_pat,
     layout_for_ptr,
     never_type,
     ptr_metadata,
     slice_ptr_get,
     slice_ptr_len,
+    strict_provenance,
     try_trait_v2
 )]
 #![no_std]
@@ -24,7 +29,7 @@ extern crate alloc;
 pub mod capabilities;
 pub mod error;
 pub mod mem;
-pub mod message;
 pub mod syscalls;
 pub mod task;
 pub mod taskgroup;
+pub mod units;

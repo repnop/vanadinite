@@ -5,8 +5,13 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::ipc::ReadChannelMessage;
-use librust::capabilities::Capability;
+use librust::{
+    capabilities::{Capability, CapabilityDescription, CapabilityPtr, CapabilityRights, CapabilityWithDescription},
+    syscalls::{
+        channel::{ChannelReadFlags, ReadResult, KERNEL_CHANNEL, PARENT_CHANNEL},
+        mem::MemoryPermissions,
+    },
+};
 
 #[no_mangle]
 unsafe extern "C" fn _start(argc: isize, argv: *const *const u8, a2: usize) -> ! {
@@ -35,7 +40,7 @@ unsafe extern "C" fn _start(argc: isize, argv: *const *const u8, a2: usize) -> !
     A2 = a2;
 
     main(argc, argv);
-    librust::syscalls::exit()
+    librust::syscalls::task::exit()
 }
 
 extern "C" {
@@ -48,25 +53,21 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize 
     unsafe { ARGS = [argc as usize, argv as usize] };
 
     let mut map = crate::env::CAP_MAP.borrow_mut();
-    let channel = crate::ipc::IpcChannel::new(librust::capabilities::CapabilityPtr::new(0));
-    let mut cap = [Capability::default()];
-
+    let channel = crate::ipc::IpcChannel::new(PARENT_CHANNEL);
     // FIXME: Wowie is this some awful code!
-    while let Ok(ReadChannelMessage { message: msg, .. }) = channel.read(&mut cap[..]) {
-        let _ = librust::syscalls::receive_message();
-        let name = match core::str::from_utf8(msg.as_bytes()) {
-            Ok(name) => name,
-            Err(_) => break,
-        };
-
-        if name == "done" {
-            break;
+    if let Ok((names, _, caps)) = channel.temp_read_json::<Vec<String>>(ChannelReadFlags::NONE) {
+        for (name, cap) in names.into_iter().zip(caps) {
+            map.insert(name, cap);
         }
-
-        map.insert(name.into(), cap[0].cptr);
     }
 
-    map.insert("parent".into(), librust::capabilities::CapabilityPtr::new(0));
+    map.insert(
+        "parent".into(),
+        CapabilityWithDescription {
+            capability: Capability { cptr: PARENT_CHANNEL, rights: CapabilityRights::READ | CapabilityRights::WRITE },
+            description: CapabilityDescription::Channel,
+        },
+    );
     drop(map);
 
     main();

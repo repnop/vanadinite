@@ -17,3 +17,9 @@ pub fn gp() -> *mut u8 {
     unsafe { core::arch::asm!("mv {}, gp", out(reg) gp) };
     gp as *mut u8
 }
+
+pub fn ra() -> *mut u8 {
+    let ra: usize;
+    unsafe { core::arch::asm!("mv {}, ra", out(reg) ra) };
+    ra as *mut u8
+}

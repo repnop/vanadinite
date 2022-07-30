@@ -190,6 +190,12 @@ impl<S: Serializer, T: Serialize<S>> Serialize<S> for alloc::vec::Vec<T> {
     }
 }
 
+impl<S: Serializer, T: Serialize<S>> Serialize<S> for [T] {
+    fn serialize(&self, serializer: &mut S) {
+        serializer.serialize_list(self.iter().map(|t| t as &dyn Serialize<S>))
+    }
+}
+
 impl<S: Serializer, T: Serialize<S>> Serialize<S> for Option<T> {
     fn serialize(&self, serializer: &mut S) {
         match self {

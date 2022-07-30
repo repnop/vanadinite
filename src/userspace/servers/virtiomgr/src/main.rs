@@ -8,11 +8,10 @@
 #![feature(drain_filter)]
 
 use librust::{
-    capabilities::{Capability, CapabilityRights},
-    message::KernelNotification,
-    syscalls::ReadMessage,
+    capabilities::{Capability, CapabilityRights, CapabilityWithDescription},
+    syscalls::channel::KernelMessage,
 };
-use std::ipc::IpcChannel;
+use std::ipc::{ChannelMessage, ChannelReadFlags, IpcChannel};
 use virtio::DeviceType;
 
 json::derive! {
@@ -54,40 +53,44 @@ json::derive! {
 }
 
 fn main() {
-    let devicemgr_cptr = std::env::lookup_capability("devicemgr").unwrap();
-    let mut devicemgr = IpcChannel::new(devicemgr_cptr);
-    devicemgr.send_bytes(&json::to_bytes(&WantedCompatible { compatible: vec!["virtio,mmio".into()] }), &[]).unwrap();
+    let devicemgr_cptr = std::env::lookup_capability("devicemgr").unwrap().capability.cptr;
+    let devicemgr = IpcChannel::new(devicemgr_cptr);
+    devicemgr
+        .temp_send_json(ChannelMessage::default(), &WantedCompatible { compatible: vec!["virtio,mmio".into()] }, &[])
+        .unwrap();
 
-    let (message, capabilities) = devicemgr.read_with_all_caps().unwrap();
-    let devices: Devices = json::deserialize(message.as_bytes()).unwrap();
+    let (devices, _, capabilities): (Devices, _, _) = devicemgr.temp_read_json(ChannelReadFlags::NONE).unwrap();
+    let _ = librust::syscalls::channel::read_kernel_message();
     let mut virtio_devices = Vec::new();
 
-    for (device, Capability { cptr: mmio_cap, .. }) in devices.devices.into_iter().zip(capabilities) {
-        let info = librust::syscalls::io::query_mmio_cap(mmio_cap).unwrap();
+    for (device, CapabilityWithDescription { capability: Capability { cptr: mmio_cap, .. }, .. }) in
+        devices.devices.into_iter().zip(capabilities.into_iter())
+    {
+        let (info, _) = librust::syscalls::io::query_mmio_cap(mmio_cap, &mut []).unwrap();
 
         let header = unsafe { &*(info.address() as *const virtio::VirtIoHeader) };
         let dev_type = header.device_type().unwrap();
 
-        if !matches!(dev_type, DeviceType::Reserved) {
-            println!("[virtiomgr] We have a VirtIO {:?} device: {:?}", dev_type, device);
-        }
+        // if !matches!(dev_type, DeviceType::Reserved) {
+        //     println!("[virtiomgr] We have a VirtIO {:?} device: {:?}", dev_type, device);
+        // }
 
         virtio_devices.push((mmio_cap, info, dev_type, header, device));
     }
 
     loop {
-        #[allow(clippy::collapsible_match)]
-        let cptr = match librust::syscalls::receive_message() {
-            ReadMessage::Kernel(kmsg) => match kmsg {
-                KernelNotification::NewChannelMessage(cptr) if cptr != devicemgr_cptr => cptr,
-                _ => continue,
-            },
+        let cptr = match librust::syscalls::channel::read_kernel_message() {
+            KernelMessage::NewChannelMessage(cptr) => cptr,
             _ => continue,
         };
 
-        let mut channel = IpcChannel::new(cptr);
-        let (msg, _) = channel.read_with_all_caps().unwrap();
-        let dev_type = json::deserialize::<VirtIoDeviceRequest>(msg.as_bytes()).unwrap().ty;
+        let channel = IpcChannel::new(cptr);
+        let (req, _, _): (VirtIoDeviceRequest, _, _) = match channel.temp_read_json(ChannelReadFlags::NONBLOCKING) {
+            Ok(data) => data,
+            Err(_) => continue,
+        };
+
+        let dev_type = req.ty;
 
         // println!("[virtiomgr] Got request for device type: {:?}", DeviceType::from_u32(dev_type));
 
@@ -100,8 +103,9 @@ fn main() {
             .collect();
 
         channel
-            .send_bytes(
-                &json::to_bytes(&VirtIoDeviceResponse { devices: devices.iter().map(|dev| dev.4.clone()).collect() }),
+            .temp_send_json(
+                ChannelMessage::default(),
+                &VirtIoDeviceResponse { devices: devices.iter().map(|dev| dev.4.clone()).collect() },
                 &caps,
             )
             .unwrap();

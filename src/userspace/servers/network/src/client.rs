@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{ClientMessage, ControlMessage, PortType};
-use librust::capabilities::CapabilityPtr;
+use librust::{capabilities::CapabilityPtr, syscalls::channel::ChannelMessage};
 use netstack::ipv4::IpV4Socket;
 use present::{ipc::IpcChannel, sync::mpsc::Sender};
 
@@ -59,20 +59,15 @@ pub async fn handle_client(
     packet_tx: Sender<(u16, IpV4Socket, Vec<u8>)>,
     cptr: CapabilityPtr,
 ) {
-    let mut ipc_channel = IpcChannel::new(cptr);
-    let msg = ipc_channel.read(&mut []).await;
+    let ipc_channel = IpcChannel::new(cptr);
+    let msg = ipc_channel.temp_read_json().await;
 
-    let msg = match msg {
+    let (request, _msg, _): (BindRequest, _, _) = match msg {
         Ok(msg) => msg,
         Err(e) => {
             println!("Error reading from IPC channel: {:?}", e);
             return;
         }
-    };
-
-    let request: BindRequest = match json::deserialize(msg.message.as_bytes()) {
-        Ok(request) => request,
-        Err(_) => return,
     };
 
     let port = request.port;
@@ -81,7 +76,7 @@ pub async fn handle_client(
         "raw" => PortType::Raw,
         _ => {
             let _ = ipc_channel
-                .send_bytes(&json::to_bytes(&BindResponse { msg: String::from("unknown port type"), port: None }), &[]);
+                .temp_send_json(ChannelMessage::default(), &BindResponse { msg: String::from("unknown port type"), port: None }, &[]);
             return;
         }
     };
@@ -92,12 +87,12 @@ pub async fn handle_client(
     match client_rx.recv().await {
         ClientMessage::PortInUse => {
             let _ = ipc_channel
-                .send_bytes(&json::to_bytes(&BindResponse { msg: String::from("port in use"), port: None }), &[]);
+                .temp_send_json(ChannelMessage::default(), &BindResponse { msg: String::from("port in use"), port: None }, &[]);
             return;
         }
         ClientMessage::PortBound => {
             if ipc_channel
-                .send_bytes(&json::to_bytes(&BindResponse { msg: String::new(), port: Some(port) }), &[])
+                .temp_send_json(ChannelMessage::default(), &BindResponse { msg: String::new(), port: Some(port) }, &[])
                 .is_err()
             {
                 control_tx.send(ControlMessage::ClientDisconnect { port });
@@ -112,12 +107,13 @@ pub async fn handle_client(
             msg = client_rx.recv() => {
                 match msg {
                     ClientMessage::Received { from, data } => {
-                        if ipc_channel.send_bytes(
-                            &json::to_bytes(&Received {
+                        if ipc_channel.temp_send_json(
+                            ChannelMessage::default(),
+                            &Received {
                                 from_ip: from.ip.to_string(),
                                 from_port: from.port,
                                 data,
-                            }),
+                            },
                             &[]
                         ).is_err() {
                             control_tx.send(ControlMessage::ClientDisconnect { port });
@@ -127,21 +123,13 @@ pub async fn handle_client(
                     _ => {}
                 }
             }
-            msg = ipc_channel.read(&mut []) => {
-                let msg = match msg {
+            msg = ipc_channel.temp_read_json() => {
+                let (request, msg, _): (SendRequest, _, _) = match msg {
                     Ok(msg) => msg,
                     Err(_) => {
                         control_tx.send(ControlMessage::ClientDisconnect { port });
                         break;
                     },
-                };
-
-                let request: SendRequest = match json::deserialize(msg.message.as_bytes()) {
-                    Ok(request) => request,
-                    Err(_) => {
-                        control_tx.send(ControlMessage::ClientDisconnect { port });
-                        break;
-                    }
                 };
 
                 let ip = match request.to_ip.parse() {

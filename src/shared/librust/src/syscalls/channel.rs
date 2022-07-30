@@ -6,136 +6,149 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    capabilities::{Capability, CapabilityPtr},
-    error::KError,
-    message::{Recipient, SyscallRequest, SyscallResult},
-    syscalls::{syscall, Syscall},
+    capabilities::{Capability, CapabilityPtr, CapabilityWithDescription},
+    error::{RawSyscallError, SyscallError},
+    syscalls::Syscall,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
-pub struct ChannelMessage {
-    pub id: MessageId,
-    pub ptr: *mut u8,
-    pub len: usize,
-}
+pub struct ChannelMessage(pub [usize; 7]);
 
-unsafe impl Send for ChannelMessage {}
-unsafe impl Sync for ChannelMessage {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Clone, Copy)]
 #[repr(transparent)]
-pub struct ChannelId(usize);
+pub struct ChannelReadFlags(usize);
 
-impl ChannelId {
-    pub fn new(id: usize) -> Self {
-        Self(id)
+impl ChannelReadFlags {
+    pub const NONE: Self = Self(0);
+    pub const NONBLOCKING: Self = Self(1);
+
+    pub const fn new(flags: usize) -> Self {
+        Self(flags)
     }
 
-    pub fn value(self) -> usize {
+    pub const fn value(self) -> usize {
         self.0
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(transparent)]
-pub struct MessageId(usize);
+impl core::ops::BitOr for ChannelReadFlags {
+    type Output = Self;
 
-impl MessageId {
-    pub fn new(id: usize) -> Self {
-        Self(id)
-    }
-
-    pub fn value(self) -> usize {
-        self.0
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
     }
 }
 
-pub fn create_message(cptr: CapabilityPtr, size: usize) -> SyscallResult<ChannelMessage, KError> {
-    syscall(
-        Recipient::kernel(),
-        SyscallRequest {
-            syscall: Syscall::CreateChannelMessage,
-            arguments: [cptr.value(), size, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        },
-    )
-    .1
-    .map(|(id, ptr, len)| ChannelMessage { id: MessageId::new(id), ptr: ptr as *mut u8, len })
+impl core::ops::BitAnd for ChannelReadFlags {
+    type Output = bool;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        self.0 & rhs.0 == rhs.0
+    }
 }
 
-pub fn send_message(
-    cptr: CapabilityPtr,
-    message: MessageId,
-    message_len: usize,
-    caps: &[Capability],
-) -> SyscallResult<(), KError> {
-    syscall(
-        Recipient::kernel(),
-        SyscallRequest {
-            syscall: Syscall::SendChannelMessage,
-            arguments: [
-                cptr.value(),
-                message.value(),
-                message_len,
-                caps.as_ptr() as usize,
-                caps.len(),
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-            ],
-        },
-    )
-    .1
+pub fn send_message(cptr: CapabilityPtr, message: ChannelMessage, caps: &[Capability]) -> Result<(), SyscallError> {
+    let error: usize;
+
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inlateout("a0") Syscall::WriteChannel as usize => error,
+            in("a1") cptr.value(),
+            in("a2") caps.as_ptr(),
+            in("a3") caps.len(),
+            in("t0") message.0[0],
+            in("t1") message.0[1],
+            in("t2") message.0[2],
+            in("t3") message.0[3],
+            in("t4") message.0[4],
+            in("t5") message.0[5],
+            in("t6") message.0[6],
+        );
+    }
+
+    match RawSyscallError::optional(error) {
+        Some(error) => Err(error.cook()),
+        None => Ok(()),
+    }
+}
+
+pub struct ReadResult {
+    pub message: ChannelMessage,
+    pub capabilities_read: usize,
+    pub capabilities_remaining: usize,
 }
 
 pub fn read_message(
     cptr: CapabilityPtr,
-    cap_buffer: &mut [Capability],
-) -> SyscallResult<(ChannelMessage, usize, usize), KError> {
-    syscall(
-        Recipient::kernel(),
-        SyscallRequest {
-            syscall: Syscall::ReadChannel,
-            arguments: [cptr.value(), cap_buffer.as_mut_ptr() as usize, cap_buffer.len(), 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        },
-    )
-    .1
-    .map(|(id, ptr, len, written_caps, caps_remaining)| {
-        (ChannelMessage { id: MessageId::new(id), ptr: ptr as *mut u8, len }, written_caps, caps_remaining)
-    })
+    cap_buffer: &mut [CapabilityWithDescription],
+    flags: ChannelReadFlags,
+) -> Result<ReadResult, SyscallError> {
+    let error: usize;
+    let capabilities_read: usize;
+    let capabilities_remaining: usize;
+    let mut message = [0; 7];
+
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inlateout("a0") Syscall::ReadChannel as usize => error,
+            inlateout("a1") cptr.value() => capabilities_read,
+            inlateout("a2") cap_buffer.as_mut_ptr() => capabilities_remaining,
+            in("a3") cap_buffer.len(),
+            in("a4") flags.0,
+            lateout("t0") message[0],
+            lateout("t1") message[1],
+            lateout("t2") message[2],
+            lateout("t3") message[3],
+            lateout("t4") message[4],
+            lateout("t5") message[5],
+            lateout("t6") message[6],
+        );
+    }
+
+    match RawSyscallError::optional(error) {
+        Some(error) => Err(error.cook()),
+        None => Ok(ReadResult { message: ChannelMessage(message), capabilities_read, capabilities_remaining }),
+    }
 }
 
-pub fn read_message_non_blocking(
-    cptr: CapabilityPtr,
-    cap_buffer: &mut [Capability],
-) -> SyscallResult<Option<(ChannelMessage, usize, usize)>, KError> {
-    syscall(
-        Recipient::kernel(),
-        SyscallRequest {
-            syscall: Syscall::ReadChannelNonBlocking,
-            arguments: [cptr.value(), cap_buffer.as_mut_ptr() as usize, cap_buffer.len(), 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        },
-    )
-    .1
-    .map(|vals| match vals {
-        (0, 0, 0, 0, 0) => None,
-        (id, ptr, len, written_caps, caps_remaining) => {
-            Some((ChannelMessage { id: MessageId::new(id), ptr: ptr as *mut u8, len }, written_caps, caps_remaining))
+pub const KERNEL_CHANNEL: CapabilityPtr = CapabilityPtr::new(0);
+pub const PARENT_CHANNEL: CapabilityPtr = CapabilityPtr::new(1);
+
+pub const KMSG_INTERRUPT_OCCURRED: usize = 0;
+pub const KMSG_NEW_CHANNEL_MESSAGE: usize = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum KernelMessage {
+    InterruptOccurred(usize),
+    NewChannelMessage(CapabilityPtr),
+}
+
+impl KernelMessage {
+    pub const fn into_parts(self) -> [usize; 7] {
+        match self {
+            Self::InterruptOccurred(n) => [KMSG_INTERRUPT_OCCURRED, n, 0, 0, 0, 0, 0],
+            Self::NewChannelMessage(cptr) => [KMSG_NEW_CHANNEL_MESSAGE, cptr.value(), 0, 0, 0, 0, 0],
         }
-    })
+    }
+
+    pub const fn construct(parts: [usize; 7]) -> Self {
+        match parts[0] {
+            KMSG_INTERRUPT_OCCURRED => Self::InterruptOccurred(parts[1]),
+            KMSG_NEW_CHANNEL_MESSAGE => Self::NewChannelMessage(CapabilityPtr::new(parts[1])),
+            _ => unreachable!(),
+        }
+    }
 }
 
-pub fn retire_message(cptr: CapabilityPtr, message: MessageId) -> SyscallResult<(), KError> {
-    syscall(
-        Recipient::kernel(),
-        SyscallRequest {
-            syscall: Syscall::RetireChannelMessage,
-            arguments: [cptr.value(), message.value(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        },
-    )
-    .1
+impl From<KernelMessage> for [usize; 7] {
+    fn from(km: KernelMessage) -> Self {
+        km.into_parts()
+    }
+}
+
+pub fn read_kernel_message() -> KernelMessage {
+    KernelMessage::construct(read_message(KERNEL_CHANNEL, &mut [], ChannelReadFlags::NONE).unwrap().message.0)
 }

@@ -8,7 +8,7 @@
 use librust::{
     self,
     capabilities::{CapabilityPtr, CapabilityRights},
-    syscalls::allocation::MemoryPermissions,
+    syscalls::mem::MemoryPermissions,
 };
 
 static SERVERS: &[u8] = include_bytes!("../../../../build/initfs.tar");
@@ -89,7 +89,8 @@ fn main() {
 
         env.a0 = 0;
         env.a1 = 0;
-        let (_, cap) = space.spawn(env).unwrap();
+
+        let cap = space.spawn(env).unwrap();
         caps.insert(server.name, cap);
     }
 }

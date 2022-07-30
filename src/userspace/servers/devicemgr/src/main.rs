@@ -6,14 +6,14 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use librust::{
-    capabilities::{Capability, CapabilityRights},
-    message::KernelNotification,
-    syscalls::ReadMessage,
+    capabilities::{Capability, CapabilityDescription, CapabilityRights},
+    syscalls::channel::{ChannelMessage, KernelMessage},
 };
-use std::ipc::IpcChannel;
+use std::ipc::{ChannelReadFlags, IpcChannel};
 
 json::derive! {
     Serialize,
+    #[derive(Debug)]
     struct Device {
         name: String,
         compatible: Vec<String>,
@@ -23,6 +23,7 @@ json::derive! {
 
 json::derive! {
     Serialize,
+    #[derive(Debug)]
     struct Devices {
         devices: Vec<Device>,
     }
@@ -53,23 +54,30 @@ fn main() {
             }
         }
     }
-
-    let mut buffer = Vec::new();
+    librust::syscalls::task::enable_notifications();
     loop {
-        buffer.clear();
+        // println!("[devicemgr] Waiting for new kernel message");
+        let cptr = match librust::syscalls::channel::read_kernel_message() {
+            KernelMessage::NewChannelMessage(cptr) => cptr,
+            _ => continue,
+        };
 
-        #[allow(clippy::collapsible_match)]
-        let cptr = match librust::syscalls::receive_message() {
-            ReadMessage::Kernel(kmsg) => match kmsg {
-                KernelNotification::NewChannelMessage(cptr) => cptr,
-                _ => continue,
+        // println!("[devicemgr] New channel message on {cptr:?}");
+
+        let channel = IpcChannel::new(cptr);
+        let (_, caps) = match channel.read_with_all_caps(ChannelReadFlags::NONBLOCKING) {
+            Ok(data) => data,
+            Err(_) => continue,
+        };
+
+        let mem = match &caps[0].description {
+            CapabilityDescription::Memory { ptr, len, permissions: _ } => unsafe {
+                core::slice::from_raw_parts(*ptr, *len)
             },
             _ => continue,
         };
 
-        let mut channel = IpcChannel::new(cptr);
-        let (message, _) = channel.read_with_all_caps().unwrap();
-        let compatible = json::deserialize::<WantedCompatible>(message.as_bytes()).unwrap().compatible;
+        let compatible = json::deserialize::<WantedCompatible>(mem).unwrap().compatible;
 
         let all_compatible = fdt
             .all_nodes()
@@ -82,13 +90,7 @@ fn main() {
             .collect::<Vec<_>>();
 
         match all_compatible.len() {
-            0 => drop(channel.send_bytes(
-                {
-                    json::serialize(&mut buffer, &Devices { devices: vec![] });
-                    &buffer
-                },
-                &[],
-            )),
+            0 => channel.temp_send_json(ChannelMessage::default(), &Devices { devices: vec![] }, &[]).unwrap(),
             _ => {
                 let devices = Devices {
                     devices: all_compatible
@@ -110,8 +112,7 @@ fn main() {
                     ));
                 }
 
-                json::serialize(&mut buffer, &devices);
-                channel.send_bytes(&buffer, &caps[..]).unwrap();
+                channel.temp_send_json(ChannelMessage::default(), &devices, &caps[..]).unwrap();
             }
         }
     }
