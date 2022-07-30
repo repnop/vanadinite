@@ -9,7 +9,7 @@ use crate::{
     capabilities::{Capability, CapabilityResource},
     mem::{
         manager::{AddressRegionKind, FillOption, RegionDescription},
-        paging::{flags, PageSize, VirtualAddress},
+        paging::{flags::Flags, PageSize, VirtualAddress},
         user::{RawUserSlice, ReadWrite, ValidatedUserSlice},
     },
     task::Task,
@@ -31,18 +31,18 @@ pub fn alloc_virtual_memory(task: &mut Task, frame: &mut GeneralRegisters) -> Re
         return Err(SyscallError::InvalidArgument(2));
     }
 
-    let mut flags = flags::VALID | flags::USER;
+    let mut flags = Flags::VALID | Flags::USER;
 
     if permissions & MemoryPermissions::READ {
-        flags |= flags::READ;
+        flags |= Flags::READ;
     }
 
     if permissions & MemoryPermissions::WRITE {
-        flags |= flags::WRITE;
+        flags |= Flags::WRITE;
     }
 
     if permissions & MemoryPermissions::EXECUTE {
-        flags |= flags::EXECUTE;
+        flags |= Flags::EXECUTE;
     }
 
     let page_size = if options & AllocationOptions::LARGE_PAGE { PageSize::Megapage } else { PageSize::Kilopage };
@@ -133,7 +133,7 @@ pub fn alloc_dma_memory(task: &mut Task, frame: &mut GeneralRegisters) -> Result
                     size: page_size,
                     len: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
                     contiguous: true,
-                    flags: flags::VALID | flags::USER | flags::READ | flags::WRITE,
+                    flags: Flags::VALID | Flags::USER | Flags::READ | Flags::WRITE,
                     fill: if options & DmaAllocationOptions::ZERO {
                         FillOption::Zeroed
                     } else {

@@ -58,10 +58,7 @@ impl BuildTarget {
     pub fn env(&self) -> Vec<xshell::Pushenv> {
         match self {
             BuildTarget::Userspace => vec![],
-            BuildTarget::Vanadinite(opts) => vec![pushenv(
-                "RUSTFLAGS",
-                format!("-C code-model=medium -C link-arg=-Tvanadinite/lds/{}.lds", opts.platform),
-            )],
+            BuildTarget::Vanadinite(opts) => vec![pushenv("VANADINITE_TARGET_PLATFORM", opts.platform.to_string())],
             BuildTarget::Vanadium(opts) => {
                 vec![pushenv("RUSTFLAGS", format!("-C code-model=medium -C link-arg=-Tlds/{}.lds", opts.platform))]
             }
@@ -116,10 +113,6 @@ pub fn build(target: BuildTarget) -> Result<()> {
             }
 
             archive.finish()?;
-
-            let _dir = pushd("init/");
-            cmd!("cargo build --release").run()?;
-            cp("target/riscv64gc-unknown-none-elf/release/init", "../../../build/init")?;
         }
         BuildTarget::Vanadinite(build_opts) => {
             let features = format!("platform.{} {}", build_opts.platform, build_opts.kernel_features);

@@ -14,10 +14,7 @@ use crate::{
     csr::satp::Satp,
     mem::{
         kernel_patching,
-        paging::{
-            flags::{ACCESSED, DIRTY, EXECUTE, READ, VALID, WRITE},
-            PageSize, PageTable, PhysicalAddress, VirtualAddress, SATP_MODE,
-        },
+        paging::{flags::Flags, PageSize, PageTable, PhysicalAddress, VirtualAddress, SATP_MODE},
         phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
     },
     utils::{LinkerSymbol, Units},
@@ -92,7 +89,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8) -> ! {
         root_page_table.static_map(
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
-            DIRTY | ACCESSED | READ | WRITE | VALID,
+            Flags::DIRTY | Flags::ACCESSED | Flags::READ | Flags::WRITE | Flags::VALID,
             PageSize::Kilopage,
         );
     }
@@ -105,7 +102,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8) -> ! {
         root_page_table.static_map(
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
-            DIRTY | ACCESSED | READ | WRITE | VALID,
+            Flags::DIRTY | Flags::ACCESSED | Flags::READ | Flags::WRITE | Flags::VALID,
             PageSize::Kilopage,
         );
     }
@@ -118,7 +115,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8) -> ! {
         root_page_table.static_map(
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
-            DIRTY | ACCESSED | READ | WRITE | VALID,
+            Flags::DIRTY | Flags::ACCESSED | Flags::READ | Flags::WRITE | Flags::VALID,
             PageSize::Kilopage,
         );
     }
@@ -131,7 +128,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8) -> ! {
         root_page_table.static_map(
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
-            ACCESSED | EXECUTE | VALID,
+            Flags::ACCESSED | Flags::EXECUTE | Flags::VALID,
             PageSize::Kilopage,
         );
     }
@@ -153,7 +150,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8) -> ! {
         root_page_table.static_map(
             PhysicalAddress::new(addr * 1.gib()),
             VirtualAddress::new(PHYS_OFFSET_VALUE + addr * 1.gib()),
-            DIRTY | ACCESSED | READ | WRITE | VALID,
+            Flags::DIRTY | Flags::ACCESSED | Flags::READ | Flags::WRITE | Flags::VALID,
             PageSize::Gigapage,
         );
     }

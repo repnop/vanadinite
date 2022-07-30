@@ -177,8 +177,6 @@ pub fn test(mut options: RunOptions) -> Result<()> {
     let build_opts = &options.vanadinite_options;
     build::build(BuildTarget::Vanadinite(build_opts.clone()))?;
 
-    let _dir = xshell::pushd("./src");
-
     let platform = options.vanadinite_options.platform.to_string();
     let cpu_count = options.cpus.to_string();
     let ram = options.ram.to_string();
@@ -204,8 +202,8 @@ pub fn test(mut options: RunOptions) -> Result<()> {
             -smp {cpu_count}
             -m {ram}M
             -append {kernel_args}
-            -bios ../opensbi-riscv64-generic-fw_jump.bin 
-            -kernel target/riscv64gc-unknown-none-elf/debug/vanadinite
+            -bios build/opensbi-riscv64-generic-fw_jump.bin 
+            -kernel src/kernel/target/riscv64gc-unknown-none-elf/debug/vanadinite
             {debug_log...}
     ").run()?;
 

@@ -4,3 +4,4 @@ target = "riscv64gc-unknown-none-elf"
 [unstable]
 build-std = ["core", "alloc", "compiler_builtins"]
 build-std-features = ["compiler-builtins-mem"]
+bindeps = true

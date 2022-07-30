@@ -10,7 +10,7 @@ use crate::{
     interrupts::{isr::invoke_isr, PLIC},
     mem::{
         manager::AddressRegion,
-        paging::{flags, VirtualAddress},
+        paging::{flags::Flags, VirtualAddress},
         region::MemoryRegion,
     },
     scheduler::{Scheduler, SCHEDULER},
@@ -327,17 +327,17 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                             Trap::LoadPageFault | Trap::InstructionPageFault => {
                                 match memory_manager.page_flags(stval) {
                                     Some(flags) => {
-                                        (flags & flags::READ)
-                                            && memory_manager.modify_page_flags(stval, |f| f | flags::ACCESSED)
+                                        (flags & Flags::READ)
+                                            && memory_manager.modify_page_flags(stval, |f| f | Flags::ACCESSED)
                                     }
                                     None => false,
                                 }
                             }
                             Trap::StorePageFault => match memory_manager.page_flags(stval) {
                                 Some(flags) => {
-                                    (flags & flags::WRITE)
+                                    (flags & Flags::WRITE)
                                         && memory_manager
-                                            .modify_page_flags(stval, |f| f | flags::DIRTY | flags::ACCESSED)
+                                            .modify_page_flags(stval, |f| f | Flags::DIRTY | Flags::ACCESSED)
                                 }
                                 None => false,
                             },

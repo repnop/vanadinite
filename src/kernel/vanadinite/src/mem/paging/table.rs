@@ -79,7 +79,7 @@ impl PageTable {
                     let new_subtable = Box::leak(Self::new_table());
                     let subtable_phys = virt2phys(VirtualAddress::from_ptr(new_subtable));
 
-                    entry.set_flags(flags::VALID);
+                    entry.set_flags(Flags::VALID);
                     entry.set_ppn(subtable_phys);
 
                     self.subtables.push(unsafe { NonNull::new_unchecked(new_subtable) });
@@ -169,7 +169,7 @@ impl PageTable {
                 EntryKind::NotValid => {
                     let new_subtable = Box::leak(Self::new_table());
                     let subtable_phys = virt2phys(VirtualAddress::from_ptr(new_subtable));
-                    entry.set_flags(flags::VALID);
+                    entry.set_flags(Flags::VALID);
                     entry.set_ppn(subtable_phys);
 
                     table = new_subtable;

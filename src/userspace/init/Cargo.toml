@@ -11,8 +11,9 @@ json = { path = "../libs/json" }
 librust = { path = "../../shared/librust" }
 loadelf = { path = "../libs/loadelf" }
 fdt = "0.1.3"
-std = { path = "../libs/std" }
+std = { path = "../libs/std", features = ["init"] }
 tar = { path = "../libs/tar" }
 
 [profile.release]
-debug = true
+debug = false
+lto = "fat"

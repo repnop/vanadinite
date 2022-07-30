@@ -82,9 +82,9 @@ impl PageTableEntry {
     pub fn kind(self) -> EntryKind {
         let flags = self.flags();
 
-        match flags & VALID {
+        match flags & Flags::VALID {
             false => EntryKind::NotValid,
-            true => match flags & READ || flags & EXECUTE {
+            true => match flags & Flags::READ || flags & Flags::EXECUTE {
                 true => EntryKind::Leaf,
                 false => EntryKind::Branch(self.ppn().unwrap()),
             },
@@ -292,7 +292,7 @@ impl VirtualAddress {
     }
 
     pub const fn userspace_range() -> Range<VirtualAddress> {
-        VirtualAddress::new(0)..VirtualAddress::new(1 << (12 + N_VPN * 9 - 1))
+        VirtualAddress::new(0)..VirtualAddress::new((1 << (12 + N_VPN * 9 - 1)) - 1)
     }
 
     pub const fn kernelspace_range() -> Range<VirtualAddress> {

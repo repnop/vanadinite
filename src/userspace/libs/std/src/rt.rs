@@ -14,6 +14,7 @@ use librust::{
 };
 
 #[no_mangle]
+#[cfg_attr(feature = "init", link_section = ".rt.entry")]
 unsafe extern "C" fn _start(argc: isize, argv: *const *const u8, a2: usize) -> ! {
     extern "C" {
         fn main(_: isize, _: *const *const u8) -> isize;

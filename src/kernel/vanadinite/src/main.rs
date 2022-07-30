@@ -77,7 +77,7 @@ pub use vanadinite_macros::{debug, error, info, trace, warn};
 
 static N_CPUS: AtomicUsize = AtomicUsize::new(1);
 static TIMER_FREQ: AtomicU64 = AtomicU64::new(0);
-static INIT: &[u8] = include_bytes!("../../../../build/init");
+static INIT: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_INIT"));
 
 #[thread_local]
 static HART_ID: core::cell::Cell<usize> = core::cell::Cell::new(0);
@@ -298,11 +298,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
     //scheduler::init_scheduler(Box::new(scheduler::round_robin::RoundRobinScheduler::new()));
 
-    scheduler::SCHEDULER.enqueue(task::Task::load(
-        "init",
-        &elf64::Elf::new(INIT).unwrap(),
-        init_args.into_iter().flatten(),
-    ));
+    scheduler::SCHEDULER.enqueue(task::Task::load_init(INIT, init_args.into_iter().flatten()));
 
     let other_hart_boot_phys = unsafe { kernel_section_v2p(VirtualAddress::from_ptr(other_hart_boot as *const u8)) };
 

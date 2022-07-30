@@ -10,7 +10,7 @@ debug = false
 
 [dependencies]
 anyhow = "1.0"
-clap = { version = "3.0.12", features = ["derive"] }
+clap = { version = "3.2.16", features = ["derive"] }
 tar = "0.4"
 walkdir = "2.3"
 xshell = "0.1"

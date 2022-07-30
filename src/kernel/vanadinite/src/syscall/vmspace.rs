@@ -11,7 +11,7 @@ use crate::{
     capabilities::{Capability, CapabilityResource, CapabilitySpace},
     mem::{
         manager::{AddressRegionKind, FillOption, MemoryManager, RegionDescription},
-        paging::{flags, PageSize, VirtualAddress},
+        paging::{flags::Flags, PageSize, VirtualAddress},
         user::RawUserSlice,
     },
     scheduler::{Scheduler, SCHEDULER},
@@ -70,21 +70,21 @@ pub fn alloc_vmspace_object(task: &mut Task, frame: &mut GeneralRegisters) -> Re
         return Err(SyscallError::InvalidArgument(2));
     }
 
-    let mut flags = flags::VALID | flags::USER;
+    let mut flags = Flags::VALID | Flags::USER;
 
     if permissions & MemoryPermissions::READ {
-        flags |= flags::READ;
+        flags |= Flags::READ;
     }
 
     if permissions & MemoryPermissions::WRITE {
-        flags |= flags::WRITE;
+        flags |= Flags::WRITE;
     }
 
     if permissions & MemoryPermissions::EXECUTE {
-        flags |= flags::EXECUTE;
+        flags |= Flags::EXECUTE;
     }
 
-    let kind = match (flags & flags::READ, flags & flags::WRITE, flags & flags::EXECUTE) {
+    let kind = match (flags & Flags::READ, flags & Flags::WRITE, flags & Flags::EXECUTE) {
         (true, true, true) => AddressRegionKind::UserAllocated,
         (true, true, false) => AddressRegionKind::Data,
         (true, false, false) => AddressRegionKind::ReadOnly,
@@ -115,7 +115,7 @@ pub fn alloc_vmspace_object(task: &mut Task, frame: &mut GeneralRegisters) -> Re
     // log::info!("Mapping region at {:#p} for task {}", at.start, task.name);
     let range = task.memory_manager.apply_shared_region(
         None,
-        flags::USER | flags::VALID | flags::READ | flags::WRITE,
+        Flags::USER | Flags::VALID | Flags::READ | Flags::WRITE,
         region,
         AddressRegionKind::UserAllocated,
     );
@@ -190,7 +190,7 @@ pub fn spawn_vmspace(task: &mut Task, frame: &mut GeneralRegisters) -> Result<()
         cspace: CapabilitySpace::new(),
         kernel_channel,
         claimed_interrupts: BTreeMap::new(),
-        subscribes_to_events: false,
+        subscribes_to_events: true,
     };
 
     let (mut channel1, mut channel2) = UserspaceChannel::new();

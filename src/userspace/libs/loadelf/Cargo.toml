@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 librust = { path = "../../../shared/librust" }
 std = { path = "../std", default-features = false }
-elf64 = { path = "../../../shared/elf64" }
+elf64 = { path = "../elf64" }

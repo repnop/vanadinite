@@ -9,7 +9,7 @@ use crate::{
     capabilities::{Capability, CapabilityResource},
     interrupts::PLIC,
     mem::{
-        paging::{flags, VirtualAddress},
+        paging::{flags::Flags, VirtualAddress},
         user::{self, RawUserSlice},
     },
     scheduler::{Scheduler, WakeToken, SCHEDULER, TASKS},
@@ -319,21 +319,21 @@ pub fn read_message(task: &mut Task, regs: &mut GeneralRegisters) -> Result<supe
                             }
                             CapabilityResource::Memory(region, _, kind) => {
                                 let mut permissions = MemoryPermissions::new(0);
-                                let mut memflags = flags::VALID | flags::USER;
+                                let mut memflags = Flags::VALID | Flags::USER;
 
                                 if rights & CapabilityRights::READ {
                                     permissions |= MemoryPermissions::READ;
-                                    memflags |= flags::READ;
+                                    memflags |= Flags::READ;
                                 }
 
                                 if rights & CapabilityRights::WRITE {
                                     permissions |= MemoryPermissions::WRITE;
-                                    memflags |= flags::WRITE;
+                                    memflags |= Flags::WRITE;
                                 }
 
                                 if rights & CapabilityRights::EXECUTE {
                                     permissions |= MemoryPermissions::EXECUTE;
-                                    memflags |= flags::EXECUTE;
+                                    memflags |= Flags::EXECUTE;
                                 }
 
                                 let addr =

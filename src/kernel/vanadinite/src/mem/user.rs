@@ -9,10 +9,7 @@ use crate::csr::sstatus::TemporaryUserMemoryAccess;
 
 use super::{
     manager::{InvalidRegion, MemoryManager},
-    paging::{
-        flags::{self, Flags},
-        VirtualAddress,
-    },
+    paging::{flags::Flags, VirtualAddress},
 };
 use core::marker::PhantomData;
 
@@ -151,12 +148,12 @@ pub trait UserPtrMode {
 
 pub struct Read;
 impl UserPtrMode for Read {
-    const FLAGS: Flags = flags::READ;
+    const FLAGS: Flags = Flags::READ;
 }
 
 pub struct ReadWrite;
 impl UserPtrMode for ReadWrite {
-    const FLAGS: Flags = Flags::new(flags::READ.value() | flags::WRITE.value());
+    const FLAGS: Flags = Flags::new(Flags::READ.value() | Flags::WRITE.value());
 }
 
 #[derive(Debug)]

@@ -9,10 +9,7 @@ mod address_map;
 
 use crate::{
     mem::{
-        paging::{
-            flags::{self, Flags},
-            PageSize, PageTable, PageTableDebug, PhysicalAddress, VirtualAddress,
-        },
+        paging::{flags::Flags, PageSize, PageTable, PageTableDebug, PhysicalAddress, VirtualAddress},
         region::{MemoryRegion, PhysicalRegion, UniquePhysicalRegion},
         sfence,
     },
@@ -177,7 +174,7 @@ impl MemoryManager {
 
         let backing = UniquePhysicalRegion::mmio(from, PageSize::Kilopage, n_pages);
 
-        let flags = flags::READ | flags::WRITE | flags::USER | flags::VALID;
+        let flags = Flags::READ | Flags::WRITE | Flags::USER | Flags::VALID;
         let iter = backing
             .physical_addresses()
             .enumerate()
@@ -239,9 +236,9 @@ impl MemoryManager {
     /// Place a guard page at the given [`VirtualAddress`]
     pub fn guard(&mut self, at: VirtualAddress) {
         self.address_map
-            .alloc(at..at.add(4.kib()), MemoryRegion::GuardPage, AddressRegionKind::Guard, flags::USER)
+            .alloc(at..at.add(4.kib()), MemoryRegion::GuardPage, AddressRegionKind::Guard, Flags::USER)
             .unwrap();
-        self.table.map(PhysicalAddress::null(), at, flags::USER | flags::VALID, PageSize::Kilopage);
+        self.table.map(PhysicalAddress::null(), at, Flags::USER | Flags::VALID, PageSize::Kilopage);
     }
 
     /// Deallocate the region specified by the given [`VirtualAddress`]

@@ -69,7 +69,7 @@ impl AddressMap {
                 region: None,
                 span: complete_range,
                 kind: AddressRegionKind::Unoccupied,
-                permissions: flags::USER,
+                permissions: Flags::USER,
             },
         );
 
@@ -145,14 +145,14 @@ impl AddressMap {
                     region: None,
                     span: old_range.span.start..subrange.start,
                     kind: AddressRegionKind::Unoccupied,
-                    permissions: flags::USER,
+                    permissions: Flags::USER,
                 };
                 let active = AddressRegion { region: Some(backing), span: subrange.clone(), kind, permissions };
                 let after = AddressRegion {
                     region: None,
                     span: subrange.end..old_range.span.end,
                     kind: AddressRegionKind::Unoccupied,
-                    permissions: flags::USER,
+                    permissions: Flags::USER,
                 };
 
                 self.map.insert(unsafe { before.span.end.unchecked_offset(-1) }, before);
@@ -247,9 +247,9 @@ impl core::fmt::Debug for AddressMapDebug<'_> {
                         region.span.end,
                         // Apparently padding doesn't work with debug printing...
                         alloc::format!("{:?}", region.kind),
-                        if region.permissions & flags::READ { 'R' } else { '-' },
-                        if region.permissions & flags::WRITE { 'W' } else { '-' },
-                        if region.permissions & flags::EXECUTE { 'X' } else { '-' },
+                        if region.permissions & Flags::READ { 'R' } else { '-' },
+                        if region.permissions & Flags::WRITE { 'W' } else { '-' },
+                        if region.permissions & Flags::EXECUTE { 'X' } else { '-' },
                         match (inside_region, inbetween_regions) {
                             (Some(inside), _) if inside.span == region.span => "<-- fault lies inside this region",
                             (None, Some((start, _))) if start.span == region.span =>
@@ -283,7 +283,7 @@ mod tests {
         // Initial allocation, aka splitting into three parts
         let mut am = AddressMap::new();
         let subrange = VirtualAddress::new(0x1_0000)..VirtualAddress::new(0x5_0000);
-        am.alloc(subrange.clone(), MemoryRegion::GuardPage, AddressRegionKind::Unoccupied, flags::READ).unwrap();
+        am.alloc(subrange.clone(), MemoryRegion::GuardPage, AddressRegionKind::Unoccupied, Flags::READ).unwrap();
 
         assert_eq!(
             am.occupied_regions().collect::<alloc::vec::Vec<_>>(),
@@ -291,7 +291,7 @@ mod tests {
                 region: Some(MemoryRegion::GuardPage),
                 span: subrange.clone(),
                 kind: AddressRegionKind::Unoccupied,
-                permissions: flags::USER,
+                permissions: Flags::READ,
             }]
         );
 
@@ -302,13 +302,13 @@ mod tests {
                     region: None,
                     span: VirtualAddress::new(0)..subrange.start,
                     kind: AddressRegionKind::Unoccupied,
-                    permissions: flags::USER,
+                    permissions: Flags::USER,
                 },
                 &AddressRegion {
                     region: None,
                     span: subrange.end..VirtualAddress::userspace_range().end,
                     kind: AddressRegionKind::Unoccupied,
-                    permissions: flags::USER,
+                    permissions: Flags::USER,
                 }
             ]
         );
@@ -316,12 +316,12 @@ mod tests {
         // Full first-subrange allocation
         let mut am = AddressMap::new();
         let subrange = VirtualAddress::new(0x1_0000)..VirtualAddress::new(0x5_0000);
-        am.alloc(subrange.clone(), MemoryRegion::GuardPage, AddressRegionKind::Unoccupied, flags::USER).unwrap();
+        am.alloc(subrange.clone(), MemoryRegion::GuardPage, AddressRegionKind::Unoccupied, Flags::USER).unwrap();
         am.alloc(
             VirtualAddress::new(0)..subrange.start,
             MemoryRegion::GuardPage,
             AddressRegionKind::Unoccupied,
-            flags::USER,
+            Flags::USER,
         )
         .unwrap();
 
@@ -332,13 +332,13 @@ mod tests {
                     region: Some(MemoryRegion::GuardPage),
                     span: VirtualAddress::new(0)..subrange.start,
                     kind: AddressRegionKind::Unoccupied,
-                    permissions: flags::USER,
+                    permissions: Flags::USER,
                 },
                 &AddressRegion {
                     region: Some(MemoryRegion::GuardPage),
                     span: subrange.clone(),
                     kind: AddressRegionKind::Unoccupied,
-                    permissions: flags::USER,
+                    permissions: Flags::USER,
                 },
             ]
         );
@@ -349,19 +349,19 @@ mod tests {
                 region: None,
                 span: subrange.end..VirtualAddress::userspace_range().end,
                 kind: AddressRegionKind::Unoccupied,
-                permissions: flags::USER,
+                permissions: Flags::USER,
             }]
         );
 
         // Full second-subrange allocation
         let mut am = AddressMap::new();
         let subrange = VirtualAddress::new(0x1_0000)..VirtualAddress::new(0x5_0000);
-        am.alloc(subrange.clone(), MemoryRegion::GuardPage, AddressRegionKind::Unoccupied, flags::USER).unwrap();
+        am.alloc(subrange.clone(), MemoryRegion::GuardPage, AddressRegionKind::Unoccupied, Flags::USER).unwrap();
         am.alloc(
             subrange.end..VirtualAddress::userspace_range().end,
             MemoryRegion::GuardPage,
             AddressRegionKind::Unoccupied,
-            flags::USER,
+            Flags::USER,
         )
         .unwrap();
 
@@ -372,13 +372,13 @@ mod tests {
                     region: Some(MemoryRegion::GuardPage),
                     span: subrange.clone(),
                     kind: AddressRegionKind::Unoccupied,
-                    permissions: flags::USER,
+                    permissions: Flags::USER,
                 },
                 &AddressRegion {
                     region: Some(MemoryRegion::GuardPage),
                     span: subrange.end..VirtualAddress::userspace_range().end,
                     kind: AddressRegionKind::Unoccupied,
-                    permissions: flags::USER,
+                    permissions: Flags::USER,
                 }
             ]
         );
@@ -389,7 +389,7 @@ mod tests {
                 region: None,
                 span: VirtualAddress::new(0)..subrange.start,
                 kind: AddressRegionKind::Unoccupied,
-                permissions: flags::USER,
+                permissions: Flags::USER,
             }]
         );
     }
@@ -399,7 +399,7 @@ mod tests {
         let mut am = AddressMap::new();
         let subrange = VirtualAddress::new(0x1_0000)..VirtualAddress::new(0x5_0000);
 
-        am.alloc(subrange.clone(), MemoryRegion::GuardPage, AddressRegionKind::Unoccupied, flags::USER).unwrap();
+        am.alloc(subrange.clone(), MemoryRegion::GuardPage, AddressRegionKind::Unoccupied, Flags::USER).unwrap();
         am.free(subrange).unwrap();
 
         assert_eq!(
@@ -408,7 +408,33 @@ mod tests {
                 region: None,
                 span: VirtualAddress::userspace_range(),
                 kind: AddressRegionKind::Unoccupied,
-                permissions: flags::USER,
+                permissions: Flags::USER,
+            }
+        );
+    }
+
+    #[test]
+    fn doesnt_grab_existing_region() {
+        let mut am = AddressMap::new();
+        let subrange = VirtualAddress::new(0x1_0000)..VirtualAddress::new(0x5_0000);
+
+        am.alloc(subrange.clone(), MemoryRegion::GuardPage, AddressRegionKind::Unoccupied, Flags::USER).unwrap();
+        am.alloc(
+            VirtualAddress::new(0x4_0000)..VirtualAddress::new(0x5_0000),
+            MemoryRegion::GuardPage,
+            AddressRegionKind::Unoccupied,
+            Flags::USER,
+        )
+        .unwrap_err();
+        am.free(subrange).unwrap();
+
+        assert_eq!(
+            am.unoccupied_regions().next().unwrap(),
+            &AddressRegion {
+                region: None,
+                span: VirtualAddress::userspace_range(),
+                kind: AddressRegionKind::Unoccupied,
+                permissions: Flags::USER,
             }
         );
     }
