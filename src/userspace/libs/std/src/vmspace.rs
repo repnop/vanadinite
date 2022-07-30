@@ -12,11 +12,9 @@ use librust::{
     error::SyscallError,
     syscalls::{
         channel::ChannelMessage,
-        mem::{AllocationOptions, MemoryPermissions},
+        mem::MemoryPermissions,
         vmspace::{self, VmspaceObjectId, VmspaceObjectMapping, VmspaceSpawnEnv},
     },
-    task::Tid,
-    units::Bytes,
 };
 
 pub struct Vmspace {

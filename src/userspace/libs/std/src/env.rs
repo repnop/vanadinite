@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use alloc::{collections::BTreeMap, string::String};
-use librust::capabilities::{CapabilityPtr, CapabilityWithDescription};
+use librust::capabilities::CapabilityWithDescription;
 
 use crate::sync::SyncRefCell;
 

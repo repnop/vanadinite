@@ -71,7 +71,12 @@ fn main() {
                 let read = uart.read();
                 librust::syscalls::io::complete_interrupt(id).unwrap();
                 input.push(read);
-                uart.write(read);
+                uart.write(if read == b'\r' {
+                    uart.write(b'\r');
+                    b'\n'
+                } else {
+                    read
+                });
                 continue;
             }
             _ => continue,
@@ -86,7 +91,7 @@ fn main() {
         if let Some(CapabilityWithDescription { description: CapabilityDescription::Memory { ptr, len, .. }, .. }) =
             caps.get(0)
         {
-            for b in unsafe { core::slice::from_raw_parts(*ptr, (*len).min(msg.0[0])) } {
+            for b in unsafe { core::slice::from_raw_parts(*ptr, (*len).min(msg.0[1])) } {
                 uart.write(*b);
             }
         }

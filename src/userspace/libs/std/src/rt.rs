@@ -6,11 +6,8 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use librust::{
-    capabilities::{Capability, CapabilityDescription, CapabilityPtr, CapabilityRights, CapabilityWithDescription},
-    syscalls::{
-        channel::{ChannelReadFlags, ReadResult, KERNEL_CHANNEL, PARENT_CHANNEL},
-        mem::MemoryPermissions,
-    },
+    capabilities::{Capability, CapabilityDescription, CapabilityRights, CapabilityWithDescription},
+    syscalls::channel::{ChannelReadFlags, PARENT_CHANNEL},
 };
 
 #[no_mangle]
