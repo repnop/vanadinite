@@ -25,7 +25,7 @@ pub enum Outcome {
     Completed,
 }
 
-pub fn handle(frame: &mut TrapFrame, _: usize) -> Outcome {
+pub fn handle(frame: &mut TrapFrame, sepc: usize) -> Outcome {
     let task_lock = SCHEDULER.active_on_cpu().unwrap();
     let mut task_lock = task_lock.lock();
     let task = &mut *task_lock;
@@ -55,7 +55,7 @@ pub fn handle(frame: &mut TrapFrame, _: usize) -> Outcome {
         Syscall::AllocDmaMemory => mem::alloc_dma_memory(task, regs),
         Syscall::AllocVirtualMemory => mem::alloc_virtual_memory(task, regs),
         Syscall::ClaimDevice => io::claim_device(task, regs),
-        Syscall::CompleteInterrupt => todo!(),
+        Syscall::CompleteInterrupt => io::complete_interrupt(task, regs),
         Syscall::CreateVmspace => vmspace::create_vmspace(task, regs),
         Syscall::AllocVmspaceObject => vmspace::alloc_vmspace_object(task, regs),
         Syscall::SpawnVmspace => vmspace::spawn_vmspace(task, regs),
@@ -64,6 +64,8 @@ pub fn handle(frame: &mut TrapFrame, _: usize) -> Outcome {
         Syscall::ReadChannel => match channel::read_message(task, regs) {
             Ok(Outcome::Blocked) => {
                 let tid = task.tid;
+                task.context.gp_regs = frame.registers;
+                task.context.pc = sepc;
                 drop(task_lock);
                 SCHEDULER.block(tid);
                 return Outcome::Blocked;
@@ -74,6 +76,7 @@ pub fn handle(frame: &mut TrapFrame, _: usize) -> Outcome {
         Syscall::WriteChannel => channel::send_message(task, regs),
         Syscall::MintCapability => todo!(),
         Syscall::RevokeCapability => todo!(),
+        Syscall::EnableNotifications => Ok(task.subscribes_to_events = true),
     };
 
     match res {

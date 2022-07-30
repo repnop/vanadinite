@@ -30,6 +30,7 @@ pub enum Syscall {
     QueryMmioCapability = 22,
     MintCapability = 23,
     RevokeCapability = 24,
+    EnableNotifications = 25,
 }
 
 impl Syscall {
@@ -51,6 +52,7 @@ impl Syscall {
             22 => Some(Self::QueryMmioCapability),
             23 => Some(Self::MintCapability),
             24 => Some(Self::RevokeCapability),
+            25 => Some(Self::EnableNotifications),
             _ => None,
         }
     }

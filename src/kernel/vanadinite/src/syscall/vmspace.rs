@@ -22,7 +22,7 @@ use crate::{
 };
 use alloc::{collections::BTreeMap, vec::Vec};
 use librust::{
-    capabilities::{CapabilityPtr, CapabilityRights},
+    capabilities::CapabilityRights,
     error::SyscallError,
     syscalls::{
         channel::{KERNEL_CHANNEL, PARENT_CHANNEL},
@@ -190,9 +190,10 @@ pub fn spawn_vmspace(task: &mut Task, frame: &mut GeneralRegisters) -> Result<()
         cspace: CapabilitySpace::new(),
         kernel_channel,
         claimed_interrupts: BTreeMap::new(),
+        subscribes_to_events: false,
     };
 
-    let (channel1, channel2) = UserspaceChannel::new();
+    let (mut channel1, mut channel2) = UserspaceChannel::new();
 
     new_task
         .cspace
@@ -202,29 +203,39 @@ pub fn spawn_vmspace(task: &mut Task, frame: &mut GeneralRegisters) -> Result<()
         )
         .expect("[BUG] kernel channel cap already created?");
 
-    new_task
-        .cspace
-        .mint_with_id(
-            PARENT_CHANNEL,
+    SCHEDULER.enqueue_with(|tid| {
+        channel1.sender.other_tid = Some(tid);
+        channel2.sender.other_tid = Some(task.tid);
+
+        for region in object.inprocess_mappings {
+            task.memory_manager.dealloc_region(region);
+        }
+
+        let cptr = task.cspace.mint_with(|cptr| {
+            channel1.sender.other_cptr = PARENT_CHANNEL;
+            channel2.sender.other_cptr = cptr;
+
+            new_task
+                .cspace
+                .mint_with_id(
+                    PARENT_CHANNEL,
+                    Capability {
+                        resource: CapabilityResource::Channel(channel2),
+                        rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
+                    },
+                )
+                .expect("[BUG] parent channel cap already created?");
+
             Capability {
-                resource: CapabilityResource::Channel(channel2),
+                resource: CapabilityResource::Channel(channel1),
                 rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
-            },
-        )
-        .expect("[BUG] parent channel cap already created?");
+            }
+        });
 
-    for region in object.inprocess_mappings {
-        task.memory_manager.dealloc_region(region);
-    }
+        frame.a1 = cptr.value();
 
-    let cptr = task.cspace.mint(Capability {
-        resource: CapabilityResource::Channel(channel1),
-        rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
+        new_task
     });
-
-    frame.a1 = cptr.value();
-
-    SCHEDULER.enqueue(new_task);
 
     Ok(())
 }

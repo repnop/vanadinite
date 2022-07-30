@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::ipc::{ChannelMessage, IpcChannel};
+use std::ipc::{ChannelMessage, ChannelReadFlags, IpcChannel};
 
 json::derive! {
     #[derive(Debug, Clone)]
@@ -56,7 +56,7 @@ fn main() {
     network
         .temp_send_json(ChannelMessage::default(), &BindRequest { port: 1337, port_type: String::from("udp") }, &[])
         .unwrap();
-    let (bind_response, _, _): (BindResponse, _, _) = network.temp_read_json().unwrap();
+    let (bind_response, _, _): (BindResponse, _, _) = network.temp_read_json(ChannelReadFlags::NONE).unwrap();
     match bind_response.port {
         Some(port) => println!("Bound to port {}", port),
         None => {
@@ -66,7 +66,7 @@ fn main() {
     }
 
     loop {
-        let (received, _, _): (Received, _, _) = network.temp_read_json().unwrap();
+        let (received, _, _): (Received, _, _) = network.temp_read_json(ChannelReadFlags::NONE).unwrap();
         println!("Got message, replying!");
         network
             .temp_send_json(

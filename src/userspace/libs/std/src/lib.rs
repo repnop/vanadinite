@@ -53,7 +53,7 @@ macro_rules! dbg {
     ($e:expr) => {{
         let e = $e;
         $crate::println!("[{}:{}] {} = {:?}", file!(), line!(), stringify!($e), e);
-        $e
+        e
     }};
 }
 

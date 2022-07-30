@@ -9,10 +9,11 @@ use librust::{
     capabilities::{Capability, CapabilityDescription, CapabilityRights},
     syscalls::channel::{ChannelMessage, KernelMessage},
 };
-use std::ipc::IpcChannel;
+use std::ipc::{ChannelReadFlags, IpcChannel};
 
 json::derive! {
     Serialize,
+    #[derive(Debug)]
     struct Device {
         name: String,
         compatible: Vec<String>,
@@ -22,6 +23,7 @@ json::derive! {
 
 json::derive! {
     Serialize,
+    #[derive(Debug)]
     struct Devices {
         devices: Vec<Device>,
     }
@@ -52,15 +54,22 @@ fn main() {
             }
         }
     }
-
+    librust::syscalls::task::enable_notifications();
     loop {
+        // println!("[devicemgr] Waiting for new kernel message");
         let cptr = match librust::syscalls::channel::read_kernel_message() {
             KernelMessage::NewChannelMessage(cptr) => cptr,
             _ => continue,
         };
 
+        // println!("[devicemgr] New channel message on {cptr:?}");
+
         let channel = IpcChannel::new(cptr);
-        let (_, caps) = channel.read_with_all_caps().unwrap();
+        let (_, caps) = match channel.read_with_all_caps(ChannelReadFlags::NONBLOCKING) {
+            Ok(data) => data,
+            Err(_) => continue,
+        };
+
         let mem = match &caps[0].description {
             CapabilityDescription::Memory { ptr, len, permissions: _ } => unsafe {
                 core::slice::from_raw_parts(*ptr, *len)

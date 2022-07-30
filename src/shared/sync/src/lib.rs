@@ -7,9 +7,9 @@
 
 #![no_std]
 
-mod lazy;
-mod mutex;
-mod rwlock;
+pub mod lazy;
+pub mod mutex;
+pub mod rwlock;
 
 use core::{
     marker::PhantomData,

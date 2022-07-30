@@ -166,7 +166,7 @@ impl core::ops::DerefMut for TrapFrame {
 const INTERRUPT_BIT: usize = 1 << 63;
 
 #[allow(clippy::enum_clike_unportable_variant)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(usize)]
 pub enum Trap {
     // Software interrupts
@@ -244,7 +244,19 @@ impl Trap {
 #[no_mangle]
 pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize, stval: usize) -> usize {
     log::trace!("we trappin' on hart {}: {:x?}", crate::HART_ID.get(), regs);
-    log::debug!("scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p}", Trap::from_cause(scause), sepc, stval as *mut u8);
+    if Trap::from_cause(scause) != Trap::UserModeEnvironmentCall
+        || regs.a0 != (librust::syscalls::Syscall::DebugPrint as usize)
+    {
+        log::debug!(
+            "scause: {:?}, sepc: {:#x}, stval (as ptr): {:#p} (syscall? {:?})",
+            Trap::from_cause(scause),
+            sepc,
+            stval as *mut u8,
+            (Trap::from_cause(scause) == Trap::UserModeEnvironmentCall)
+                .then(|| librust::syscalls::Syscall::from_usize(regs.a0))
+                .flatten()
+        );
+    }
 
     let trap_kind = Trap::from_cause(scause);
     match trap_kind {
@@ -259,7 +271,6 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, sepc: usize, scause: usize,
                     save_fp_registers(&mut lock.context.fp_regs);
                 }
             }
-
             SCHEDULER.schedule()
         }
         Trap::UserModeEnvironmentCall => match syscall::handle(regs, sepc) {

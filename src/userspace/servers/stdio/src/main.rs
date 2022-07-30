@@ -7,6 +7,8 @@
 
 mod ns16550;
 
+use std::ipc::ChannelReadFlags;
+
 use librust::{
     capabilities::{CapabilityDescription, CapabilityWithDescription},
     syscalls::channel::{ChannelMessage, KernelMessage},
@@ -38,16 +40,12 @@ json::derive! {
 
 fn main() {
     let devicemgr = std::env::lookup_capability("devicemgr").unwrap();
-    let mut devicemgr = std::ipc::IpcChannel::new(devicemgr.capability.cptr);
+    let devicemgr = std::ipc::IpcChannel::new(devicemgr.capability.cptr);
 
     let msg = &WantedCompatible { compatible: vec![String::from("ns16550"), String::from("ns16550a")] };
     devicemgr.temp_send_json(ChannelMessage::default(), msg, &[]).unwrap();
 
-    let (_message, caps) = devicemgr.read_with_all_caps().unwrap();
-    if caps.is_empty() {
-        return;
-    }
-
+    let (_devices, _message, caps) = devicemgr.temp_read_json::<Devices>(ChannelReadFlags::NONE).unwrap();
     let mut interrupt_buffer = [0];
     let (uart_info, _) =
         librust::syscalls::io::query_mmio_cap(caps[0].capability.cptr, &mut interrupt_buffer[..]).unwrap();
@@ -63,6 +61,7 @@ fn main() {
     // }
 
     let mut input = Vec::new();
+    librust::syscalls::task::enable_notifications();
     loop {
         let cptr = match librust::syscalls::channel::read_kernel_message() {
             // hack to skip the notification from devicemgr since its
@@ -79,7 +78,10 @@ fn main() {
         };
 
         let msg = std::ipc::IpcChannel::new(cptr);
-        let (msg, caps) = msg.read_with_all_caps().unwrap();
+        let (msg, caps) = match msg.read_with_all_caps(ChannelReadFlags::NONBLOCKING) {
+            Ok(data) => data,
+            Err(_) => continue,
+        };
 
         if let Some(CapabilityWithDescription { description: CapabilityDescription::Memory { ptr, len, .. }, .. }) =
             caps.get(0)

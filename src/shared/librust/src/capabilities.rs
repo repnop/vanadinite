@@ -99,9 +99,9 @@ pub struct CapabilityWithDescription {
 #[derive(Debug, Clone, Copy)]
 #[repr(C, usize)]
 pub enum CapabilityDescription {
-    Channel,
-    Memory { ptr: *mut u8, len: usize, permissions: MemoryPermissions },
-    MappedMmio { ptr: *mut u8, len: usize, n_interrupts: usize },
+    Channel = 0,
+    Memory { ptr: *mut u8, len: usize, permissions: MemoryPermissions } = 1,
+    MappedMmio { ptr: *mut u8, len: usize, n_interrupts: usize } = 2,
 }
 
 impl Default for CapabilityDescription {

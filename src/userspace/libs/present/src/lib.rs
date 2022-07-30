@@ -42,6 +42,7 @@ impl Present {
     }
 
     pub fn run(&self) {
+        librust::syscalls::task::enable_notifications();
         loop {
             let mut executor = GLOBAL_EXECUTOR.borrow_mut();
             if executor.ready_tasks.is_empty() && executor.waiting_tasks.is_empty() {

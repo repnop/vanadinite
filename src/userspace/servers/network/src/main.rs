@@ -27,7 +27,7 @@ use present::{
     ipc::{IpcChannel},
     sync::{mpsc::Sender, oneshot::OneshotTx},
 };
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ipc::ChannelReadFlags};
 
 json::derive! {
     #[derive(Debug, Clone)]
@@ -76,13 +76,13 @@ pub enum PortType {
 }
 
 async fn real_main() {
-    let mut virtiomgr = IpcChannel::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr);
+    let virtiomgr = std::ipc::IpcChannel::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr);
 
     virtiomgr
         .temp_send_json(ChannelMessage::default(), &VirtIoDeviceRequest { ty: virtio::DeviceType::NetworkCard as u32 }, &[])
         .unwrap();
 
-    let (response, message, capabilities): (VirtIoDeviceResponse, _, _) = virtiomgr.temp_read_json().await.unwrap();
+    let (response, _, capabilities): (VirtIoDeviceResponse, _, _) = virtiomgr.temp_read_json(ChannelReadFlags::NONE).unwrap();
 
     if response.devices.is_empty() {
         return;

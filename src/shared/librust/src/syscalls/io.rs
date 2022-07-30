@@ -99,7 +99,8 @@ pub fn query_mmio_cap(
     }
 }
 
-#[inline]
+#[inline(never)]
+#[no_mangle]
 pub fn debug_print(value: &[u8]) -> Result<(), SyscallError> {
     let error: usize;
 

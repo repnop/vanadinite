@@ -29,17 +29,24 @@ impl IpcChannel {
         Self { cptr }
     }
 
-    pub fn read(&self, cap_buffer: &mut [CapabilityWithDescription]) -> Result<ReadResult, SyscallError> {
-        channel::read_message(self.cptr, cap_buffer, ChannelReadFlags::NONE)
+    pub fn read(
+        &self,
+        cap_buffer: &mut [CapabilityWithDescription],
+        flags: ChannelReadFlags,
+    ) -> Result<ReadResult, SyscallError> {
+        channel::read_message(self.cptr, cap_buffer, flags)
     }
 
-    pub fn read_with_all_caps(&self) -> Result<(ChannelMessage, Vec<CapabilityWithDescription>), SyscallError> {
+    pub fn read_with_all_caps(
+        &self,
+        flags: ChannelReadFlags,
+    ) -> Result<(ChannelMessage, Vec<CapabilityWithDescription>), SyscallError> {
         let mut caps = Vec::new();
-        let ReadResult { message, capabilities_remaining, .. } = self.read(&mut caps[..])?;
+        let ReadResult { message, capabilities_remaining, .. } = self.read(&mut caps[..], flags)?;
 
         if capabilities_remaining > 0 {
             caps.resize(capabilities_remaining, CapabilityWithDescription::default());
-            self.read(&mut caps[..])?;
+            self.read(&mut caps[..], flags)?;
         }
 
         Ok((message, caps))
@@ -73,8 +80,9 @@ impl IpcChannel {
 
     pub fn temp_read_json<T: json::deser::Deserialize>(
         &self,
+        flags: ChannelReadFlags,
     ) -> Result<(T, ChannelMessage, Vec<CapabilityWithDescription>), SyscallError> {
-        let (msg, mut caps) = self.read_with_all_caps()?;
+        let (msg, mut caps) = self.read_with_all_caps(flags)?;
         let t = match caps.remove(0) {
             CapabilityWithDescription {
                 capability: _,

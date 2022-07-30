@@ -26,6 +26,7 @@ use librust::{
         channel::{ChannelReadFlags, KernelMessage},
         mem::MemoryPermissions,
     },
+    task::Tid,
 };
 use sync::{SpinMutex, SpinRwLock};
 
@@ -42,8 +43,13 @@ impl UserspaceChannel {
             let alive = Arc::new(AtomicBool::new(true));
             let wake = Arc::new(SpinMutex::new(None));
 
-            let sender =
-                Sender { inner: Arc::clone(&message_queue), alive: Arc::clone(&alive), wake: Arc::clone(&wake) };
+            let sender = Sender {
+                inner: Arc::clone(&message_queue),
+                alive: Arc::clone(&alive),
+                wake: Arc::clone(&wake),
+                other_tid: None,
+                other_cptr: CapabilityPtr::new(usize::MAX),
+            };
             let receiver = Receiver { inner: message_queue, alive, wake };
 
             (sender, receiver)
@@ -54,8 +60,13 @@ impl UserspaceChannel {
             let alive = Arc::new(AtomicBool::new(true));
             let wake = Arc::new(SpinMutex::new(None));
 
-            let sender =
-                Sender { inner: Arc::clone(&message_queue), alive: Arc::clone(&alive), wake: Arc::clone(&wake) };
+            let sender = Sender {
+                inner: Arc::clone(&message_queue),
+                alive: Arc::clone(&alive),
+                wake: Arc::clone(&wake),
+                other_tid: None,
+                other_cptr: CapabilityPtr::new(usize::MAX),
+            };
             let receiver = Receiver { inner: message_queue, alive, wake };
 
             (sender, receiver)
@@ -101,7 +112,8 @@ impl Receiver {
 
 impl Drop for Receiver {
     fn drop(&mut self) {
-        self.alive.store(false, Ordering::Release);
+        // FIXME: this currently breaks sending messages...
+        // self.alive.store(false, Ordering::Release);
     }
 }
 
@@ -111,18 +123,35 @@ pub struct Sender {
     pub(super) inner: Arc<SpinRwLock<VecDeque<ChannelMessage>>>,
     pub(super) alive: Arc<AtomicBool>,
     pub(super) wake: Arc<SpinMutex<Option<WakeToken>>>,
+    pub(super) other_tid: Option<Tid>,
+    pub(super) other_cptr: CapabilityPtr,
 }
 
 impl Sender {
     fn try_send(&self, message: ChannelMessage) -> Result<(), ChannelMessage> {
         if !self.alive.load(Ordering::Acquire) {
+            log::debug!("Channel to {:?}:{:?} is dead", self.other_tid, self.other_cptr);
             return Err(message);
         }
 
         // FIXME: set a buffer limit at some point
-        self.inner.write().push_back(message);
+        let mut lock = self.inner.write();
+
+        lock.push_back(message);
         if let Some(token) = self.wake.lock().take() {
+            log::debug!("Waking other side of channel [{:?}:{:?}]", self.other_tid, self.other_cptr);
             SCHEDULER.unblock(token);
+        }
+
+        if let Some(task) = self.other_tid.and_then(|tid| TASKS.get(tid)) {
+            let task = task.lock();
+            if task.subscribes_to_events {
+                log::debug!("Enqueuing kernel message for other cptr [{}:{:?}]", task.name, self.other_cptr);
+                task.kernel_channel.sender.try_send(ChannelMessage {
+                    data: KernelMessage::into_parts(KernelMessage::NewChannelMessage(self.other_cptr)),
+                    caps: Vec::new(),
+                })?;
+            }
         }
 
         Ok(())
@@ -131,7 +160,8 @@ impl Sender {
 
 impl Drop for Sender {
     fn drop(&mut self) {
-        self.alive.store(false, Ordering::Release);
+        // FIXME: this currently breaks sending messages
+        // self.alive.store(false, Ordering::Release);
     }
 }
 
@@ -189,8 +219,9 @@ pub fn send_message(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(),
         }
     };
 
+    log::debug!("[{}:{}] Sending channel message", task.name, task.tid);
     // FIXME: this should notify the sender the channel is dead if it is
-    let _ = channel.sender.try_send(ChannelMessage { data, caps });
+    channel.sender.try_send(ChannelMessage { data, caps }).unwrap();
 
     Ok(())
 }
@@ -222,15 +253,17 @@ pub fn read_message(task: &mut Task, regs: &mut GeneralRegisters) -> Result<supe
     match receiver.pop_front() {
         None if flags & ChannelReadFlags::NONBLOCKING => Err(SyscallError::WouldBlock),
         None => {
-            log::debug!("Registering wake for channel::read_message");
+            log::debug!("[{}:{}:{:?}] Registering wake for channel::read_message", task.name, task.tid, cptr);
             wake_lock.replace(WakeToken::new(task.tid, move |task| {
                 log::debug!("Waking task {:?} (TID: {:?}) for channel::read_message!", task.name, task.tid.value());
                 let mut regs = task.context.gp_regs;
+                let cptr = CapabilityPtr::new(regs.a1);
                 let res = read_message(task, &mut regs);
                 match res {
                     Ok(super::Outcome::Completed) => {
                         regs.a0 = 0;
                         task.context.gp_regs = regs;
+                        log::debug!("[{}:{}:{:?}] Completed blocked read", task.name, task.tid, cptr);
                     }
                     _ => todo!("is this even possible?"),
                 }
@@ -252,8 +285,37 @@ pub fn read_message(task: &mut Task, regs: &mut GeneralRegisters) -> Result<supe
                     for (target, cap) in cap_slice.iter_mut().zip(caps.drain(..n_caps_to_write)) {
                         let rights = cap.rights;
                         let (cptr, description) = match cap.resource {
-                            CapabilityResource::Channel(_) => {
-                                (task.cspace.mint(cap), librust::capabilities::CapabilityDescription::Channel)
+                            CapabilityResource::Channel(channel) => {
+                                let other_tid = match channel.sender.other_tid {
+                                    Some(tid) if task.tid != tid => tid,
+                                    Some(_) => continue,
+                                    None => {
+                                        log::warn!("Channel cap sent but didn't contain TID for other side?");
+                                        continue;
+                                    }
+                                };
+
+                                let other_task = match TASKS.get(other_tid) {
+                                    Some(task) => task,
+                                    None => continue, // Task is... gone? hmm..
+                                };
+
+                                let (mut c1, mut c2) = UserspaceChannel::new();
+                                c1.sender.other_tid = Some(task.tid);
+                                c2.sender.other_tid = Some(other_tid);
+
+                                let mut other_task = other_task.lock();
+                                let cptr = task.cspace.mint_with(|this_cptr| {
+                                    other_task.cspace.mint_with(|other_cptr| {
+                                        c1.sender.other_cptr = this_cptr;
+                                        c2.sender.other_cptr = other_cptr;
+                                        Capability { resource: CapabilityResource::Channel(c1), rights }
+                                    });
+
+                                    Capability { resource: CapabilityResource::Channel(c2), rights }
+                                });
+
+                                (cptr, librust::capabilities::CapabilityDescription::Channel)
                             }
                             CapabilityResource::Memory(region, _, kind) => {
                                 let mut permissions = MemoryPermissions::new(0);
@@ -385,6 +447,7 @@ pub fn read_message(task: &mut Task, regs: &mut GeneralRegisters) -> Result<supe
             regs.t5 = data[5];
             regs.t6 = data[6];
 
+            log::debug!("[{}:{}:{:?}] Read channel message! ra={:#p}", task.name, task.tid, cptr, crate::asm::ra());
             Ok(super::Outcome::Completed)
         }
     }

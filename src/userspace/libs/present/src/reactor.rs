@@ -27,6 +27,7 @@ impl EventRegistry {
         Self { waiting_for_event: SyncRefCell::new(BTreeMap::new()), interest: SyncRefCell::new(BTreeMap::new()) }
     }
 
+    #[track_caller]
     pub(crate) fn register_interest(&self, block_type: BlockType) {
         assert!(self.interest.borrow_mut().insert(block_type, 0).is_none());
     }
@@ -91,21 +92,27 @@ impl Reactor {
                     waker.wake();
                 }
             }
-            KernelMessage::NewChannelMessage(cptr) => match SEEN_IPC_CHANNELS.borrow().get(&cptr).is_some() {
-                true => {
-                    EVENT_REGISTRY.add_interested_event(BlockType::IpcChannelMessage(cptr));
-                    if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::IpcChannelMessage(cptr)) {
-                        waker.wake();
+            KernelMessage::NewChannelMessage(cptr) => {
+                let saw = SEEN_IPC_CHANNELS.borrow().get(&cptr).is_some();
+                match saw {
+                    true => {
+                        EVENT_REGISTRY.add_interested_event(BlockType::IpcChannelMessage(cptr));
+                        if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::IpcChannelMessage(cptr)) {
+                            waker.wake();
+                        }
+                    }
+                    false => {
+                        SEEN_IPC_CHANNELS.borrow_mut().insert(cptr, ());
+                        NEW_IPC_CHANNELS.borrow_mut().push_back(cptr);
+                        if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::NewIpcChannel) {
+                            waker.wake();
+                        }
+                        if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::IpcChannelMessage(cptr)) {
+                            waker.wake();
+                        }
                     }
                 }
-                false => {
-                    SEEN_IPC_CHANNELS.borrow_mut().insert(cptr, ());
-                    NEW_IPC_CHANNELS.borrow_mut().push_back(cptr);
-                    if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::NewIpcChannel) {
-                        waker.wake();
-                    }
-                }
-            },
+            }
         }
     }
 }

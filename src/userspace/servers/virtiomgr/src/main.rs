@@ -11,7 +11,7 @@ use librust::{
     capabilities::{Capability, CapabilityRights, CapabilityWithDescription},
     syscalls::channel::KernelMessage,
 };
-use std::ipc::{ChannelMessage, IpcChannel};
+use std::ipc::{ChannelMessage, ChannelReadFlags, IpcChannel};
 use virtio::DeviceType;
 
 json::derive! {
@@ -54,37 +54,42 @@ json::derive! {
 
 fn main() {
     let devicemgr_cptr = std::env::lookup_capability("devicemgr").unwrap().capability.cptr;
-    let mut devicemgr = IpcChannel::new(devicemgr_cptr);
+    let devicemgr = IpcChannel::new(devicemgr_cptr);
     devicemgr
         .temp_send_json(ChannelMessage::default(), &WantedCompatible { compatible: vec!["virtio,mmio".into()] }, &[])
         .unwrap();
 
-    let (devices, _, capabilities): (Devices, _, _) = devicemgr.temp_read_json().unwrap();
+    let (devices, _, capabilities): (Devices, _, _) = devicemgr.temp_read_json(ChannelReadFlags::NONE).unwrap();
+    let _ = librust::syscalls::channel::read_kernel_message();
     let mut virtio_devices = Vec::new();
 
     for (device, CapabilityWithDescription { capability: Capability { cptr: mmio_cap, .. }, .. }) in
-        devices.devices.into_iter().zip(capabilities)
+        devices.devices.into_iter().zip(capabilities.into_iter())
     {
         let (info, _) = librust::syscalls::io::query_mmio_cap(mmio_cap, &mut []).unwrap();
 
         let header = unsafe { &*(info.address() as *const virtio::VirtIoHeader) };
         let dev_type = header.device_type().unwrap();
 
-        if !matches!(dev_type, DeviceType::Reserved) {
-            println!("[virtiomgr] We have a VirtIO {:?} device: {:?}", dev_type, device);
-        }
+        // if !matches!(dev_type, DeviceType::Reserved) {
+        //     println!("[virtiomgr] We have a VirtIO {:?} device: {:?}", dev_type, device);
+        // }
 
         virtio_devices.push((mmio_cap, info, dev_type, header, device));
     }
 
     loop {
         let cptr = match librust::syscalls::channel::read_kernel_message() {
-            KernelMessage::NewChannelMessage(cptr) if cptr != devicemgr_cptr => cptr,
+            KernelMessage::NewChannelMessage(cptr) => cptr,
             _ => continue,
         };
 
         let channel = IpcChannel::new(cptr);
-        let (req, _, _): (VirtIoDeviceRequest, _, _) = channel.temp_read_json().unwrap();
+        let (req, _, _): (VirtIoDeviceRequest, _, _) = match channel.temp_read_json(ChannelReadFlags::NONBLOCKING) {
+            Ok(data) => data,
+            Err(_) => continue,
+        };
+
         let dev_type = req.ty;
 
         // println!("[virtiomgr] Got request for device type: {:?}", DeviceType::from_u32(dev_type));

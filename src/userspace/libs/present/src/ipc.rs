@@ -45,6 +45,7 @@ impl Future for NewChannelListenerRecv {
 pub struct IpcChannel(CapabilityPtr);
 
 impl IpcChannel {
+    #[track_caller]
     pub fn new(cptr: CapabilityPtr) -> Self {
         EVENT_REGISTRY.register_interest(BlockType::IpcChannelMessage(cptr));
         Self(cptr)

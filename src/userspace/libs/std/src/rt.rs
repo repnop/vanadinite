@@ -8,7 +8,7 @@
 use librust::{
     capabilities::{Capability, CapabilityDescription, CapabilityPtr, CapabilityRights, CapabilityWithDescription},
     syscalls::{
-        channel::{ReadResult, PARENT_CHANNEL},
+        channel::{ChannelReadFlags, ReadResult, KERNEL_CHANNEL, PARENT_CHANNEL},
         mem::MemoryPermissions,
     },
 };
@@ -55,7 +55,7 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize 
     let mut map = crate::env::CAP_MAP.borrow_mut();
     let channel = crate::ipc::IpcChannel::new(PARENT_CHANNEL);
     // FIXME: Wowie is this some awful code!
-    if let Ok((names, _, caps)) = channel.temp_read_json::<Vec<String>>() {
+    if let Ok((names, _, caps)) = channel.temp_read_json::<Vec<String>>(ChannelReadFlags::NONE) {
         for (name, cap) in names.into_iter().zip(caps) {
             map.insert(name, cap);
         }

@@ -59,10 +59,10 @@ pub async fn handle_client(
     packet_tx: Sender<(u16, IpV4Socket, Vec<u8>)>,
     cptr: CapabilityPtr,
 ) {
-    let mut ipc_channel = IpcChannel::new(cptr);
+    let ipc_channel = IpcChannel::new(cptr);
     let msg = ipc_channel.temp_read_json().await;
 
-    let (request, msg, _): (BindRequest, _, _) = match msg {
+    let (request, _msg, _): (BindRequest, _, _) = match msg {
         Ok(msg) => msg,
         Err(e) => {
             println!("Error reading from IPC channel: {:?}", e);

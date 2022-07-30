@@ -186,6 +186,11 @@ impl<Mode: UserPtrMode, T> RawUserSlice<Mode, T> {
             return Err((self.addr, InvalidUserPtr::Unaligned));
         }
 
+        if self.len == 0 {
+            // FIXME: I think this is fine?
+            return Ok(ValidatedUserSlice { addr: self.addr, len: self.len, typë: self.typë, mode: self.mode });
+        }
+
         let addr_range = self.addr..self.addr.add(core::mem::size_of::<T>() * self.len);
 
         match manager.is_user_region_valid(addr_range, |f| f & Mode::FLAGS) {

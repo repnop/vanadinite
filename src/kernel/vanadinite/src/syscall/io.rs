@@ -132,7 +132,7 @@ pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), 
     }
 }
 
-pub fn claim_interrupt(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
+pub fn complete_interrupt(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let interrupt_id = regs.a1;
     match task.claimed_interrupts.remove(&interrupt_id) {
         None => Err(SyscallError::InvalidArgument(0)),

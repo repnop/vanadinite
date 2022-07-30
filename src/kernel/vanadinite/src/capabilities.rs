@@ -43,6 +43,12 @@ impl CapabilitySpace {
         }
     }
 
+    pub fn mint_with(&mut self, f: impl FnOnce(CapabilityPtr) -> Capability) -> CapabilityPtr {
+        let cptr = CapabilityPtr::new(self.inner.keys().max().map(|c| c.value() + 1).unwrap_or(0));
+        self.inner.insert(cptr, f(cptr));
+        cptr
+    }
+
     /// Create a new [`CapabilityPtr`] representing the given [`Capability`]
     pub fn mint(&mut self, capability: Capability) -> CapabilityPtr {
         // FIXME: Uncomment & improve

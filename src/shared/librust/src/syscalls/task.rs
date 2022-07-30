@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{syscalls::Syscall, task::Tid, error::RawSyscallError};
+use crate::{error::RawSyscallError, syscalls::Syscall, task::Tid};
 use core::num::NonZeroUsize;
 
 #[inline(always)]
@@ -21,7 +21,7 @@ pub fn current_tid() -> Tid {
     let error: usize;
     let tid: usize;
 
-    unsafe { 
+    unsafe {
         core::arch::asm!(
             "ecall",
             inlateout("a0") Syscall::GetTid as usize => error,
@@ -32,5 +32,15 @@ pub fn current_tid() -> Tid {
     match RawSyscallError::optional(error) {
         Some(_) => unreachable!(),
         None => Tid::new(NonZeroUsize::new(tid).unwrap()),
+    }
+}
+
+#[inline]
+pub fn enable_notifications() {
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inlateout("a0") Syscall::EnableNotifications as usize => _,
+        );
     }
 }

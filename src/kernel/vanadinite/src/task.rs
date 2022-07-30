@@ -21,15 +21,11 @@ use crate::{
     trap::{FloatingPointRegisters, GeneralRegisters},
     utils::{round_up_to_next, Units},
 };
-use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    vec::Vec,
-};
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 use elf64::{Elf, ProgramSegmentType, Relocation};
 use fdt::Fdt;
 use librust::{
-    capabilities::{CapabilityPtr, CapabilityRights},
+    capabilities::CapabilityRights,
     syscalls::{channel::KERNEL_CHANNEL, vmspace::VmspaceObjectId},
     task::Tid,
 };
@@ -91,6 +87,7 @@ pub struct Task {
     pub cspace: CapabilitySpace,
     pub kernel_channel: UserspaceChannel,
     pub claimed_interrupts: BTreeMap<usize, usize>,
+    pub subscribes_to_events: bool,
 }
 
 impl Task {
@@ -339,7 +336,7 @@ impl Task {
                 KERNEL_CHANNEL,
                 Capability { resource: CapabilityResource::Channel(user_read), rights: CapabilityRights::READ },
             )
-            .expect("[BUG] parent channel cap already created?");
+            .expect("[BUG] kernel channel cap already created?");
 
         Self {
             tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),
@@ -352,6 +349,7 @@ impl Task {
             cspace,
             kernel_channel,
             claimed_interrupts: BTreeMap::new(),
+            subscribes_to_events: false,
         }
     }
 }
