@@ -5,173 +5,295 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{Error, Parser, Span};
+use crate::Span;
 
-pub trait Stream: Clone {
-    type Item: core::fmt::Debug + Clone;
-
-    fn next(&mut self) -> Option<(Self::Item, Span)>;
-    fn peek(&mut self) -> Option<(Self::Item, Span)>;
+pub struct Stream<'a, T> {
+    source: alloc::boxed::Box<dyn StreamSource<Item = T> + 'a>,
+    pub(crate) buffer: alloc::collections::VecDeque<(T, Span)>,
+    pub(crate) mode: StreamMode,
 }
 
-// impl<I, Item> Stream for I
-// where
-//     I: Iterator<Item = (Item, Span)>,
-// {
-//     type Item<'a> = Item;
-//     fn next<'a>(&mut self) -> Option<(Self::Item<'a>, Span)> {
-//         Iterator::next(self)
-//     }
-// }
+impl<'a, T> Stream<'a, T>
+where
+    T: Clone + core::fmt::Debug,
+{
+    #[inline]
+    pub fn new<S>(source: S) -> Self
+    where
+        S: StreamSource<Item = T> + 'a,
+        T: 'a,
+    {
+        Self {
+            source: alloc::boxed::Box::new(source),
+            buffer: alloc::collections::VecDeque::new(),
+            mode: StreamMode::Normal,
+        }
+    }
+
+    #[inline]
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self) -> Option<(T, Span)> {
+        match &mut self.mode {
+            // Try to get an already obtained element, otherwise grab the next one
+            StreamMode::Transaction { current, .. } => match self.buffer.get(*current) {
+                Some(value) => {
+                    *current += 1;
+                    Some(<(T, Span)>::clone(value))
+                }
+                None => {
+                    *current += 1;
+                    self.buffer.push_back(self.source.next()?);
+                    self.buffer.back().cloned()
+                }
+            },
+            StreamMode::Normal => {
+                if let Some(next) = self.buffer.pop_front() {
+                    return Some(next);
+                }
+
+                self.source.next()
+            }
+        }
+    }
+
+    #[inline]
+    pub fn peek(&mut self) -> Option<(&T, Span)> {
+        match &mut self.mode {
+            StreamMode::Transaction { current, .. } => {
+                if self.buffer.get(*current).is_some() {
+                    return self.buffer.get(*current).map(|(t, span)| (t, *span));
+                }
+
+                self.buffer.push_back(self.source.next()?);
+                self.buffer.back().map(|(t, span)| (t, *span))
+            }
+            StreamMode::Normal => {
+                if self.buffer.front().is_some() {
+                    return self.buffer.front().map(|(peek, span)| (peek, *span));
+                }
+
+                let next = self.next()?;
+                self.buffer.push_front(next);
+                self.buffer.front().map(|(next, span)| (next, *span))
+            }
+        }
+    }
+
+    pub(crate) fn try_parse<E, O>(&mut self, f: impl FnOnce(&mut Self) -> Result<O, E>) -> Result<O, E> {
+        let mut current_transaction = None;
+        match self.mode {
+            // Create a new transaction
+            StreamMode::Normal => {
+                self.mode = StreamMode::Transaction { start: 0, current: 0 };
+            }
+            // Overlay a new transaction that will be reset if it fails
+            StreamMode::Transaction { start, current } => {
+                current_transaction = Some(start);
+                self.mode = StreamMode::Transaction { start: current, current };
+            }
+        }
+
+        match (f(self), current_transaction) {
+            (res, Some(start)) => {
+                match res {
+                    // Progress further in the stream
+                    Ok(_) => {
+                        let StreamMode::Transaction { current, .. } = self.mode else { unreachable!() };
+                        self.mode = StreamMode::Transaction { start: current, current };
+                    }
+                    // Rollback to the original starting position
+                    Err(_) => self.mode = StreamMode::Transaction { start, current: start },
+                }
+
+                res
+            }
+            (res, None) => {
+                if res.is_ok() {
+                    let StreamMode::Transaction { current, .. } = self.mode else { unreachable!() };
+                    // Commit to having gotten this far and free memory
+                    // associated with already processed elements
+                    self.buffer.drain(..current);
+                }
+
+                self.mode = StreamMode::Normal;
+                res
+            }
+        }
+    }
+
+    pub(crate) fn in_try_mode(&self) -> bool {
+        matches!(self.mode, StreamMode::Transaction { .. })
+    }
+}
+
+impl<'a> Stream<'a, char> {
+    #[inline]
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &'a str) -> Stream<'a, char> {
+        Stream::new(CharStream::new(s))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum StreamMode {
+    Normal,
+    Transaction { start: usize, current: usize },
+}
+
+pub trait StreamSource {
+    type Item;
+
+    fn next(&mut self) -> Option<(Self::Item, Span)>;
+}
+
+impl<I, Item> StreamSource for I
+where
+    I: Iterator<Item = (Item, Span)>,
+{
+    type Item = Item;
+
+    fn next(&mut self) -> Option<(Self::Item, Span)> {
+        Iterator::next(self)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CharStream<'a> {
-    iter: core::iter::Peekable<core::str::CharIndices<'a>>,
+    iter: core::str::CharIndices<'a>,
 }
 
 impl<'a> CharStream<'a> {
     pub fn new(s: &'a str) -> CharStream {
-        Self { iter: s.char_indices().peekable() }
+        Self { iter: s.char_indices() }
     }
 }
 
-impl Stream for CharStream<'_> {
+impl StreamSource for CharStream<'_> {
     type Item = char;
 
     #[inline]
     fn next(&mut self) -> Option<(Self::Item, Span)> {
         let (index, next) = self.iter.next()?;
-        Some((next, Span { start: index, end: next.len_utf8() }))
-    }
-
-    #[inline]
-    fn peek<'a>(&mut self) -> Option<(Self::Item, Span)> {
-        let (index, next) = self.iter.peek()?;
-        Some((*next, Span { start: *index, end: next.len_utf8() }))
+        Some((next, Span { start: index, end: index + next.len_utf8() }))
     }
 }
 
-pub struct ParserOutputStream<E, I, O, S, P>
-where
-    E: Error + Clone,
-    I: core::fmt::Debug + Clone,
-    O: core::fmt::Debug,
-    S: Stream<Item = I>,
-    P: Parser<Error = E, Output = O, Input = I>,
-{
-    parser: P,
-    stream: S,
-    lookahead: Option<(Result<O, E>, Span)>,
-}
+// pub struct ParserOutputStream<E, I, O, P>
+// where
+//     E: Error + Clone,
+//     I: core::fmt::Debug + Clone,
+//     O: core::fmt::Debug,
+//     P: Parser<Error = E, Output = O, Input = I>,
+// {
+//     parser: P,
+//     stream: Stream<I>,
+//     lookahead: Option<(Result<O, E>, Span)>,
+// }
 
-impl<E, I, O, S, P> ParserOutputStream<E, I, O, S, P>
-where
-    E: Error + Clone,
-    I: core::fmt::Debug + Clone,
-    O: core::fmt::Debug + Clone,
-    S: Stream<Item = I>,
-    P: Parser<Error = E, Output = O, Input = I> + Clone,
-{
-    pub fn new(parser: P, stream: S) -> Self {
-        Self { parser, stream, lookahead: None }
-    }
-}
+// impl<E, I, O, P> ParserOutputStream<E, I, O, P>
+// where
+//     E: Error + Clone,
+//     I: core::fmt::Debug + Clone,
+//     O: core::fmt::Debug + Clone,
+//     P: Parser<Error = E, Output = O, Input = I> + Clone,
+// {
+//     pub fn new(parser: P, stream: Stream<I>) -> Self {
+//         Self { parser, stream, lookahead: None }
+//     }
+// }
 
-impl<E, I, O, S, P> Clone for ParserOutputStream<E, I, O, S, P>
-where
-    E: Error + Clone,
-    I: core::fmt::Debug + Clone,
-    O: core::fmt::Debug + Clone,
-    S: Stream<Item = I>,
-    P: Parser<Error = E, Output = O, Input = I> + Clone,
-{
-    fn clone(&self) -> Self {
-        Self { parser: self.parser.clone(), stream: self.stream.clone(), lookahead: self.lookahead.clone() }
-    }
-}
+// impl<E, I, O, P> Clone for ParserOutputStream<E, I, O, P>
+// where
+//     E: Error + Clone,
+//     I: core::fmt::Debug + Clone,
+//     O: core::fmt::Debug + Clone,
+//     P: Parser<Error = E, Output = O, Input = I> + Clone,
+// {
+//     fn clone(&self) -> Self {
+//         Self { parser: self.parser.clone(), stream: self.stream.clone(), lookahead: self.lookahead.clone() }
+//     }
+// }
 
-impl<E, I, O, S, P> Stream for ParserOutputStream<E, I, O, S, P>
-where
-    E: Error + Clone,
-    I: core::fmt::Debug + Clone,
-    O: core::fmt::Debug + Clone,
-    S: Stream<Item = I>,
-    P: Parser<Error = E, Output = O, Input = I> + Clone,
-{
-    type Item = Result<O, E>;
+// impl<E, I, O, P> StreamSource for ParserOutputStream<E, I, O, P>
+// where
+//     E: Error + Clone,
+//     I: core::fmt::Debug + Clone,
+//     O: core::fmt::Debug + Clone,
+//     P: Parser<Error = E, Output = O, Input = I> + Clone,
+// {
+//     type Item = Result<O, E>;
 
-    fn next(&mut self) -> Option<(Self::Item, Span)> {
-        if let Some(next) = self.lookahead.take() {
-            return Some(next);
-        }
+//     fn next(&mut self) -> Option<(Self::Item, Span)> {
+//         if let Some(next) = self.lookahead.take() {
+//             return Some(next);
+//         }
 
-        let (_, span) = self.stream.peek()?;
-        Some((self.parser.parse(&mut self.stream), span))
-    }
+//         let (_, span) = self.stream.peek()?;
+//         Some((self.parser.parse(&mut self.stream), span))
+//     }
+// }
 
-    fn peek(&mut self) -> Option<(Self::Item, Span)> {
-        if let Some(next) = self.lookahead.as_ref() {
-            return Some(next.clone());
-        }
+// pub struct ErrorCollectStream<E, I>
+// where
+//     E: Error + Clone,
+//     I: core::fmt::Debug,
+// {
+//     stream: Stream<Result<I, E>>,
+//     error_dump: Option<E>,
+//     lookahead: Option<(I, Span)>,
+// }
 
-        let (_, span) = self.stream.peek()?;
-        let next = (self.parser.parse(&mut self.stream.clone()), span);
-        self.lookahead = Some(next.clone());
+// impl<E, I> ErrorCollectStream<E, I>
+// where
+//     E: Error + Clone,
+//     I: core::fmt::Debug,
+// {
+//     pub fn new(stream: Stream<Result<I, E>>) -> Self {
+//         Self { stream, error_dump: None, lookahead: None }
+//     }
 
-        Some(next)
-    }
-}
+//     pub fn error(&mut self) -> Option<E> {
+//         self.error_dump.take()
+//     }
 
-pub struct ErrorCollectStream<E, I, S>
-where
-    E: Error + Clone,
-    I: core::fmt::Debug,
-    S: Stream<Item = Result<I, E>>,
-{
-    pub(crate) stream: S,
-    pub(crate) error_dump: Option<E>,
-}
+//     pub fn is_error(&self) -> bool {
+//         self.error_dump.is_some()
+//     }
 
-impl<E, I, S> Clone for ErrorCollectStream<E, I, S>
-where
-    E: Error + Clone,
-    I: core::fmt::Debug,
-    S: Stream<Item = Result<I, E>>,
-{
-    fn clone(&self) -> Self {
-        Self { stream: self.stream.clone(), error_dump: self.error_dump.clone() }
-    }
-}
+//     pub fn into_parts(self) -> (Stream<Result<I, E>>, Option<E>) {
+//         (self.stream, self.error_dump)
+//     }
+// }
 
-impl<E, I, S> Stream for ErrorCollectStream<E, I, S>
-where
-    E: Error + Clone,
-    I: core::fmt::Debug + Clone,
-    S: Stream<Item = Result<I, E>>,
-{
-    type Item = I;
+// impl<E, I> Clone for ErrorCollectStream<E, I>
+// where
+//     E: Error + Clone,
+//     I: core::fmt::Debug,
+// {
+//     fn clone(&self) -> Self {
+//         Self { stream: self.stream.clone(), error_dump: self.error_dump.clone(), lookahead: None }
+//     }
+// }
 
-    fn next(&mut self) -> Option<(Self::Item, crate::Span)> {
-        let (next, span) = self.stream.next()?;
+// impl<E, I> StreamSource for ErrorCollectStream<E, I>
+// where
+//     E: Error + Clone,
+//     I: core::fmt::Debug + Clone,
+// {
+//     type Item = I;
 
-        match next {
-            Ok(item) => Some((item, span)),
-            Err(e) => {
-                self.error_dump = Some(e);
-                None
-            }
-        }
-    }
-
-    fn peek(&mut self) -> Option<(Self::Item, crate::Span)> {
-        let (next, span) = self.stream.peek()?;
-
-        match next {
-            Ok(item) => Some((item, span)),
-            Err(e) => {
-                self.error_dump = Some(e);
-                None
-            }
-        }
-    }
-}
+//     fn next(&mut self) -> Option<(Self::Item, Span)> {
+//         match (&mut self.error_dump, &mut self.lookahead) {
+//             (None, Some(_)) => self.lookahead.take(),
+//             (Some(_), _) => None,
+//             (None, None) => match self.stream.next() {
+//                 Some((Ok(next), span)) => Some((next, span)),
+//                 Some((Err(e), _)) => {
+//                     self.error_dump = Some(e);
+//                     None
+//                 }
+//                 None => None,
+//             },
+//         }
+//     }
+// }
