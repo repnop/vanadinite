@@ -9,7 +9,7 @@ use alloc::string::String;
 use comb::{
     combinators::{hinted_choice, sequence, single},
     text::{ascii_alphabetic, ascii_alphanumeric, string, whitespace},
-    Parser,
+    Parser, Span,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,9 +17,11 @@ pub enum Token {
     Arrow,
     Keyword(Keyword),
     Identifier(String),
+    LeftAngleBracket,
     LeftBrace,
     LeftBracket,
     LeftParenthesis,
+    RightAngleBracket,
     RightBrace,
     RightBracket,
     RightParenthesis,
@@ -42,9 +44,10 @@ impl Token {
 pub enum Keyword {
     Fn,
     Service,
+    Use,
 }
 
-pub fn lexer() -> impl Parser<Error = String, Output = Token, Input = char> {
+pub fn lexer() -> impl Parser<Error = crate::SourceError, Output = (Token, Span), Input = char> {
     let alphabetic = (|c: &char| c.is_ascii_alphabetic()) as fn(&char) -> bool;
     hinted_choice((
         (alphabetic, identifier()),
@@ -54,19 +57,23 @@ pub fn lexer() -> impl Parser<Error = String, Output = Token, Input = char> {
         ('(', single('(').to(Token::LeftParenthesis)),
         ('{', single('{').to(Token::LeftBrace)),
         ('[', single('[').to(Token::LeftBracket)),
+        ('<', single('<').to(Token::LeftAngleBracket)),
         (')', single(')').to(Token::RightParenthesis)),
         ('}', single('}').to(Token::RightBrace)),
         (']', single(']').to(Token::RightBracket)),
+        ('>', single('>').to(Token::RightAngleBracket)),
         (',', single(',').to(Token::Comma)),
         ('-', single('-').then(single('>')).to(Token::Arrow)),
     ))
+    .with_span()
     .padded_by(whitespace())
 }
 
-fn identifier() -> impl Parser<Error = String, Output = Token, Input = char> {
+fn identifier() -> impl Parser<Error = crate::SourceError, Output = Token, Input = char> {
     string((ascii_alphabetic(), ascii_alphanumeric() /*.or(single('_'))*/)).map(|s| match &*s {
         "fn" => Token::Keyword(Keyword::Fn),
         "service" => Token::Keyword(Keyword::Service),
+        "use" => Token::Keyword(Keyword::Use),
         _ => Token::Identifier(s),
     })
 }
@@ -75,7 +82,7 @@ fn identifier() -> impl Parser<Error = String, Output = Token, Input = char> {
 mod test {
     use super::*;
     use comb::{
-        combinators::{choice, end, many0},
+        combinators::{choice, end, many0, maybe},
         stream::{CharStream, Stream},
         Span,
     };
@@ -94,7 +101,7 @@ service
         "#;
 
         let mut stream = Stream::new(CharStream::new(some_syntax));
-        let lexer = lexer();
+        let lexer = lexer().map(|(v, _)| v);
         let mut lexer_parse = move || lexer.parse(&mut stream);
 
         assert_eq!(lexer_parse(), Ok(Token::Identifier(String::from("ThisIsAnIdent"))));
@@ -110,5 +117,14 @@ service
         assert_eq!(lexer_parse(), Ok(Token::Arrow));
         assert_eq!(lexer_parse(), Ok(Token::Keyword(Keyword::Fn)));
         assert_eq!(lexer_parse(), Ok(Token::Keyword(Keyword::Service)));
+    }
+
+    #[test]
+    fn single_char_ident() {
+        let mut stream = Stream::from_str("-I;");
+        let lexer = maybe(single('-'))
+            .then(string::<(), _>((ascii_alphabetic(), ascii_alphanumeric())))
+            .or(end().to((Some('a'), String::from("f"))));
+        assert_eq!(lexer.parse(&mut stream), Ok((Some('-'), String::from("I"))));
     }
 }

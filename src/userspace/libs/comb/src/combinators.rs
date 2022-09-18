@@ -41,7 +41,7 @@ where
 
     #[inline]
     fn parse(&self, stream: &mut Stream<'_, Self::Input>) -> Result<Self::Output, Self::Error> {
-        let (next, span) = stream.next().ok_or_else(|| E::custom("end of stream", None))?;
+        let (next, span) = stream.next().ok_or_else(|| E::unexpected_end_of_input())?;
 
         match next == self.input {
             true => Ok(next),
@@ -576,5 +576,49 @@ where
     fn parse(&self, stream: &mut Stream<'_, Self::Input>) -> Result<Self::Output, Self::Error> {
         while self.parser.try_parse(stream).is_ok() {}
         Ok(())
+    }
+}
+
+pub fn until<C, E, I, O, P>(hint: C, parser: P) -> Until<C, E, I, O, P>
+where
+    I: core::fmt::Debug + Clone + choice::Hint<C>,
+    E: Error,
+    P: Parser<Error = E, Input = I, Output = O>,
+{
+    Until { hint, parser }
+}
+
+pub struct Until<C, E, I, O, P>
+where
+    I: core::fmt::Debug + Clone + choice::Hint<C>,
+    E: Error,
+    P: Parser<Error = E, Input = I, Output = O>,
+{
+    hint: C,
+    parser: P,
+}
+
+impl<C, E, I, O, P> Parser for Until<C, E, I, O, P>
+where
+    I: core::fmt::Debug + Clone + choice::Hint<C>,
+    E: Error,
+    P: Parser<Error = E, Input = I, Output = O>,
+{
+    type Error = E;
+    type Input = I;
+    type Output = alloc::vec::Vec<O>;
+
+    fn parse(&self, stream: &mut Stream<'_, Self::Input>) -> Result<Self::Output, Self::Error> {
+        let mut values = alloc::vec::Vec::new();
+
+        loop {
+            let peek = stream.peek().ok_or_else(|| E::unexpected_end_of_input())?;
+            if peek.0.is_hinted(&self.hint) {
+                break;
+            }
+            values.push(self.parser.parse(stream)?);
+        }
+
+        Ok(values)
     }
 }

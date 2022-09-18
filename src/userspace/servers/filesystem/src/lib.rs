@@ -5,11 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#[macro_export]
-macro_rules! vidl_include {
-    ($vidl:literal) => {
-        include!(concat!(env!("OUT_DIR"), concat!("/", $vidl, ".rs")));
-    };
-}
-
-pub mod core;
+pub struct FileHandle;
+// type U8 = u8;
+type Error = ();
+vidl::vidl_include!("filesystem");

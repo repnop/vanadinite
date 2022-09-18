@@ -30,6 +30,12 @@ pub mod rt;
 pub mod sync;
 pub mod task;
 mod task_local;
+pub mod string {
+    pub use alloc::string::*;
+}
+pub mod vec {
+    pub use alloc::vec::*;
+}
 pub mod vmspace;
 
 pub use alloc::collections;

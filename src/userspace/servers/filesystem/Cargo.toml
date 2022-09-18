@@ -9,5 +9,9 @@ edition = "2021"
 json = { path = "../../libs/json" }
 librust = { path = "../../../shared/librust" }
 std = { path = "../../libs/std" }
+vidl = { path = "../../libs/vidl" }
 virtio = { path = "../../libs/virtio" }
 volatile = { path = "../../../shared/volatile" }
+
+[build-dependencies]
+vidlgen = { path = "../../libs/vidlgen" }

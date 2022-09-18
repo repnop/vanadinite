@@ -1,0 +1,6 @@
+use core::{FileHandle, morecore::{A, B, C}};
+
+service Filesystem {
+    fn open(path: String) -> Result<FileHandle, Error>;
+    fn read(handle: FileHandle) -> [U8];
+}

@@ -11,6 +11,8 @@ pub struct Stream<'a, T> {
     source: alloc::boxed::Box<dyn StreamSource<Item = T> + 'a>,
     pub(crate) buffer: alloc::collections::VecDeque<(T, Span)>,
     pub(crate) mode: StreamMode,
+    debug: Option<DebugState>,
+    span: (bool, Option<Span>),
 }
 
 impl<'a, T> Stream<'a, T>
@@ -27,31 +29,90 @@ where
             source: alloc::boxed::Box::new(source),
             buffer: alloc::collections::VecDeque::new(),
             mode: StreamMode::Normal,
+            debug: None,
+            span: (false, None),
         }
     }
 
     #[inline]
+    pub fn with_debug<S, W>(source: S, writer: W) -> Self
+    where
+        S: StreamSource<Item = T> + 'a,
+        T: 'a,
+        W: core::fmt::Write + 'static,
+    {
+        Self {
+            source: alloc::boxed::Box::new(source),
+            buffer: alloc::collections::VecDeque::new(),
+            mode: StreamMode::Normal,
+            debug: Some(DebugState { writer: alloc::boxed::Box::new(writer), try_depth: 0 }),
+            span: (false, None),
+        }
+    }
+
+    #[inline]
+    #[track_caller]
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<(T, Span)> {
+        let caller = core::panic::Location::caller();
         match &mut self.mode {
             // Try to get an already obtained element, otherwise grab the next one
             StreamMode::Transaction { current, .. } => match self.buffer.get(*current) {
                 Some(value) => {
                     *current += 1;
-                    Some(<(T, Span)>::clone(value))
+                    let value = <(T, Span)>::clone(value);
+
+                    self.debug_action(DebugAction::TransactionConsume { item: &value.0 }, Some(caller));
+                    if self.span.0 {
+                        match &mut self.span.1 {
+                            Some(span) => span.end = value.1.end,
+                            this @ None => *this = Some(value.1),
+                        }
+                    }
+
+                    Some(value)
                 }
                 None => {
                     *current += 1;
                     self.buffer.push_back(self.source.next()?);
-                    self.buffer.back().cloned()
+
+                    let value = self.buffer.back().cloned().unwrap();
+
+                    self.debug_action(DebugAction::TransactionConsume { item: &value.0 }, Some(caller));
+                    if self.span.0 {
+                        match &mut self.span.1 {
+                            Some(span) => span.end = value.1.end,
+                            this @ None => *this = Some(value.1),
+                        }
+                    }
+
+                    Some(value)
                 }
             },
             StreamMode::Normal => {
                 if let Some(next) = self.buffer.pop_front() {
+                    self.debug_action(DebugAction::NormalConsume { item: &next.0 }, Some(caller));
+                    if self.span.0 {
+                        match &mut self.span.1 {
+                            Some(span) => span.end = next.1.end,
+                            this @ None => *this = Some(next.1),
+                        }
+                    }
                     return Some(next);
                 }
 
-                self.source.next()
+                let value = self.source.next();
+                if let Some(value) = &value {
+                    self.debug_action(DebugAction::NormalConsume { item: &value.0 }, Some(caller));
+                    if self.span.0 {
+                        match &mut self.span.1 {
+                            Some(span) => span.end = value.1.end,
+                            this @ None => *this = Some(value.1),
+                        }
+                    }
+                }
+
+                value
             }
         }
     }
@@ -79,6 +140,18 @@ where
         }
     }
 
+    #[inline]
+    pub fn begin_record_span(&mut self) {
+        self.span.0 = true;
+    }
+
+    #[inline]
+    pub fn end_record_span(&mut self) -> Option<Span> {
+        self.span.0 = false;
+        self.span.1.take()
+    }
+
+    #[inline]
     pub(crate) fn try_parse<E, O>(&mut self, f: impl FnOnce(&mut Self) -> Result<O, E>) -> Result<O, E> {
         let mut current_transaction = None;
         match self.mode {
@@ -88,31 +161,43 @@ where
             }
             // Overlay a new transaction that will be reset if it fails
             StreamMode::Transaction { start, current } => {
-                current_transaction = Some(start);
+                current_transaction = Some(current);
+                if let Some(debug) = &mut self.debug {
+                    debug.try_depth += 1;
+                }
+                self.debug_action(DebugAction::NewTransaction { previous_start: start, new_start: current }, None);
                 self.mode = StreamMode::Transaction { start: current, current };
             }
         }
 
         match (f(self), current_transaction) {
-            (res, Some(start)) => {
+            (res, Some(prev_current)) => {
+                let StreamMode::Transaction { current, .. } = self.mode else { unreachable!() };
+
                 match res {
                     // Progress further in the stream
-                    Ok(_) => {
-                        let StreamMode::Transaction { current, .. } = self.mode else { unreachable!() };
-                        self.mode = StreamMode::Transaction { start: current, current };
-                    }
-                    // Rollback to the original starting position
-                    Err(_) => self.mode = StreamMode::Transaction { start, current: start },
+                    Ok(_) => self.mode = StreamMode::Transaction { start: current, current },
+                    // Rollback to the original buffer position
+                    Err(_) => self.mode = StreamMode::Transaction { start: prev_current, current: prev_current },
+                }
+
+                self.debug_action(DebugAction::TransactionEnd { ok: res.is_ok() }, None);
+
+                if let Some(debug) = &mut self.debug {
+                    debug.try_depth -= 1;
                 }
 
                 res
             }
             (res, None) => {
+                self.debug_action(DebugAction::TransactionEnd { ok: res.is_ok() }, None);
+
                 if res.is_ok() {
                     let StreamMode::Transaction { current, .. } = self.mode else { unreachable!() };
                     // Commit to having gotten this far and free memory
                     // associated with already processed elements
                     self.buffer.drain(..current);
+                    self.debug_action(DebugAction::Commit, None);
                 }
 
                 self.mode = StreamMode::Normal;
@@ -123,6 +208,58 @@ where
 
     pub(crate) fn in_try_mode(&self) -> bool {
         matches!(self.mode, StreamMode::Transaction { .. })
+    }
+
+    fn debug_action(
+        &mut self,
+        debug_action: DebugAction<'_, T>,
+        caller: Option<&'static core::panic::Location<'static>>,
+    ) {
+        if let Some(debug) = self.debug.as_mut() {
+            match debug_action {
+                DebugAction::Commit => writeln!(
+                    &mut debug.writer,
+                    "{}[transaction] commit: buffer={:?}",
+                    "+".repeat(debug.try_depth),
+                    self.buffer,
+                ),
+                DebugAction::NewTransaction { previous_start, new_start } => writeln!(
+                    &mut debug.writer,
+                    "{}[transaction] new: previous_start={}, new_start={}",
+                    "+".repeat(debug.try_depth),
+                    previous_start,
+                    new_start,
+                ),
+                DebugAction::NormalConsume { item } => {
+                    let caller = caller.unwrap();
+                    writeln!(
+                        &mut debug.writer,
+                        "{}[normal] consume: item={item:?} buffer={:?} caller = {}:{}:{}",
+                        "+".repeat(debug.try_depth),
+                        self.buffer,
+                        caller.file(),
+                        caller.line(),
+                        caller.column(),
+                    )
+                }
+                DebugAction::TransactionConsume { item } => {
+                    let caller = caller.unwrap();
+                    writeln!(
+                        &mut debug.writer,
+                        "{}[transaction] consume: item={item:?} buffer={:?} caller = {}:{}:{}",
+                        "+".repeat(debug.try_depth),
+                        self.buffer,
+                        caller.file(),
+                        caller.line(),
+                        caller.column(),
+                    )
+                }
+                DebugAction::TransactionEnd { ok } => {
+                    writeln!(&mut debug.writer, "{}[transaction] finish: ok={ok}", "+".repeat(debug.try_depth),)
+                }
+            }
+            .unwrap();
+        }
     }
 }
 
@@ -176,6 +313,19 @@ impl StreamSource for CharStream<'_> {
         let (index, next) = self.iter.next()?;
         Some((next, Span { start: index, end: index + next.len_utf8() }))
     }
+}
+
+struct DebugState {
+    writer: alloc::boxed::Box<dyn core::fmt::Write>,
+    try_depth: usize,
+}
+
+enum DebugAction<'a, T: core::fmt::Debug> {
+    NewTransaction { previous_start: usize, new_start: usize },
+    Commit,
+    TransactionConsume { item: &'a T },
+    NormalConsume { item: &'a T },
+    TransactionEnd { ok: bool },
 }
 
 // pub struct ParserOutputStream<E, I, O, P>

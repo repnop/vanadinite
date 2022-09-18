@@ -20,7 +20,7 @@ pub mod utils;
 use error::Error;
 use stream::Stream;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
@@ -99,6 +99,21 @@ pub trait Parser {
         P: Parser<Error = Self::Error, Output = O, Input = Self::Input>,
     {
         PaddedBy { padding, parser: self }
+    }
+
+    fn separated_by<O, P>(self, separator: P) -> SeparatedBy<Self, P, O, Self::Error, Self::Output, Self::Input>
+    where
+        Self: Sized,
+        P: Parser<Error = Self::Error, Output = O, Input = Self::Input>,
+    {
+        SeparatedBy { separator, parser: self, trailing: false }
+    }
+
+    fn with_span(self) -> WithSpan<Self, Self::Error, Self::Output, Self::Input>
+    where
+        Self: Sized,
+    {
+        WithSpan { parser: self }
     }
 }
 
@@ -328,6 +343,102 @@ where
     fn parse(&self, stream: &mut Stream<'_, Self::Input>) -> Result<Self::Output, Self::Error> {
         while self.padding.try_parse(stream).is_ok() {}
         self.parser.parse(stream)
+    }
+}
+
+pub struct SeparatedBy<P, S, O2, E, O, I>
+where
+    P: Parser<Error = E, Output = O, Input = I>,
+    S: Parser<Error = E, Output = O2, Input = I>,
+    E: Error,
+    I: core::fmt::Debug,
+{
+    parser: P,
+    separator: S,
+    trailing: bool,
+}
+
+impl<P, S, O2, E, O, I> SeparatedBy<P, S, O2, E, O, I>
+where
+    P: Parser<Error = E, Output = O, Input = I>,
+    S: Parser<Error = E, Output = O2, Input = I>,
+    E: Error,
+    I: core::fmt::Debug,
+{
+    pub fn allow_trailing(mut self) -> Self {
+        self.trailing = true;
+        self
+    }
+}
+
+impl<P, PD, O2, E, O, I> Parser for SeparatedBy<P, PD, O2, E, O, I>
+where
+    P: Parser<Error = E, Output = O, Input = I>,
+    PD: Parser<Error = E, Output = O2, Input = I>,
+    E: Error,
+    I: core::fmt::Debug + Clone,
+{
+    type Error = E;
+    type Output = alloc::vec::Vec<O>;
+    type Input = I;
+
+    #[inline]
+    fn parse(&self, stream: &mut Stream<'_, Self::Input>) -> Result<Self::Output, Self::Error> {
+        let mut values = alloc::vec![self.parser.parse(stream)?];
+        if self.separator.try_parse(stream).is_err() {
+            return Ok(values);
+        }
+
+        loop {
+            match self.trailing {
+                false => values.push(self.parser.parse(stream)?),
+                true => match self.parser.try_parse(stream) {
+                    Ok(value) => values.push(value),
+                    Err(_) => break,
+                },
+            }
+
+            if self.separator.try_parse(stream).is_err() {
+                break;
+            }
+        }
+
+        Ok(values)
+    }
+}
+
+pub struct WithSpan<P, E, O, I>
+where
+    P: Parser<Error = E, Output = O, Input = I>,
+    E: Error,
+    I: core::fmt::Debug,
+{
+    parser: P,
+}
+
+impl<P, E, O, I> Parser for WithSpan<P, E, O, I>
+where
+    P: Parser<Error = E, Output = O, Input = I>,
+    E: Error,
+    I: core::fmt::Debug + Clone,
+{
+    type Error = E;
+    type Output = (O, Span);
+    type Input = I;
+
+    #[inline]
+    fn parse(&self, stream: &mut Stream<'_, Self::Input>) -> Result<Self::Output, Self::Error> {
+        stream.begin_record_span();
+        match self.parser.parse(stream) {
+            Ok(val) => {
+                let span = stream.end_record_span().unwrap_or_default();
+                Ok((val, span))
+            }
+            Err(e) => {
+                stream.end_record_span();
+                Err(e)
+            }
+        }
     }
 }
 
