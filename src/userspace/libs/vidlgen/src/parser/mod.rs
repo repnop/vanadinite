@@ -19,6 +19,13 @@ use comb::{
 pub enum AstNode {
     Service(Service),
     Use(Use),
+    TypeDefinition(TypeDefinition),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum TypeDefinition {
+    Struct(Struct),
+    Enum(Enum),
 }
 
 #[derive(Debug, PartialEq)]
@@ -59,6 +66,31 @@ pub struct Method {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct Struct {
+    pub name: String,
+    pub generics: Option<Vec<String>>,
+    pub fields: Vec<Field>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Field {
+    pub name: String,
+    pub ty: Type,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Enum {
+    pub name: String,
+    pub generics: Option<Vec<String>>,
+    pub variants: Vec<Variant>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Variant {
+    pub name: String,
+}
+
+#[derive(Debug, PartialEq)]
 pub enum Type {
     Path { path: Vec<String>, generics: Option<Vec<Type>> },
     Slice(Box<Type>),
@@ -68,6 +100,14 @@ pub fn parser() -> impl Parser<Error = crate::SourceError, Output = AstNode, Inp
     hinted_choice((
         (Token::Keyword(Keyword::Service), parse_service()),
         (Token::Keyword(Keyword::Use), parse_use()),
+        (
+            Token::Keyword(Keyword::Struct),
+            parse_struct_definition().map(|d| AstNode::TypeDefinition(TypeDefinition::Struct(d))),
+        ),
+        (
+            Token::Keyword(Keyword::Enum),
+            parse_enum_definition().map(|d| AstNode::TypeDefinition(TypeDefinition::Enum(d))),
+        ),
         // ...
     ))
 }
@@ -153,6 +193,48 @@ fn parse_type() -> impl Parser<Error = crate::SourceError, Output = Type, Input 
 fn parse_ident() -> impl Parser<Error = crate::SourceError, Output = String, Input = Token> {
     single_by(|t| matches!(t, Token::Identifier(_))).map(Token::into_identifier)
 }
+
+fn parse_struct_definition() -> impl Parser<Error = crate::SourceError, Output = Struct, Input = Token> {
+    single(Token::Keyword(Keyword::Struct))
+        .then_to(parse_ident())
+        .then(maybe(delimited(
+            single(Token::LeftAngleBracket),
+            parse_ident().separated_by(single(Token::Comma)).allow_trailing(),
+            single(Token::RightAngleBracket),
+        )))
+        .then(delimited(
+            single(Token::LeftBrace),
+            parse_ident()
+                .then_assert(single(Token::Colon))
+                .then(parse_type())
+                .map(|(name, ty)| Field { name, ty })
+                .separated_by(single(Token::Comma))
+                .allow_trailing(),
+            single(Token::RightBrace),
+        ))
+        .map(|((name, generics), fields)| Struct { name, generics, fields })
+}
+
+fn parse_enum_definition() -> impl Parser<Error = crate::SourceError, Output = Enum, Input = Token> {
+    single(Token::Keyword(Keyword::Enum))
+        .then_to(parse_ident())
+        .then(maybe(delimited(
+            single(Token::LeftAngleBracket),
+            parse_ident().separated_by(single(Token::Comma)).allow_trailing(),
+            single(Token::RightAngleBracket),
+        )))
+        .then(delimited(
+            single(Token::LeftBrace),
+            parse_ident()
+                .then_assert(single(Token::Comma))
+                .map(|name| Variant { name })
+                .separated_by(single(Token::Comma))
+                .allow_trailing(),
+            single(Token::RightBrace),
+        ))
+        .map(|((name, generics), variants)| Enum { name, generics, variants })
+}
+
 #[cfg(test)]
 mod test {
     use super::lexer::lexer;
