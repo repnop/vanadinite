@@ -1,10 +1,13 @@
 [package]
-name = "materialize"
+name = "materialize_derive"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+proc-macro = true
+
 [dependencies]
-materialize_derive = { path = "../materialize_derive" }
-librust = { path = "../../../shared/librust" }
+syn = "1"
+quote = "1"

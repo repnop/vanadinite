@@ -6,15 +6,22 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 #![no_std]
-#![feature(strict_provenance)]
+#![allow(incomplete_features)]
+#![feature(generic_const_exprs, strict_provenance)]
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
+mod deserialize;
+mod hash;
 pub mod primitives;
+mod serialize;
+pub mod writer;
 
 use primitives::Primitive;
 
-const MINIMUM_ALIGNMENT: usize = core::mem::align_of::<usize>();
+const MINIMUM_ALIGNMENT: usize = core::mem::align_of::<u64>();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Underaligned;
