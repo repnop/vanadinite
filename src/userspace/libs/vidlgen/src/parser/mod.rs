@@ -255,7 +255,7 @@ mod test {
     fn stuff_works_idk() {
         let syntax = "service MyService {
                 fn fump(baz: U32, aaa: U64) -> T;
-                fn fraz (baz2: Yeet, aaa2: [[[U64]]]), -> Foo<Baz, Bar>;
+                fn fraz (baz2: Yeet, aaa2: [[[U64]]]) -> Foo<Baz, Bar>;
             }";
 
         let tokens = comb::combinators::many0(lexer()).parse(&mut Stream::from_str(syntax)).unwrap();

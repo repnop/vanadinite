@@ -42,3 +42,51 @@ impl<'a> Message<'a> {
         todo!()
     }
 }
+
+pub trait Serializable {
+    type Primitive<'a>: primitives::Primitive;
+}
+
+impl Serializable for u8 {
+    type Primitive<'a> = u8;
+}
+
+impl Serializable for i8 {
+    type Primitive<'a> = i8;
+}
+
+impl Serializable for u16 {
+    type Primitive<'a> = u16;
+}
+
+impl Serializable for i16 {
+    type Primitive<'a> = i16;
+}
+
+impl Serializable for u32 {
+    type Primitive<'a> = u32;
+}
+
+impl Serializable for i32 {
+    type Primitive<'a> = i32;
+}
+
+impl Serializable for u64 {
+    type Primitive<'a> = u64;
+}
+
+impl Serializable for i64 {
+    type Primitive<'a> = i64;
+}
+
+impl Serializable for usize {
+    type Primitive<'a> = usize;
+}
+
+impl Serializable for isize {
+    type Primitive<'a> = isize;
+}
+
+impl Serializable for &'_ str {
+    type Primitive<'a> = &'a str;
+}

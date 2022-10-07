@@ -5,7 +5,12 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::hash::FxHasher;
+mod fields;
+
+use crate::{
+    hash::FxHasher,
+    serialize::{ReservationToken, SerializeError, Serializer},
+};
 use core::convert::TryFrom;
 
 mod sealed {
@@ -60,15 +65,26 @@ pub enum ExtractionError {
 
 pub trait Primitive: sealed::Sealed {
     const ID: u64;
+    type Input<'a>;
     type Output<'a>;
 
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError>;
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError>;
     fn layout() -> core::alloc::Layout;
 }
 
 impl Primitive for () {
     const ID: u64 = 0xadc4eb49d6e3a43c;
+    type Input<'a> = ();
     type Output<'a> = ();
+
+    fn encode(_: Self::Input<'_>, _: &mut Serializer, _: &mut ReservationToken) -> Result<(), SerializeError> {
+        Ok(())
+    }
 
     fn extract<'a>(_: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         Ok(())
@@ -110,7 +126,19 @@ impl<'a, F: Fields> Struct<'a, F> {
 impl<F: Fields> sealed::Sealed for Struct<'_, F> {}
 impl<F: Fields> Primitive for Struct<'_, F> {
     const ID: u64 = FxHasher::new().hash(Self::STRUCT_BASE_ID).hash(<<F as Fields>::Head as Primitive>::ID).finish();
+    type Input<'a> = F::Input<'a>;
     type Output<'a> = Struct<'a, F>;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError> {
+        let mut field_token = serializer.reserve_space(F::layout())?;
+        serializer.write_bytes(token, &Self::ID.to_ne_bytes()[..])?;
+        serializer.write_bytes(token, &(field_token.position() as u64).to_ne_bytes()[..])?;
+        F::encode(input, serializer, &mut field_token)
+    }
 
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         let [id, position] = buffer.read::<[u64; 2]>()?;
@@ -133,17 +161,39 @@ impl<F: Fields> Primitive for Struct<'_, F> {
 impl sealed::Sealed for &'_ str {}
 impl Primitive for &'_ str {
     const ID: u64 = 0x94a845be7716094d;
+    type Input<'a> = &'a str;
     type Output<'a> = &'a str;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError> {
+        match input.len() {
+            0 => serializer.write_bytes(token, &[0; 16]).map(drop),
+            len => {
+                let mut data_token = serializer.reserve_space(core::alloc::Layout::for_value(input))?;
+                serializer.write_bytes(token, &data_token.position().to_ne_bytes()[..])?;
+                serializer.write_bytes(token, &len.to_ne_bytes()[..])?;
+                serializer.write_bytes(&mut data_token, input.as_bytes())?;
+                Ok(())
+            }
+        }
+    }
 
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         let [position, length] = buffer.read::<[usize; 2]>()?;
         let buffer = buffer.buffer.get(position..position + length).ok_or(ExtractionError::MalformedOffset)?;
 
+        if position == 0 {
+            return Ok("");
+        }
+
         core::str::from_utf8(buffer).map_err(|_| ExtractionError::InvalidUtf8)
     }
 
     fn layout() -> core::alloc::Layout {
-        core::alloc::Layout::new::<[u64; 2]>()
+        core::alloc::Layout::new::<[usize; 2]>()
     }
 }
 
@@ -175,8 +225,21 @@ impl<'a, P: Primitive, const LENGTH: usize> Array<'a, P, LENGTH> {
 
 impl<const LENGTH: usize, P: Primitive> sealed::Sealed for Array<'_, P, LENGTH> {}
 impl<const LENGTH: usize, P: Primitive> Primitive for Array<'_, P, LENGTH> {
-    const ID: u64 = FxHasher::new().hash(0xf13a444fbc5162d0).hash(P::ID).finish();
+    const ID: u64 = FxHasher::new().hash(0xf13a444fbc5162d0).hash(P::ID).hash(LENGTH as u64).finish();
+    type Input<'a> = [P::Input<'a>; LENGTH];
     type Output<'a> = Array<'a, P, LENGTH>;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError> {
+        for input in input {
+            P::encode(input, serializer, token)?;
+        }
+
+        Ok(())
+    }
 
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         let [position, length] = buffer.read::<[usize; 2]>()?;
@@ -196,7 +259,16 @@ impl<const LENGTH: usize, P: Primitive> Primitive for Array<'_, P, LENGTH> {
 impl sealed::Sealed for u8 {}
 impl Primitive for u8 {
     const ID: u64 = 0xd4d1d74109db7e0;
+    type Input<'a> = u8;
     type Output<'a> = u8;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError> {
+        serializer.write_bytes(token, &[input])
+    }
 
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         buffer.read::<Self>()
@@ -210,7 +282,16 @@ impl Primitive for u8 {
 impl sealed::Sealed for i8 {}
 impl Primitive for i8 {
     const ID: u64 = 0x85316d595ee12d8e;
+    type Input<'a> = i8;
     type Output<'a> = i8;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError> {
+        serializer.write_bytes(token, &[input as u8])
+    }
 
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         buffer.read::<Self>()
@@ -224,7 +305,16 @@ impl Primitive for i8 {
 impl sealed::Sealed for u16 {}
 impl Primitive for u16 {
     const ID: u64 = 0x182ca144e057ded8;
+    type Input<'a> = u16;
     type Output<'a> = u16;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError> {
+        serializer.write_bytes(token, &input.to_ne_bytes()[..])
+    }
 
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         buffer.read::<Self>()
@@ -238,7 +328,16 @@ impl Primitive for u16 {
 impl sealed::Sealed for i16 {}
 impl Primitive for i16 {
     const ID: u64 = 0x8339ca9fef21af4;
+    type Input<'a> = i16;
     type Output<'a> = i16;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError> {
+        serializer.write_bytes(token, &input.to_ne_bytes()[..])
+    }
 
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         buffer.read::<Self>()
@@ -252,7 +351,16 @@ impl Primitive for i16 {
 impl sealed::Sealed for u32 {}
 impl Primitive for u32 {
     const ID: u64 = 0xb330c6b1bc925fe3;
+    type Input<'a> = u32;
     type Output<'a> = u32;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError> {
+        serializer.write_bytes(token, &input.to_ne_bytes()[..])
+    }
 
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         buffer.read::<Self>()
@@ -266,7 +374,16 @@ impl Primitive for u32 {
 impl sealed::Sealed for i32 {}
 impl Primitive for i32 {
     const ID: u64 = 0xa7618d5014e22dcd;
+    type Input<'a> = i32;
     type Output<'a> = i32;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError> {
+        serializer.write_bytes(token, &input.to_ne_bytes()[..])
+    }
 
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         buffer.read::<Self>()
@@ -280,7 +397,16 @@ impl Primitive for i32 {
 impl sealed::Sealed for u64 {}
 impl Primitive for u64 {
     const ID: u64 = 0x46f3003d096708b8;
+    type Input<'a> = u64;
     type Output<'a> = u64;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError> {
+        serializer.write_bytes(token, &input.to_ne_bytes()[..])
+    }
 
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         buffer.read::<Self>()
@@ -294,7 +420,16 @@ impl Primitive for u64 {
 impl sealed::Sealed for i64 {}
 impl Primitive for i64 {
     const ID: u64 = 0xf892cc40250d39f7;
+    type Input<'a> = i64;
     type Output<'a> = i64;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError> {
+        serializer.write_bytes(token, &input.to_ne_bytes()[..])
+    }
 
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         buffer.read::<Self>()
@@ -308,7 +443,16 @@ impl Primitive for i64 {
 impl sealed::Sealed for usize {}
 impl Primitive for usize {
     const ID: u64 = 0x191f7db76a9b101d;
+    type Input<'a> = usize;
     type Output<'a> = usize;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError> {
+        serializer.write_bytes(token, &input.to_ne_bytes()[..])
+    }
 
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         buffer.read::<Self>()
@@ -322,7 +466,16 @@ impl Primitive for usize {
 impl sealed::Sealed for isize {}
 impl Primitive for isize {
     const ID: u64 = 0xe14dbb5b71ba5adc;
+    type Input<'a> = isize;
     type Output<'a> = isize;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError> {
+        serializer.write_bytes(token, &input.to_ne_bytes()[..])
+    }
 
     fn extract<'a>(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self::Output<'a>, ExtractionError> {
         buffer.read::<Self>()
@@ -337,448 +490,17 @@ pub trait Fields: Sized + sealed::Sealed {
     const ID: u64;
     type Head: Primitive;
     type Next: Fields;
+    type Input<'a>;
+
+    fn encode(
+        input: Self::Input<'_>,
+        serializer: &mut Serializer,
+        token: &mut ReservationToken,
+    ) -> Result<(), SerializeError>;
 
     fn layout() -> core::alloc::Layout {
         <Self::Head as Primitive>::layout().extend(<Self::Next as Fields>::layout()).unwrap().0.pad_to_align()
     }
-}
-
-impl sealed::Sealed for () {}
-impl Fields for () {
-    const ID: u64 = <() as Primitive>::ID;
-    type Head = ();
-    type Next = ();
-
-    fn layout() -> core::alloc::Layout {
-        core::alloc::Layout::new::<()>()
-    }
-}
-
-impl<T: Primitive> sealed::Sealed for (T,) {}
-impl<T: Primitive> Fields for (T,) {
-    const ID: u64 = T::ID;
-    type Head = T;
-    type Next = ();
-}
-
-impl<T: Primitive, U: Primitive> sealed::Sealed for (T, U) {}
-impl<T: Primitive, U: Primitive> Fields for (T, U) {
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U,);
-}
-
-impl<T: Primitive, U: Primitive, V: Primitive> sealed::Sealed for (T, U, V) {}
-impl<T: Primitive, U: Primitive, V: Primitive> Fields for (T, U, V) {
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V);
-}
-
-impl<T: Primitive, U: Primitive, V: Primitive, W: Primitive> sealed::Sealed for (T, U, V, W) {}
-impl<T: Primitive, U: Primitive, V: Primitive, W: Primitive> Fields for (T, U, V, W) {
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W);
-}
-
-impl<T: Primitive, U: Primitive, V: Primitive, W: Primitive, X: Primitive> sealed::Sealed for (T, U, V, W, X) {}
-impl<T: Primitive, U: Primitive, V: Primitive, W: Primitive, X: Primitive> Fields for (T, U, V, W, X) {
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W, X);
-}
-
-impl<T: Primitive, U: Primitive, V: Primitive, W: Primitive, X: Primitive, Y: Primitive> sealed::Sealed
-    for (T, U, V, W, X, Y)
-{
-}
-impl<T: Primitive, U: Primitive, V: Primitive, W: Primitive, X: Primitive, Y: Primitive> Fields for (T, U, V, W, X, Y) {
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W, X, Y);
-}
-
-impl<T: Primitive, U: Primitive, V: Primitive, W: Primitive, X: Primitive, Y: Primitive, Z: Primitive> sealed::Sealed
-    for (T, U, V, W, X, Y, Z)
-{
-}
-impl<T: Primitive, U: Primitive, V: Primitive, W: Primitive, X: Primitive, Y: Primitive, Z: Primitive> Fields
-    for (T, U, V, W, X, Y, Z)
-{
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W, X, Y, Z);
-}
-
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-    > sealed::Sealed for (T, U, V, W, X, Y, Z, A)
-{
-}
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-    > Fields for (T, U, V, W, X, Y, Z, A)
-{
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W, X, Y, Z, A);
-}
-
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-    > sealed::Sealed for (T, U, V, W, X, Y, Z, A, B)
-{
-}
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-    > Fields for (T, U, V, W, X, Y, Z, A, B)
-{
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W, X, Y, Z, A, B);
-}
-
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-    > sealed::Sealed for (T, U, V, W, X, Y, Z, A, B, C)
-{
-}
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-    > Fields for (T, U, V, W, X, Y, Z, A, B, C)
-{
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W, X, Y, Z, A, B, C);
-}
-
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-    > sealed::Sealed for (T, U, V, W, X, Y, Z, A, B, C, D)
-{
-}
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-    > Fields for (T, U, V, W, X, Y, Z, A, B, C, D)
-{
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W, X, Y, Z, A, B, C, D);
-}
-
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-        E: Primitive,
-    > sealed::Sealed for (T, U, V, W, X, Y, Z, A, B, C, D, E)
-{
-}
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-        E: Primitive,
-    > Fields for (T, U, V, W, X, Y, Z, A, B, C, D, E)
-{
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W, X, Y, Z, A, B, C, D, E);
-}
-
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-        E: Primitive,
-        F: Primitive,
-    > sealed::Sealed for (T, U, V, W, X, Y, Z, A, B, C, D, E, F)
-{
-}
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-        E: Primitive,
-        F: Primitive,
-    > Fields for (T, U, V, W, X, Y, Z, A, B, C, D, E, F)
-{
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W, X, Y, Z, A, B, C, D, E, F);
-}
-
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-        E: Primitive,
-        F: Primitive,
-        G: Primitive,
-    > sealed::Sealed for (T, U, V, W, X, Y, Z, A, B, C, D, E, F, G)
-{
-}
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-        E: Primitive,
-        F: Primitive,
-        G: Primitive,
-    > Fields for (T, U, V, W, X, Y, Z, A, B, C, D, E, F, G)
-{
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W, X, Y, Z, A, B, C, D, E, F, G);
-}
-
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-        E: Primitive,
-        F: Primitive,
-        G: Primitive,
-        H: Primitive,
-    > sealed::Sealed for (T, U, V, W, X, Y, Z, A, B, C, D, E, F, G, H)
-{
-}
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-        E: Primitive,
-        F: Primitive,
-        G: Primitive,
-        H: Primitive,
-    > Fields for (T, U, V, W, X, Y, Z, A, B, C, D, E, F, G, H)
-{
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W, X, Y, Z, A, B, C, D, E, F, G, H);
-}
-
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-        E: Primitive,
-        F: Primitive,
-        G: Primitive,
-        H: Primitive,
-        I: Primitive,
-    > sealed::Sealed for (T, U, V, W, X, Y, Z, A, B, C, D, E, F, G, H, I)
-{
-}
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-        E: Primitive,
-        F: Primitive,
-        G: Primitive,
-        H: Primitive,
-        I: Primitive,
-    > Fields for (T, U, V, W, X, Y, Z, A, B, C, D, E, F, G, H, I)
-{
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W, X, Y, Z, A, B, C, D, E, F, G, H, I);
-}
-
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-        E: Primitive,
-        F: Primitive,
-        G: Primitive,
-        H: Primitive,
-        I: Primitive,
-        J: Primitive,
-    > sealed::Sealed for (T, U, V, W, X, Y, Z, A, B, C, D, E, F, G, H, I, J)
-{
-}
-impl<
-        T: Primitive,
-        U: Primitive,
-        V: Primitive,
-        W: Primitive,
-        X: Primitive,
-        Y: Primitive,
-        Z: Primitive,
-        A: Primitive,
-        B: Primitive,
-        C: Primitive,
-        D: Primitive,
-        E: Primitive,
-        F: Primitive,
-        G: Primitive,
-        H: Primitive,
-        I: Primitive,
-        J: Primitive,
-    > Fields for (T, U, V, W, X, Y, Z, A, B, C, D, E, F, G, H, I, J)
-{
-    const ID: u64 = FxHasher::new().hash(T::ID).hash(<Self::Next as Fields>::ID).finish();
-    type Head = T;
-    type Next = (U, V, W, X, Y, Z, A, B, C, D, E, F, G, H, I, J);
 }
 
 #[cfg(test)]

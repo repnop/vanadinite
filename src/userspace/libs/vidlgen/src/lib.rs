@@ -75,6 +75,7 @@ impl Compiler {
             match node {
                 AstNode::Service(service) => self.lower_service(&mut compiled, &service)?,
                 AstNode::Use(_) => unreachable!(),
+                _ => todo!(),
             }
         }
 

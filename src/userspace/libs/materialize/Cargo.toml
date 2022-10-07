@@ -7,4 +7,4 @@ edition = "2021"
 
 [dependencies]
 materialize_derive = { path = "../materialize_derive" }
-librust = { path = "../../../shared/librust" }
+# librust = { path = "../../../shared/librust" }
