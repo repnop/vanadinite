@@ -6,13 +6,24 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 #![no_std]
-#![allow(incomplete_features)]
-#![feature(generic_const_exprs, strict_provenance)]
+#![allow(incomplete_features, clippy::unit_arg)]
+#![feature(
+    alloc_layout_extra,
+    allocator_api,
+    array_methods,
+    array_try_map,
+    const_slice_from_raw_parts_mut,
+    generic_const_exprs,
+    macro_metavar_expr,
+    slice_ptr_get,
+    strict_provenance
+)]
 
 extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod buffer;
 mod deserialize;
 mod hash;
 pub mod primitives;
@@ -22,6 +33,10 @@ pub mod writer;
 use primitives::Primitive;
 
 const MINIMUM_ALIGNMENT: usize = core::mem::align_of::<u64>();
+
+mod sealed {
+    pub trait Sealed {}
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Underaligned;
@@ -38,13 +53,17 @@ impl<'a> Message<'a> {
         }
     }
 
-    pub fn read<P: Primitive + 'a>(&self) -> Result<P, ()> {
+    pub fn read<P: Primitive<'a> + 'a>(&self) -> Result<P, ()> {
         todo!()
     }
 }
 
 pub trait Serializable {
-    type Primitive<'a>: primitives::Primitive;
+    type Primitive<'a>: primitives::Primitive<'a>;
+}
+
+impl Serializable for () {
+    type Primitive<'a> = ();
 }
 
 impl Serializable for u8 {
@@ -87,6 +106,18 @@ impl Serializable for isize {
     type Primitive<'a> = isize;
 }
 
+impl Serializable for str {
+    type Primitive<'a> = &'a str;
+}
+
 impl Serializable for &'_ str {
     type Primitive<'a> = &'a str;
+}
+
+impl<F: for<'a> primitives::Fields<'a>> Serializable for primitives::Struct<'_, F> {
+    type Primitive<'b> = primitives::Struct<'b, F>;
+}
+
+impl<const LENGTH: usize, S: Serializable> Serializable for [S; LENGTH] {
+    type Primitive<'a> = primitives::Array<'a, S::Primitive<'a>, LENGTH>;
 }
