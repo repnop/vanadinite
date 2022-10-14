@@ -7,7 +7,7 @@
 
 use super::{ReservationToken, Serialize, SerializeError, Serializer};
 use crate::{
-    primitives::{Array, Fields, Primitive, Struct},
+    primitives::{Array, Fields, List, Primitive, Struct},
     sealed,
 };
 
@@ -74,12 +74,48 @@ impl<'a, P: Primitive<'a>, const LENGTH: usize> PrimitiveSerializer<'a> for Arra
         serializer: &'a mut Serializer,
         mut token: ReservationToken,
     ) -> Result<Self::Serializer, SerializeError> {
-        let data_token =
-            serializer.reserve_space(P::layout().repeat(LENGTH).map_err(|_| SerializeError::NotEnoughSpace)?.0)?;
+        let data_token = serializer
+            .reserve_space(P::layout().repeat(LENGTH).map_err(|_| SerializeError::NotEnoughSpace)?.0.pad_to_align())?;
         *serializer.integer(&mut token)? = data_token.position();
         *serializer.integer(&mut token)? = LENGTH;
 
         Ok(ArraySerializer { data_token, serializer })
+    }
+}
+
+pub struct ListSerializer<'a> {
+    token: ReservationToken,
+    serializer: &'a mut Serializer,
+}
+
+impl<'a> ListSerializer<'a> {
+    pub fn serialize_list<T: Serialize>(self, slice: &[T]) -> Result<(), SerializeError> {
+        let Self { mut token, serializer } = self;
+        let mut data_token = serializer.reserve_space(
+            <T::Primitive<'_> as Primitive<'_>>::layout()
+                .repeat(slice.len())
+                .map_err(|_| SerializeError::NotEnoughSpace)?
+                .0
+                .pad_to_align(),
+        )?;
+
+        *serializer.integer(&mut token)? = data_token.position();
+        *serializer.integer(&mut token)? = slice.len();
+
+        for item in slice {
+            let (token, rest) = data_token.split(<T::Primitive<'_> as Primitive<'_>>::layout())?;
+            data_token = rest;
+            serializer.serialize_into(token, item)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a, P: Primitive<'a>> PrimitiveSerializer<'a> for List<'a, P> {
+    type Serializer = ListSerializer<'a>;
+    fn construct(serializer: &'a mut Serializer, token: ReservationToken) -> Result<Self::Serializer, SerializeError> {
+        Ok(ListSerializer { token, serializer })
     }
 }
 

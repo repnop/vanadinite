@@ -76,6 +76,10 @@ impl Serializer {
         Self { buffer: AlignedHeapBuffer::new() }
     }
 
+    pub fn into_buffer(self) -> AlignedHeapBuffer {
+        self.buffer
+    }
+
     pub fn serialize<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), SerializeError> {
         let token = self.reserve_space(<T::Primitive<'_> as Primitive<'_>>::layout())?;
         self.serialize_into(token, value)
@@ -255,6 +259,15 @@ impl Serialize for str {
     }
 }
 
+impl Serialize for alloc::string::String {
+    fn serialize<'a>(
+        &self,
+        serializer: <Self::Primitive<'a> as PrimitiveSerializer<'a>>::Serializer,
+    ) -> Result<(), SerializeError> {
+        serializer.serialize_str(self)
+    }
+}
+
 impl<T: Serialize, const LENGTH: usize> Serialize for [T; LENGTH] {
     fn serialize<'a>(
         &self,
@@ -264,12 +277,22 @@ impl<T: Serialize, const LENGTH: usize> Serialize for [T; LENGTH] {
     }
 }
 
+impl<T: Serialize> Serialize for alloc::vec::Vec<T> {
+    fn serialize<'a>(
+        &self,
+        serializer: <Self::Primitive<'a> as PrimitiveSerializer<'a>>::Serializer,
+    ) -> Result<(), SerializeError> {
+        serializer.serialize_list(self)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::{
         deserialize::{Deserialize, Deserializer},
-        primitives::{AlignedReadBuffer, Array, Struct},
+        primitives::{AlignedReadBuffer, Array, List, Struct},
+        DeserializeError,
     };
 
     #[test]
@@ -297,7 +320,7 @@ mod test {
         impl<'de> Deserialize<'de> for MyCoolStruct {
             // type Primitive = Struct<'de, (u64, u32, u8, &'de str)>;
 
-            fn deserialize(strukt: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
+            fn deserialize(strukt: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
                 assert_eq!(strukt.field(), Ok(0xDEADF00DBEEFBABE));
                 assert_eq!(strukt.next().field(), Ok(0xC0BB0000));
                 assert_eq!(strukt.next().next().field(), Ok(0xF0));
@@ -334,8 +357,8 @@ mod test {
         }
 
         impl<'de> Deserialize<'de> for ComplexStruct {
-            fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
-                Ok(Self { frabs: <_>::deserialize(primitive.field().map_err(drop)?)? })
+            fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
+                Ok(Self { frabs: <_>::deserialize(primitive.field()?)? })
             }
         }
 
@@ -359,8 +382,8 @@ mod test {
         }
 
         impl<'de> Deserialize<'de> for LittleStruct {
-            fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
-                Ok(Self { frab: primitive.field().map_err(drop)? })
+            fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
+                Ok(Self { frab: primitive.field()? })
             }
         }
 
@@ -378,5 +401,29 @@ mod test {
         serializer.serialize(&strukt).unwrap();
         let deserializer = Deserializer::new(&serializer.buffer[..]);
         assert_eq!(deserializer.deserialize::<ComplexStruct>(), Ok(strukt));
+    }
+
+    #[test]
+    fn vec() {
+        #[derive(Debug, PartialEq, crate::Serializable, crate::Deserialize, crate::Serialize)]
+        #[materialize(reexport_path = "crate")]
+        struct Padding(u32, u8);
+
+        let v = std::vec![Padding(0xAA55AA55, 0xFF), Padding(0x22DD22DD, 0x01)];
+        let mut serializer = Serializer::new();
+        serializer.serialize(&v).unwrap();
+        pretty_print_buffer(&serializer.buffer);
+        let deserializer = Deserializer::new(&serializer.buffer[..]);
+        assert_eq!(deserializer.deserialize::<std::vec::Vec<Padding>>(), Ok(v));
+    }
+
+    fn pretty_print_buffer(b: &[u8]) {
+        for (i, chunk) in b.chunks(8).enumerate() {
+            std::print!("{:<02x}:    ", i * 8);
+            for b in chunk {
+                std::print!("{b:<02x} ");
+            }
+            std::println!();
+        }
     }
 }

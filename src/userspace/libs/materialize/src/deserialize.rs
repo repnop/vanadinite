@@ -6,9 +6,17 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    primitives::{AlignedReadBuffer, Fields, Primitive, Struct},
-    Message, Serializable,
+    primitives::{AlignedReadBuffer, Fields, List, Primitive, Struct},
+    Serializable,
 };
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum DeserializeError {
+    MalformedOffset,
+    BufferTooSmall,
+    MismatchedId { wanted: u64, found: u64 },
+    InvalidUtf8,
+}
 
 pub struct Deserializer<'a> {
     buffer: &'a [u8],
@@ -19,126 +27,119 @@ impl<'a> Deserializer<'a> {
         Self { buffer }
     }
 
-    pub fn deserialize<T: Deserialize<'a>>(self) -> Result<T, ()> {
+    pub fn deserialize<T: Deserialize<'a>>(self) -> Result<T, DeserializeError> {
         T::deserialize(<T::Primitive<'a> as Primitive>::extract(&mut AlignedReadBuffer::new(self.buffer)).unwrap())
     }
 }
 
 pub trait Deserialize<'de>: Serializable + Sized {
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()>;
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError>;
 }
 
 impl<'de> Deserialize<'de> for u8 {
-    // type Primitive = Self;
-
     #[inline]
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
 }
 
 impl<'de> Deserialize<'de> for i8 {
-    // type Primitive = Self;
-
     #[inline]
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
 }
 
 impl<'de> Deserialize<'de> for u16 {
-    // type Primitive = Self;
-
     #[inline]
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
 }
 
 impl<'de> Deserialize<'de> for i16 {
-    // type Primitive = Self;
-
     #[inline]
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
 }
 
 impl<'de> Deserialize<'de> for u32 {
-    // type Primitive = Self;
-
     #[inline]
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
 }
 
 impl<'de> Deserialize<'de> for i32 {
-    // type Primitive = Self;
-
     #[inline]
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
 }
 
 impl<'de> Deserialize<'de> for u64 {
-    // type Primitive = Self;
-
     #[inline]
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
 }
 
 impl<'de> Deserialize<'de> for i64 {
-    // type Primitive = Self;
-
     #[inline]
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
 }
 
 impl<'de> Deserialize<'de> for usize {
-    // type Primitive = Self;
-
     #[inline]
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
 }
 
 impl<'de> Deserialize<'de> for isize {
-    // type Primitive = Self;
-
     #[inline]
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
 }
 
 impl<'de> Deserialize<'de> for &'de str {
-    // type Primitive = Self;
-
     #[inline]
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
 }
 
-impl<'de, F: for<'a> Fields<'a>> Deserialize<'de> for Struct<'de, F> {
-    // type Primitive = Self;
-
+impl<'de> Deserialize<'de> for alloc::string::String {
     #[inline]
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
+        Ok(Self::from(primitive))
+    }
+}
+
+impl<'de, F: for<'a> Fields<'a>> Deserialize<'de> for Struct<'de, F> {
+    #[inline]
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
 }
 
 impl<'de, const LENGTH: usize, D: Deserialize<'de>> Deserialize<'de> for [D; LENGTH] {
     #[inline]
-    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, ()> {
-        primitive.map(|p| Ok(D::deserialize(p).unwrap())).map_err(drop)
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
+        primitive.map(|p| Ok(D::deserialize(p).unwrap()))
+    }
+}
+
+impl<'de, T: Deserialize<'de> + 'de> Deserialize<'de> for alloc::vec::Vec<T> {
+    #[inline]
+    fn deserialize(primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
+        primitive.into_iter().try_fold(alloc::vec::Vec::new(), |mut v, p| {
+            v.push(T::deserialize(p?)?);
+            Ok(v)
+        })
     }
 }

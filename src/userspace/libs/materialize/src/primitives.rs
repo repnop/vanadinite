@@ -7,11 +7,7 @@
 
 mod fields;
 
-use crate::{
-    hash::FxHasher,
-    sealed,
-    serialize::{serializers::PrimitiveSerializer, ReservationToken, SerializeError, Serializer},
-};
+use crate::{deserialize::DeserializeError, hash::FxHasher, sealed, serialize::serializers::PrimitiveSerializer};
 use core::{alloc::Layout, convert::TryFrom};
 
 pub(crate) unsafe trait Integer: Sized + Copy {}
@@ -39,38 +35,30 @@ impl<'a> AlignedReadBuffer<'a> {
     }
 
     #[inline]
-    fn read<I: Integer>(&mut self) -> Result<I, ExtractionError> {
-        let buffer = self.buffer.get(self.position..).ok_or(ExtractionError::BufferTooSmall)?;
-        let slice = unsafe { buffer.align_to::<I>().1 };
+    fn read<I: Integer>(&mut self) -> Result<I, DeserializeError> {
+        let buffer = self.buffer.get(self.position..).ok_or(DeserializeError::BufferTooSmall)?;
+        let (pad, slice, _) = unsafe { buffer.align_to::<I>() };
         match slice {
-            [] => Err(ExtractionError::BufferTooSmall),
+            [] => Err(DeserializeError::BufferTooSmall),
             [value, ..] => {
-                self.position += core::mem::size_of::<I>();
+                self.position += pad.len() + core::mem::size_of::<I>();
                 Ok(*value)
             }
         }
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum ExtractionError {
-    MalformedOffset,
-    BufferTooSmall,
-    MismatchedId { wanted: u64, found: u64 },
-    InvalidUtf8,
-}
-
 pub trait Primitive<'a>: sealed::Sealed + PrimitiveSerializer<'a> + Sized {
     const ID: u64;
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError>;
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError>;
     fn layout() -> Layout;
 }
 
 impl<'a> Primitive<'a> for () {
     const ID: u64 = 0xadc4eb49d6e3a43c;
 
-    fn extract(_: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(_: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         Ok(())
     }
 
@@ -88,7 +76,7 @@ impl<'a, F: Fields<'a>> Struct<'a, F> {
     pub const STRUCT_BASE_ID: u64 = 0x8877eea67b715863;
 
     #[inline]
-    pub fn field(&self) -> Result<F::Head, ExtractionError> {
+    pub fn field(&self) -> Result<F::Head, DeserializeError> {
         <F::Head as Primitive>::extract(&mut self.buffer.clone())
     }
 
@@ -100,7 +88,7 @@ impl<'a, F: Fields<'a>> Struct<'a, F> {
     }
 
     #[inline]
-    pub fn advance(self) -> Result<(F::Head, Struct<'a, <F as Fields<'a>>::Next>), ExtractionError> {
+    pub fn advance(self) -> Result<(F::Head, Struct<'a, <F as Fields<'a>>::Next>), DeserializeError> {
         Ok((self.field()?, self.next()))
     }
 }
@@ -109,14 +97,14 @@ impl<'a, F: Fields<'a>> sealed::Sealed for Struct<'a, F> {}
 impl<'a, F: Fields<'a>> Primitive<'a> for Struct<'a, F> {
     const ID: u64 = FxHasher::new().hash(Self::STRUCT_BASE_ID).hash(<<F as Fields>::Head as Primitive>::ID).finish();
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         let [id, position] = buffer.read::<[u64; 2]>()?;
-        let position = usize::try_from(position).map_err(|_| ExtractionError::MalformedOffset)?;
+        let position = usize::try_from(position).map_err(|_| DeserializeError::MalformedOffset)?;
 
         if id != Self::ID {
-            return Err(ExtractionError::MismatchedId { wanted: Self::ID, found: id });
+            return Err(DeserializeError::MismatchedId { wanted: Self::ID, found: id });
         } else if buffer.buffer.get(position..position + F::layout().size()).is_none() {
-            return Err(ExtractionError::MalformedOffset);
+            return Err(DeserializeError::MalformedOffset);
         }
 
         Ok(Struct { buffer: AlignedReadBuffer { buffer: buffer.buffer, position }, fields: core::marker::PhantomData })
@@ -131,15 +119,15 @@ impl sealed::Sealed for &'_ str {}
 impl<'a> Primitive<'a> for &'a str {
     const ID: u64 = 0x94a845be7716094d;
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         let [position, length] = buffer.read::<[usize; 2]>()?;
-        let buffer = buffer.buffer.get(position..position + length).ok_or(ExtractionError::MalformedOffset)?;
+        let buffer = buffer.buffer.get(position..position + length).ok_or(DeserializeError::MalformedOffset)?;
 
         if position == 0 {
             return Ok("");
         }
 
-        core::str::from_utf8(buffer).map_err(|_| ExtractionError::InvalidUtf8)
+        core::str::from_utf8(buffer).map_err(|_| DeserializeError::InvalidUtf8)
     }
 
     fn layout() -> Layout {
@@ -156,7 +144,7 @@ impl<'a, P: Primitive<'a>, const LENGTH: usize> Array<'a, P, LENGTH> {
     pub const ARRAY_BASE_ID: u64 = 0xf13a444fbc5162d0;
 
     #[inline]
-    pub fn field(&self) -> Result<P, ExtractionError> {
+    pub fn field(&self) -> Result<P, DeserializeError> {
         <P as Primitive>::extract(&mut self.buffer.clone())
     }
 
@@ -168,13 +156,13 @@ impl<'a, P: Primitive<'a>, const LENGTH: usize> Array<'a, P, LENGTH> {
     }
 
     #[inline]
-    pub fn pop_front(self) -> Result<(P, Array<'a, P, { LENGTH - 1 }>), ExtractionError> {
+    pub fn pop_front(self) -> Result<(P, Array<'a, P, { LENGTH - 1 }>), DeserializeError> {
         Ok((self.field()?, self.skip::<1>()))
     }
 
-    pub fn nth(&self, n: usize) -> Result<P, ExtractionError> {
+    pub fn nth(&self, n: usize) -> Result<P, DeserializeError> {
         if n >= LENGTH {
-            return Err(ExtractionError::MalformedOffset);
+            return Err(DeserializeError::MalformedOffset);
         }
 
         let mut buffer = self.buffer.clone();
@@ -182,7 +170,7 @@ impl<'a, P: Primitive<'a>, const LENGTH: usize> Array<'a, P, LENGTH> {
         <P as Primitive>::extract(&mut buffer)
     }
 
-    pub fn map<U>(&self, f: impl Fn(P) -> Result<U, ExtractionError>) -> Result<[U; LENGTH], ExtractionError> {
+    pub fn map<U>(&self, f: impl Fn(P) -> Result<U, DeserializeError>) -> Result<[U; LENGTH], DeserializeError> {
         let mut i = 0;
         [(); LENGTH]
             .map(|_| {
@@ -196,16 +184,91 @@ impl<'a, P: Primitive<'a>, const LENGTH: usize> Array<'a, P, LENGTH> {
 
 impl<'a, const LENGTH: usize, P: Primitive<'a>> sealed::Sealed for Array<'a, P, LENGTH> {}
 impl<'a, const LENGTH: usize, P: Primitive<'a>> Primitive<'a> for Array<'a, P, LENGTH> {
-    const ID: u64 = FxHasher::new().hash(0xf13a444fbc5162d0).hash(P::ID).hash(LENGTH as u64).finish();
+    const ID: u64 = FxHasher::new().hash(Self::ARRAY_BASE_ID).hash(P::ID).hash(LENGTH as u64).finish();
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         let [position, length] = buffer.read::<[usize; 2]>()?;
 
-        if buffer.buffer.get(position..position + (P::layout().size() * length)).is_none() {
-            return Err(ExtractionError::MalformedOffset);
+        if buffer
+            .buffer
+            .get(
+                position
+                    ..position
+                        + (P::layout()
+                            .repeat(length)
+                            .map_err(|_| DeserializeError::BufferTooSmall)?
+                            .0
+                            .pad_to_align()
+                            .size()),
+            )
+            .is_none()
+        {
+            return Err(DeserializeError::MalformedOffset);
         }
 
         Ok(Array { buffer: AlignedReadBuffer { buffer: buffer.buffer, position }, fields: core::marker::PhantomData })
+    }
+
+    fn layout() -> Layout {
+        Layout::new::<[usize; 2]>()
+    }
+}
+
+pub struct List<'a, P: Primitive<'a>> {
+    fields: core::marker::PhantomData<fn() -> P>,
+    length: usize,
+    buffer: AlignedReadBuffer<'a>,
+}
+
+impl<'a, P: Primitive<'a> + 'a> List<'a, P> {
+    pub fn into_iter(mut self) -> impl Iterator<Item = Result<P, DeserializeError>> + 'a {
+        core::iter::from_fn(move || match self.pop_front().transpose()? {
+            Ok(next) => Some(Ok(next)),
+            Err(e) => Some(Err(e)),
+        })
+    }
+
+    pub fn pop_front(&mut self) -> Result<Option<P>, DeserializeError> {
+        if self.length == 0 {
+            return Ok(None);
+        }
+
+        let p = P::extract(&mut self.buffer.clone())?;
+        self.buffer.position += <P as Primitive>::layout().size();
+        self.length -= 1;
+        Ok(Some(p))
+    }
+}
+
+impl<'a, P: Primitive<'a>> sealed::Sealed for List<'a, P> {}
+impl<'a, P: Primitive<'a>> Primitive<'a> for List<'a, P> {
+    const ID: u64 = FxHasher::new().hash(0xf3685126faa78352).hash(P::ID).finish();
+
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
+        let [position, length] = buffer.read::<[usize; 2]>()?;
+
+        if buffer
+            .buffer
+            .get(
+                position
+                    ..position
+                        + (P::layout()
+                            .repeat(length)
+                            .map_err(|_| DeserializeError::BufferTooSmall)?
+                            .0
+                            .pad_to_align()
+                            .size()),
+            )
+            .is_none()
+        {
+            return Err(DeserializeError::MalformedOffset);
+        }
+
+        Ok(List {
+            buffer: AlignedReadBuffer { buffer: buffer.buffer, position },
+            length,
+            fields: core::marker::PhantomData,
+        })
     }
 
     fn layout() -> Layout {
@@ -217,7 +280,7 @@ impl sealed::Sealed for u8 {}
 impl<'a> Primitive<'a> for u8 {
     const ID: u64 = 0xd4d1d74109db7e0;
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         buffer.read::<Self>()
     }
 
@@ -230,7 +293,7 @@ impl sealed::Sealed for i8 {}
 impl<'a> Primitive<'a> for i8 {
     const ID: u64 = 0x85316d595ee12d8e;
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         buffer.read::<Self>()
     }
 
@@ -243,7 +306,7 @@ impl sealed::Sealed for u16 {}
 impl<'a> Primitive<'a> for u16 {
     const ID: u64 = 0x182ca144e057ded8;
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         buffer.read::<Self>()
     }
 
@@ -256,7 +319,7 @@ impl sealed::Sealed for i16 {}
 impl<'a> Primitive<'a> for i16 {
     const ID: u64 = 0x8339ca9fef21af4;
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         buffer.read::<Self>()
     }
 
@@ -269,7 +332,7 @@ impl sealed::Sealed for u32 {}
 impl<'a> Primitive<'a> for u32 {
     const ID: u64 = 0xb330c6b1bc925fe3;
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         buffer.read::<Self>()
     }
 
@@ -282,7 +345,7 @@ impl sealed::Sealed for i32 {}
 impl<'a> Primitive<'a> for i32 {
     const ID: u64 = 0xa7618d5014e22dcd;
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         buffer.read::<Self>()
     }
 
@@ -295,7 +358,7 @@ impl sealed::Sealed for u64 {}
 impl<'a> Primitive<'a> for u64 {
     const ID: u64 = 0x46f3003d096708b8;
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         buffer.read::<Self>()
     }
 
@@ -308,7 +371,7 @@ impl sealed::Sealed for i64 {}
 impl<'a> Primitive<'a> for i64 {
     const ID: u64 = 0xf892cc40250d39f7;
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         buffer.read::<Self>()
     }
 
@@ -321,7 +384,7 @@ impl sealed::Sealed for usize {}
 impl<'a> Primitive<'a> for usize {
     const ID: u64 = 0x191f7db76a9b101d;
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         buffer.read::<Self>()
     }
 
@@ -334,7 +397,7 @@ impl sealed::Sealed for isize {}
 impl<'a> Primitive<'a> for isize {
     const ID: u64 = 0xe14dbb5b71ba5adc;
 
-    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, ExtractionError> {
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
         buffer.read::<Self>()
     }
 

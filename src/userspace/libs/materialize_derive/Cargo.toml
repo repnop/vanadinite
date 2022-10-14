@@ -9,5 +9,6 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
-syn = "1"
+proc-macro2 = "1"
+syn = { version = "1", default-features = false, features = ["derive", "parsing", "printing", "proc-macro"] }
 quote = "1"

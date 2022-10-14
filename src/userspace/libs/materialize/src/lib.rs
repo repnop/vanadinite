@@ -24,38 +24,21 @@ extern crate alloc;
 extern crate std;
 
 pub mod buffer;
-mod deserialize;
+pub mod deserialize;
 mod hash;
 pub mod primitives;
-mod serialize;
+pub mod serialize;
 pub mod writer;
 
+pub use deserialize::{Deserialize, DeserializeError, Deserializer};
+pub use materialize_derive::*;
 use primitives::Primitive;
+pub use serialize::{Serialize, SerializeError, Serializer};
 
 const MINIMUM_ALIGNMENT: usize = core::mem::align_of::<u64>();
 
 mod sealed {
     pub trait Sealed {}
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Underaligned;
-
-pub struct Message<'a> {
-    buffer: &'a [u8],
-}
-
-impl<'a> Message<'a> {
-    pub fn new(buffer: &'a [u8]) -> Result<Self, Underaligned> {
-        match buffer.as_ptr().addr() % MINIMUM_ALIGNMENT {
-            0 => Ok(Self { buffer }),
-            _ => Err(Underaligned),
-        }
-    }
-
-    pub fn read<P: Primitive<'a> + 'a>(&self) -> Result<P, ()> {
-        todo!()
-    }
 }
 
 pub trait Serializable {
@@ -112,6 +95,14 @@ impl Serializable for str {
 
 impl Serializable for &'_ str {
     type Primitive<'a> = &'a str;
+}
+
+impl Serializable for alloc::string::String {
+    type Primitive<'a> = &'a str;
+}
+
+impl<T: Serializable> Serializable for alloc::vec::Vec<T> {
+    type Primitive<'a> = primitives::List<'a, T::Primitive<'a>>;
 }
 
 impl<F: for<'a> primitives::Fields<'a>> Serializable for primitives::Struct<'_, F> {

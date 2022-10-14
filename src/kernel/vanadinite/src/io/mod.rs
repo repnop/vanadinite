@@ -13,7 +13,6 @@ pub mod terminal;
 use alloc::{collections::BTreeMap, string::String};
 pub use console::*;
 use core::fmt::Write;
-use crossbeam_queue::ArrayQueue;
 use librust::task::Tid;
 
 pub static CLAIMED_DEVICES: sync::SpinRwLock<BTreeMap<String, Tid>> = sync::SpinRwLock::new(BTreeMap::new());

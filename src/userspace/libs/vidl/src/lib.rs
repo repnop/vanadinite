@@ -13,3 +13,6 @@ macro_rules! vidl_include {
 }
 
 pub mod core;
+pub mod materialize {
+    pub use materialize::*;
+}

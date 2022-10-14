@@ -9,28 +9,22 @@ mod drivers;
 
 use librust::capabilities::{Capability, CapabilityPtr};
 use std::ipc::IpcChannel;
+use vidl::materialize::{Deserialize, Serializable, Serialize};
 
-json::derive! {
-    #[derive(Debug, Clone)]
-    struct Device {
-        name: String,
-        compatible: Vec<String>,
-        interrupts: Vec<usize>,
-    }
+#[derive(Debug, Clone, Serializable, Serialize, Deserialize)]
+#[materialize(reexport_path = "vidl::materialize")]
+struct Device {
+    name: String,
+    compatible: Vec<String>,
+    interrupts: Vec<usize>,
 }
 
-json::derive! {
-    Serialize,
-    struct VirtIoDeviceRequest {
-        ty: u32,
-    }
+struct VirtIoDeviceRequest {
+    ty: u32,
 }
 
-json::derive! {
-    Deserialize,
-    struct VirtIoDeviceResponse {
-        devices: Vec<Device>,
-    }
+struct VirtIoDeviceResponse {
+    devices: Vec<Device>,
 }
 
 struct BlockDevice {
@@ -51,4 +45,15 @@ fn main() {
     // // println!("[filesystem] Sent device request");
     // let (message, capabilities) = virtiomgr.read_with_all_caps().unwrap();
     // let response: VirtIoDeviceResponse = json::deserialize(message.as_bytes()).unwrap();
+
+    let mut serializer = vidl::materialize::Serializer::new();
+    let my_device = Device {
+        name: String::from("virtio_mmio@1000000"),
+        compatible: vec![String::from("virtio")],
+        interrupts: vec![16, 20],
+    };
+
+    serializer.serialize(&my_device).unwrap();
+    let buffer = serializer.into_buffer();
+    println!("{:?}", vidl::materialize::Deserializer::new(&buffer).deserialize::<Device>());
 }
