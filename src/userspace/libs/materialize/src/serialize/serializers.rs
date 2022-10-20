@@ -7,7 +7,7 @@
 
 use super::{ReservationToken, Serialize, SerializeError, Serializer};
 use crate::{
-    primitives::{Array, Fields, List, Primitive, Struct},
+    primitives::{Array, Enum, Fields, List, Primitive, Struct},
     sealed,
 };
 
@@ -116,6 +116,37 @@ impl<'a, P: Primitive<'a>> PrimitiveSerializer<'a> for List<'a, P> {
     type Serializer = ListSerializer<'a>;
     fn construct(serializer: &'a mut Serializer, token: ReservationToken) -> Result<Self::Serializer, SerializeError> {
         Ok(ListSerializer { token, serializer })
+    }
+}
+
+pub struct EnumSerializer<'a, DISCRIMINANT: Primitive<'a>> {
+    token: ReservationToken,
+    serializer: &'a mut Serializer,
+    discriminant: core::marker::PhantomData<fn() -> DISCRIMINANT>,
+}
+
+impl<'a, DISCRIMINANT: Primitive<'a>> EnumSerializer<'a, DISCRIMINANT> {
+    pub fn serialize_variant<T: Serialize<Primitive<'a> = DISCRIMINANT>, U: Serialize>(
+        self,
+        discriminant: &T,
+        value: &U,
+    ) -> Result<(), SerializeError> {
+        let Self { mut token, serializer, .. } = self;
+        let associated_data_token = serializer.reserve_space(<U::Primitive<'a> as Primitive<'a>>::layout())?;
+        *serializer.integer(&mut token)? = <Enum<'a, DISCRIMINANT>>::ID;
+        *serializer.integer(&mut token)? = <U::Primitive<'a> as Primitive<'a>>::ID;
+        *serializer.integer(&mut token)? = associated_data_token.position();
+        serializer.serialize_into(token, discriminant)?;
+        serializer.serialize_into(associated_data_token, value)?;
+
+        Ok(())
+    }
+}
+
+impl<'a, DISCRIMINANT: Primitive<'a>> PrimitiveSerializer<'a> for Enum<'a, DISCRIMINANT> {
+    type Serializer = EnumSerializer<'a, DISCRIMINANT>;
+    fn construct(serializer: &'a mut Serializer, token: ReservationToken) -> Result<Self::Serializer, SerializeError> {
+        Ok(EnumSerializer { token, serializer, discriminant: core::marker::PhantomData })
     }
 }
 

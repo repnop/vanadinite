@@ -31,7 +31,6 @@ macro_rules! fields {
         fields!(@gen $($t),*);
     };
 
-
     (@head $head:ident) => {
         $head
     };

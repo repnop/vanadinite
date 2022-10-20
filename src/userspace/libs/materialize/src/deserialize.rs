@@ -16,6 +16,7 @@ pub enum DeserializeError {
     BufferTooSmall,
     MismatchedId { wanted: u64, found: u64 },
     InvalidUtf8,
+    UnknownDiscriminantValue,
 }
 
 pub struct Deserializer<'a> {
@@ -143,3 +144,37 @@ impl<'de, T: Deserialize<'de> + 'de> Deserialize<'de> for alloc::vec::Vec<T> {
         })
     }
 }
+
+macro_rules! tuple_deserialize {
+    ($($t:ident),+) => {
+        tuple_deserialize!(@gen $($t),+);
+    };
+
+    (@gen $($t:ident),+) => {
+        impl<'de, $($t: Deserialize<'de> + 'de,)+> Deserialize<'de> for ($($t,)+) {
+            #[inline]
+            #[allow(non_snake_case)]
+            fn deserialize(_primitive: <Self as Serializable>::Primitive<'de>) -> Result<Self, DeserializeError> {
+                $(let ($t, _primitive) = _primitive.advance().and_then(|(p, s)| Ok((<$t as Deserialize<'de>>::deserialize(p)?, s)))?;)+
+                Ok(($($t,)+))
+            }
+        }
+
+        tuple_deserialize!(@skip1 $($t),+);
+    };
+
+    (@gen) => {};
+
+    (@skip1 $head:ident) => {};
+    (@skip1 $head:ident, $($t:ident),*) => {
+        tuple_deserialize!(@gen $($t),*);
+    };
+
+    (@head $head:ident) => { $head };
+    (@head $head:ident, $($t:ident),*) => { $head };
+
+    (@tail $head:ident) => {()};
+    (@tail $head:ident, $($t:ident),*) => { ($($t,)*) };
+}
+
+tuple_deserialize!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);

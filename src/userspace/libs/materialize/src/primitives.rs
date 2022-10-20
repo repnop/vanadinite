@@ -7,7 +7,9 @@
 
 mod fields;
 
-use crate::{deserialize::DeserializeError, hash::FxHasher, sealed, serialize::serializers::PrimitiveSerializer};
+use crate::{
+    deserialize::DeserializeError, hash::FxHasher, sealed, serialize::serializers::PrimitiveSerializer, Deserialize,
+};
 use core::{alloc::Layout, convert::TryFrom};
 
 pub(crate) unsafe trait Integer: Sized + Copy {}
@@ -273,6 +275,59 @@ impl<'a, P: Primitive<'a>> Primitive<'a> for List<'a, P> {
 
     fn layout() -> Layout {
         Layout::new::<[usize; 2]>()
+    }
+}
+
+pub struct Enum<'a, DISCRIMINANT: Primitive<'a>> {
+    associated_data_id: u64,
+    associated_data_position: usize,
+    buffer: AlignedReadBuffer<'a>,
+    discriminant: core::marker::PhantomData<fn() -> DISCRIMINANT>,
+}
+
+impl<'a, DISCRIMINANT: Primitive<'a>> Enum<'a, DISCRIMINANT> {
+    pub const ENUM_BASE_ID: u64 = 0xd60d20b6f2424b0f;
+
+    pub fn discriminant(&self) -> Result<DISCRIMINANT, DeserializeError> {
+        DISCRIMINANT::extract(&mut self.buffer.clone())
+    }
+
+    pub fn associated_data<P: Primitive<'a>>(self) -> Result<P, DeserializeError> {
+        if P::ID != self.associated_data_id {
+            return Err(DeserializeError::MismatchedId { wanted: self.associated_data_id, found: P::ID });
+        }
+
+        P::extract(&mut AlignedReadBuffer { buffer: self.buffer.buffer, position: self.associated_data_position })
+    }
+}
+
+impl<'a, DISCRIMINANT: Primitive<'a>> sealed::Sealed for Enum<'a, DISCRIMINANT> {}
+impl<'a, DISCRIMINANT: Primitive<'a>> Primitive<'a> for Enum<'a, DISCRIMINANT> {
+    const ID: u64 = FxHasher::new().hash(Self::ENUM_BASE_ID).hash(DISCRIMINANT::ID).finish();
+
+    fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
+        let [id, associated_data_id, associated_data_position] = buffer.read::<[u64; 3]>()?;
+        let associated_data_position =
+            usize::try_from(associated_data_position).map_err(|_| DeserializeError::MalformedOffset)?;
+
+        if id != Self::ID {
+            return Err(DeserializeError::MismatchedId { wanted: Self::ID, found: id });
+        }
+
+        let our_buffer = buffer.clone();
+        // FIXME: need to add padding size here? don't think so but
+        buffer.position += DISCRIMINANT::layout().size();
+
+        Ok(Self {
+            associated_data_position,
+            associated_data_id,
+            buffer: our_buffer,
+            discriminant: core::marker::PhantomData,
+        })
+    }
+
+    fn layout() -> Layout {
+        Layout::new::<[u64; 3]>().extend(DISCRIMINANT::layout()).unwrap().0.pad_to_align()
     }
 }
 

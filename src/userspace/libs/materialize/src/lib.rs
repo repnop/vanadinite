@@ -112,3 +112,36 @@ impl<F: for<'a> primitives::Fields<'a>> Serializable for primitives::Struct<'_, 
 impl<const LENGTH: usize, S: Serializable> Serializable for [S; LENGTH] {
     type Primitive<'a> = primitives::Array<'a, S::Primitive<'a>, LENGTH>;
 }
+
+impl<T: Serializable> Serializable for &'_ T {
+    type Primitive<'a> = <T as Serializable>::Primitive<'a>;
+}
+
+macro_rules! tuple_serializable {
+    ($($t:ident),+) => {
+        tuple_serializable!(@gen $($t),+);
+    };
+
+    (@gen $($t:ident),+) => {
+        impl<$($t: Serializable,)+> Serializable for ($($t,)+) {
+            type Primitive<'a> = primitives::Struct<'a, ($(<$t as Serializable>::Primitive<'a>,)+)>;
+        }
+
+        tuple_serializable!(@skip1 $($t),+);
+    };
+
+    (@gen) => {};
+
+    (@skip1 $head:ident) => {};
+    (@skip1 $head:ident, $($t:ident),*) => {
+        tuple_serializable!(@gen $($t),*);
+    };
+
+    (@head $head:ident) => { $head };
+    (@head $head:ident, $($t:ident),*) => { $head };
+
+    (@tail $head:ident) => {()};
+    (@tail $head:ident, $($t:ident),*) => { ($($t,)*) };
+}
+
+tuple_serializable!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
