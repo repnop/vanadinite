@@ -12,7 +12,7 @@ use alloc::{
     string::{String, ToString},
 };
 use comb::Parser;
-use parser::{AstNode, Method, Service, Type, Use};
+use parser::{AstNode, Enum, Method, Service, Struct, Type, TypeDefinition, Use};
 
 extern crate alloc;
 #[cfg(test)]
@@ -75,6 +75,7 @@ impl Compiler {
             match node {
                 AstNode::Service(service) => self.lower_service(&mut compiled, &service)?,
                 AstNode::Use(_) => unreachable!(),
+                AstNode::TypeDefinition(typedef) => self.lower_typedef(&mut compiled, &typedef)?,
                 _ => todo!(),
             }
         }
@@ -83,24 +84,121 @@ impl Compiler {
     }
 
     fn lower_service(&self, compiled: &mut CompiledVidl, service: &Service) -> Result<(), CompileError> {
+        for (i, method) in service.methods.iter().enumerate() {
+            compiled.write_fmt(format_args!(
+                r"#[allow(non_upper_case_globals)]
+const {}_{}_ID: usize = {};
+",
+                service.name, method.name, i
+            ));
+        }
         self.lower_service_server(compiled, service)?;
         self.lower_service_client(compiled, service)
     }
 
     fn lower_service_server(&self, compiled: &mut CompiledVidl, service: &Service) -> Result<(), CompileError> {
-        compiled.write_fmt(format_args!("trait {} {{", service.name));
+        compiled.write_fmt(format_args!(
+            "pub trait {}Provider {{
+    type Error;",
+            service.name
+        ));
         for method in &service.methods {
             self.lower_method_server(compiled, method)?;
         }
         compiled.write_str("\n}\n\n");
+        compiled.write_fmt(format_args!(r#"pub struct {0}<T: {0}Provider>(T);
+
+impl<T: {0}Provider> {0}<T> {{
+    pub fn new(provider: T) -> Self {{ Self(provider) }}
+    pub fn serve(&mut self) {{
+        loop {{
+            let vidl::internal::KernelMessage::NewChannelMessage(cptr) = vidl::internal::read_kernel_message() else {{ continue }};
+            let channel = vidl::internal::IpcChannel::new(cptr);
+            let Ok((msg, mut caps)) = channel.read_with_all_caps(vidl::internal::ChannelReadFlags::NONBLOCKING) else {{ continue }};
+            if caps.is_empty() {{
+                // Need at least one cap for the RPC message
+                continue;
+            }}
+
+            // If its not a memory cap we got a problem
+            let vidl::CapabilityWithDescription {{
+                capability,
+                description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions: vidl::internal::MemoryPermissions::READ_WRITE }},
+            }} = caps.remove(0) else {{ continue }};
+            let buffer = unsafe {{ core::slice::from_raw_parts(ptr, len) }};
+
+            match msg.0[0] {{
+"#, service.name));
+
+        for method in &service.methods {
+            compiled.write_fmt(format_args!(
+                r#"                {}_{}_ID => {{
+                let deserializer = vidl::materialize::Deserializer::new(buffer, &caps[..]);
+                let Ok(("#,
+                service.name, method.name
+            ));
+            for arg in &method.arguments {
+                compiled.write_fmt(format_args!("{},", arg.0));
+            }
+            compiled.write_str(")) = deserializer.deserialize::<(");
+            for arg in &method.arguments {
+                self.lower_type(compiled, &arg.1, true)?;
+                compiled.write_str(", ");
+            }
+            compiled.write_str(")>() else { continue };\n");
+            compiled.write_fmt(format_args!("                if let Ok(response) = self.0.{}(", method.name));
+            for (i, arg) in method.arguments.iter().enumerate() {
+                compiled.write_fmt(format_args!("{}", arg.0));
+                if i + 1 != method.arguments.len() {
+                    compiled.write_str(", ");
+                }
+            }
+            compiled.write_fmt(format_args!(
+                r#") {{
+                    let mut serializer = vidl::materialize::Serializer::new();
+                    serializer.serialize(&response).unwrap();
+                    let (buffer, mut caps) = serializer.into_parts();
+                    let mut mem = vidl::MemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
+                    unsafe {{ mem.as_mut()[..buffer.len()].copy_from_slice(&buffer) }};
+                    caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
+                    let _ = channel.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]);
+                }}"#,
+                service.name, method.name
+            ));
+
+            compiled.write_str("            },\n");
+        }
+
+        compiled.write_str(
+            r#"                _ => {},
+            }
+        }
+    }
+}
+        "#,
+        );
 
         Ok(())
     }
 
     fn lower_service_client(&self, compiled: &mut CompiledVidl, service: &Service) -> Result<(), CompileError> {
-        compiled.write_fmt(format_args!("trait {}Client {{", service.name));
+        compiled.write_fmt(format_args!(
+            r"pub struct {0}Client(std::ipc::IpcChannel);
+
+impl {0}Client {{
+
+",
+            service.name
+        ));
+
+        compiled.write_str(
+            r"    pub fn new(cptr: std::ipc::CapabilityPtr) -> Self { Self(std::ipc::IpcChannel::new(cptr)) }
+
+",
+        );
+
         for method in &service.methods {
-            self.lower_method_client(compiled, method)?;
+            self.lower_method_client(compiled, method, service)?;
         }
         compiled.write_str("\n}\n\n");
 
@@ -108,8 +206,39 @@ impl Compiler {
     }
 
     fn lower_method_server(&self, compiled: &mut CompiledVidl, method: &Method) -> Result<(), CompileError> {
-        compiled.write_fmt(format_args!("\n    fn {}(", method.name));
+        compiled.write_fmt(format_args!("\n    fn {}(&mut self, ", method.name));
 
+        for (i, arg) in method.arguments.iter().enumerate() {
+            compiled.write_fmt(format_args!("{}: ", arg.0));
+            self.lower_type(compiled, &arg.1, true)?;
+            if i + 1 != method.arguments.len() {
+                compiled.write_str(", ");
+            }
+        }
+
+        compiled.write_str(")");
+
+        match &method.return_type {
+            Some(ret_type) => {
+                compiled.write_str(" -> Result<");
+                self.lower_type(compiled, ret_type, true)?;
+                compiled.write_str(", Self::Error>")
+            }
+            None => compiled.write_str(" -> Result<(), Self::Error>"),
+        }
+
+        compiled.write_str(";");
+
+        Ok(())
+    }
+
+    fn lower_method_client(
+        &self,
+        compiled: &mut CompiledVidl,
+        method: &Method,
+        service: &Service,
+    ) -> Result<(), CompileError> {
+        compiled.write_fmt(format_args!("    pub fn {}(&self, ", method.name));
         for (i, arg) in method.arguments.iter().enumerate() {
             compiled.write_fmt(format_args!("{}: ", arg.0));
             self.lower_type(compiled, &arg.1, false)?;
@@ -121,17 +250,38 @@ impl Compiler {
         compiled.write_str(")");
 
         if let Some(ret_type) = &method.return_type {
-            compiled.write_str(" -> ");
+            compiled.write_str(" ->");
             self.lower_type(compiled, ret_type, true)?;
         }
 
-        compiled.write_str(";");
+        compiled.write_str(
+            r" {
+        let mut serializer = vidl::materialize::Serializer::new();
+        serializer.serialize(&(",
+        );
 
-        Ok(())
-    }
+        for arg in &method.arguments {
+            compiled.write_fmt(format_args!("&{},", arg.0));
+        }
 
-    fn lower_method_client(&self, compiled: &mut CompiledVidl, method: &Method) -> Result<(), CompileError> {
-        // compiled.write_fmt(format_args!("fn "));
+        compiled.write_fmt(format_args!(r#")).unwrap();
+        let (buffer, mut caps) = serializer.into_parts();
+        let mut mem = vidl::MemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
+        unsafe {{ mem.as_mut()[..buffer.len()].copy_from_slice(&buffer) }};
+        caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
+        self.0.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]).unwrap();
+        let (_msg, mut caps) = self.0.read_with_all_caps(vidl::ChannelReadFlags::NONE).unwrap();
+
+        match caps.remove(0) {{
+            vidl::CapabilityWithDescription {{ capability, description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions }} }} => {{
+                let deserializer = vidl::materialize::Deserializer::new(unsafe {{ core::slice::from_raw_parts(ptr, len) }}, &caps);
+                deserializer.deserialize().expect("deserialize success")
+            }}
+            _ => panic!("First cap in response not memory!"),
+        }}  
+    }}
+    
+"#, service.name, method.name));
 
         Ok(())
     }
@@ -184,8 +334,99 @@ impl Compiler {
                     compiled.write_str("]");
                 }
             },
+            Type::Str => match in_return_position {
+                true => compiled.write_str("vidl::core::String"),
+                false => compiled.write_str("&vidl::core::Str"),
+            },
         }
 
+        Ok(())
+    }
+
+    fn lower_typedef(&self, compiled: &mut CompiledVidl, typedef: &TypeDefinition) -> Result<(), CompileError> {
+        match typedef {
+            TypeDefinition::Struct(strukt) => self.lower_struct(compiled, strukt),
+            TypeDefinition::Enum(enoom) => self.lower_enum(compiled, enoom),
+        }
+    }
+
+    fn lower_struct(&self, compiled: &mut CompiledVidl, strukt: &Struct) -> Result<(), CompileError> {
+        compiled.write_fmt(format_args!(
+            r#"#[derive(Debug, vidl::materialize::Deserialize, vidl::materialize::Serializable, vidl::materialize::Serialize)]
+#[materialize(reexport_path = "vidl::materialize")]
+pub struct {}"#,
+            strukt.name
+        ));
+
+        if let Some(generics) = &strukt.generics {
+            compiled.write_str("<");
+            generics.iter().enumerate().for_each(|(i, ty)| {
+                compiled.write_str(ty);
+                if i + 1 != generics.len() {
+                    compiled.write_str(", ");
+                }
+            });
+            compiled.write_str(">");
+        }
+
+        compiled.write_str(" {\n");
+        for field in &strukt.fields {
+            compiled.write_fmt(format_args!("    pub {}: ", field.name));
+            self.lower_type(compiled, &field.ty, true)?;
+            compiled.write_str(",\n");
+        }
+        compiled.write_str("}\n\n");
+        Ok(())
+    }
+
+    fn lower_enum(&self, compiled: &mut CompiledVidl, enoom: &Enum) -> Result<(), CompileError> {
+        compiled.write_fmt(format_args!(
+            r#"#[derive(Debug, vidl::materialize::Deserialize, vidl::materialize::Serializable, vidl::materialize::Serialize)]
+#[materialize(reexport_path = "vidl::materialize")]
+pub enum {}"#,
+            enoom.name
+        ));
+
+        if let Some(generics) = &enoom.generics {
+            compiled.write_str("<");
+            generics.iter().enumerate().for_each(|(i, ty)| {
+                compiled.write_str(ty);
+                if i + 1 != generics.len() {
+                    compiled.write_str(", ");
+                }
+            });
+            compiled.write_str(">");
+        }
+
+        compiled.write_str(" {\n");
+        for variant in &enoom.variants {
+            compiled.write_fmt(format_args!("    {}", variant.name));
+            if let Some(associated_data) = &variant.associated_data {
+                match associated_data {
+                    parser::VariantData::Struct(fields) => {
+                        compiled.write_str("{\n");
+                        for field in fields {
+                            compiled.write_fmt(format_args!("        {}: ", field.name));
+                            self.lower_type(compiled, &field.ty, true)?;
+                            compiled.write_str(",\n");
+                        }
+                        compiled.write_str("    }");
+                    }
+                    parser::VariantData::Tuple(tys) => {
+                        compiled.write_str("(");
+                        for (i, ty) in tys.iter().enumerate() {
+                            self.lower_type(compiled, ty, true)?;
+                            if i + 1 != tys.len() {
+                                compiled.write_str(", ");
+                            }
+                        }
+                        compiled.write_str(")");
+                    }
+                }
+            }
+            compiled.write_str(",\n");
+        }
+        compiled.write_str("}\n\n");
         Ok(())
     }
 }

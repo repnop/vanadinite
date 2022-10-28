@@ -106,13 +106,13 @@ impl Task {
         let sp = memory_manager
             .alloc_guarded_region(RegionDescription {
                 size: PageSize::Kilopage,
-                len: 32,
+                len: 128,
                 contiguous: false,
                 flags: Flags::USER | Flags::READ | Flags::WRITE | Flags::VALID,
                 fill: FillOption::Unitialized,
                 kind: AddressRegionKind::Stack,
             })
-            .add(32.kib());
+            .add(128.kib());
 
         let fdt_ptr = FDT.load(core::sync::atomic::Ordering::Acquire);
         let fdt_loc = {

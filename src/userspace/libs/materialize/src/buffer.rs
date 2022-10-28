@@ -9,20 +9,106 @@ use crate::MINIMUM_ALIGNMENT;
 use alloc::alloc::Global;
 use core::{
     alloc::{Allocator, Layout},
+    ops::{Deref, DerefMut},
     ptr::NonNull,
 };
+use librust::{
+    capabilities::CapabilityPtr,
+    mem::MemoryAllocation,
+    syscalls::mem::{AllocationOptions, MemoryPermissions},
+    units::Bytes,
+};
 
-pub struct AlignedBuffer<'a, MODE: BufferMode> {
-    buffer: MODE::Buffer<'a>,
+pub struct AlignedBuffer<MODE: BufferMode> {
+    buffer: MODE::Buffer,
+}
+
+pub trait Buffer: Deref<Target = [u8]> + DerefMut {
+    type Error;
+    fn resize(&mut self, new_len: usize, value: u8) -> Result<(), Self::Error>;
 }
 
 pub trait BufferMode {
-    type Buffer<'a>;
+    type Buffer;
+}
+
+pub struct SharableMemory;
+
+pub struct MemoryCapabilityBuffer {
+    mem: MemoryAllocation,
+    len: usize,
+}
+
+impl MemoryCapabilityBuffer {
+    const MAX_CAPACITY: usize = isize::MAX as usize;
+
+    pub fn new(starting_capacity: usize) -> Result<Self, librust::error::SyscallError> {
+        let mem = MemoryAllocation::new(
+            Bytes(starting_capacity),
+            AllocationOptions::ZERO,
+            MemoryPermissions::READ | MemoryPermissions::WRITE,
+        )?;
+
+        Ok(Self { mem, len: 0 })
+    }
+
+    pub fn resize(&mut self, new_len: usize, value: u8) -> Result<(), librust::error::SyscallError> {
+        if new_len <= self.len {
+            self.len = new_len;
+            return Ok(());
+        }
+
+        self.realloc(new_len)?;
+        // Safety: we always allocate zeroed memory so the buffer is always fully
+        // initialized
+        unsafe { self.mem.as_mut()[self.len..new_len].fill(value) };
+        self.len = new_len;
+
+        Ok(())
+    }
+
+    fn realloc(&mut self, new_len: usize) -> Result<(), librust::error::SyscallError> {
+        if new_len <= self.capacity() {
+            return Ok(());
+        }
+
+        let capacity = new_len.next_power_of_two().min(Self::MAX_CAPACITY);
+        let mut new_buffer = MemoryAllocation::new(
+            Bytes(capacity),
+            AllocationOptions::ZERO,
+            MemoryPermissions::READ | MemoryPermissions::WRITE,
+        )?;
+
+        unsafe { new_buffer.as_mut()[..self.len].copy_from_slice(&self.mem.as_ref()[..self.len]) };
+        // TODO: free old capability memory when that's a thing
+
+        self.mem = new_buffer;
+
+        Ok(())
+    }
+
+    fn capacity(&self) -> usize {
+        unsafe { self.mem.as_ref().len() }
+    }
+}
+
+impl Deref for MemoryCapabilityBuffer {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &self.mem.as_ref()[..self.len] }
+    }
+}
+
+impl DerefMut for MemoryCapabilityBuffer {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut self.mem.as_mut()[..self.len] }
+    }
 }
 
 pub struct OwnedHeap;
 impl BufferMode for OwnedHeap {
-    type Buffer<'a> = AlignedHeapBuffer;
+    type Buffer = AlignedHeapBuffer;
 }
 
 pub struct AlignedHeapBuffer {
@@ -104,7 +190,15 @@ impl AlignedHeapBuffer {
     }
 }
 
-impl core::ops::Deref for AlignedHeapBuffer {
+impl Buffer for AlignedHeapBuffer {
+    type Error = core::alloc::AllocError;
+
+    fn resize(&mut self, new_len: usize, value: u8) -> Result<(), Self::Error> {
+        self.resize(new_len, value)
+    }
+}
+
+impl Deref for AlignedHeapBuffer {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -115,7 +209,7 @@ impl core::ops::Deref for AlignedHeapBuffer {
     }
 }
 
-impl core::ops::DerefMut for AlignedHeapBuffer {
+impl DerefMut for AlignedHeapBuffer {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self.cap {
             0 => &mut [],

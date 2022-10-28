@@ -54,19 +54,15 @@ json::derive! {
 
 fn main() {
     let devicemgr_cptr = std::env::lookup_capability("devicemgr").unwrap().capability.cptr;
-    let devicemgr = IpcChannel::new(devicemgr_cptr);
-    devicemgr
-        .temp_send_json(ChannelMessage::default(), &WantedCompatible { compatible: vec!["virtio,mmio".into()] }, &[])
-        .unwrap();
+    let devicemgr_client = devicemgr::DevicemgrClient::new(devicemgr_cptr);
 
-    let (devices, _, capabilities): (Devices, _, _) = devicemgr.temp_read_json(ChannelReadFlags::NONE).unwrap();
+    let devices = devicemgr_client.request(&["virtio,mmio"]);
     let _ = librust::syscalls::channel::read_kernel_message();
     let mut virtio_devices = Vec::new();
 
-    for (device, CapabilityWithDescription { capability: Capability { cptr: mmio_cap, .. }, .. }) in
-        devices.devices.into_iter().zip(capabilities.into_iter())
-    {
-        let (info, _) = librust::syscalls::io::query_mmio_cap(mmio_cap, &mut []).unwrap();
+    for device in devices {
+        // println!("{:?}", device);
+        let (info, _) = librust::syscalls::io::query_mmio_cap(device.capability.cptr, &mut []).unwrap();
 
         let header = unsafe { &*(info.address() as *const virtio::VirtIoHeader) };
         let dev_type = header.device_type().unwrap();
@@ -75,7 +71,7 @@ fn main() {
         //     println!("[virtiomgr] We have a VirtIO {:?} device: {:?}", dev_type, device);
         // }
 
-        virtio_devices.push((mmio_cap, info, dev_type, header, device));
+        virtio_devices.push((device.capability.cptr, info, dev_type, header, device));
     }
 
     loop {
@@ -92,7 +88,7 @@ fn main() {
 
         let dev_type = req.ty;
 
-        // println!("[virtiomgr] Got request for device type: {:?}", DeviceType::from_u32(dev_type));
+        println!("[virtiomgr] Got request for device type: {:?}", DeviceType::from_u32(dev_type));
 
         let devices: Vec<_> = virtio_devices.drain_filter(|device| device.2 as u32 == dev_type).collect();
         let caps: Vec<_> = devices
@@ -105,7 +101,16 @@ fn main() {
         channel
             .temp_send_json(
                 ChannelMessage::default(),
-                &VirtIoDeviceResponse { devices: devices.iter().map(|dev| dev.4.clone()).collect() },
+                &VirtIoDeviceResponse {
+                    devices: devices
+                        .iter()
+                        .map(|dev| Device {
+                            name: dev.4.name.clone(),
+                            compatible: dev.4.compatible.clone(),
+                            interrupts: dev.4.interrupts.clone(),
+                        })
+                        .collect(),
+                },
                 &caps,
             )
             .unwrap();

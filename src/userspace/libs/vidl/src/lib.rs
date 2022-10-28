@@ -12,7 +12,24 @@ macro_rules! vidl_include {
     };
 }
 
+#[doc(hidden)]
+pub use librust::{
+    capabilities::{Capability, CapabilityDescription, CapabilityPtr, CapabilityRights, CapabilityWithDescription},
+    mem::MemoryAllocation,
+    syscalls::channel::{ChannelMessage, ChannelReadFlags},
+    units::Bytes,
+};
+
 pub mod core;
 pub mod materialize {
     pub use materialize::*;
+}
+
+#[doc(hidden)]
+pub mod internal {
+    pub use librust::syscalls::{
+        channel::{read_kernel_message, ChannelReadFlags, KernelMessage},
+        mem::MemoryPermissions,
+    };
+    pub use std::ipc::IpcChannel;
 }

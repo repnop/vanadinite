@@ -7,7 +7,7 @@
 
 use super::{ReservationToken, Serialize, SerializeError, Serializer};
 use crate::{
-    primitives::{Array, Enum, Fields, List, Primitive, Struct},
+    primitives::{Array, Capability, Enum, Fields, List, Primitive, Struct},
     sealed,
 };
 
@@ -147,6 +147,28 @@ impl<'a, DISCRIMINANT: Primitive<'a>> PrimitiveSerializer<'a> for Enum<'a, DISCR
     type Serializer = EnumSerializer<'a, DISCRIMINANT>;
     fn construct(serializer: &'a mut Serializer, token: ReservationToken) -> Result<Self::Serializer, SerializeError> {
         Ok(EnumSerializer { token, serializer, discriminant: core::marker::PhantomData })
+    }
+}
+
+pub struct CapabilitySerializer<'a> {
+    token: ReservationToken,
+    serializer: &'a mut Serializer,
+}
+
+impl<'a> CapabilitySerializer<'a> {
+    pub fn serialize_capability(mut self, cap: librust::capabilities::Capability) -> Result<(), SerializeError> {
+        let index = self.serializer.capabilities.len();
+        self.serializer.capabilities.push(cap);
+        *self.serializer.integer(&mut self.token)? = index;
+
+        Ok(())
+    }
+}
+
+impl<'a> PrimitiveSerializer<'a> for Capability {
+    type Serializer = CapabilitySerializer<'a>;
+    fn construct(serializer: &'a mut Serializer, token: ReservationToken) -> Result<Self::Serializer, SerializeError> {
+        Ok(CapabilitySerializer { token, serializer })
     }
 }
 

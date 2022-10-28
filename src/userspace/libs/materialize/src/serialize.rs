@@ -13,6 +13,7 @@ use crate::{
     Serializable,
 };
 use alloc::alloc::Layout;
+use librust::capabilities::Capability;
 use serializers::PrimitiveSerializer;
 
 #[derive(Debug)]
@@ -69,15 +70,20 @@ impl ReservationToken {
 
 pub struct Serializer {
     buffer: AlignedHeapBuffer,
+    capabilities: alloc::vec::Vec<Capability>,
 }
 
 impl Serializer {
     pub fn new() -> Self {
-        Self { buffer: AlignedHeapBuffer::new() }
+        Self { buffer: AlignedHeapBuffer::new(), capabilities: alloc::vec::Vec::new() }
     }
 
     pub fn into_buffer(self) -> AlignedHeapBuffer {
         self.buffer
+    }
+
+    pub fn into_parts(self) -> (AlignedHeapBuffer, alloc::vec::Vec<Capability>) {
+        (self.buffer, self.capabilities)
     }
 
     pub fn serialize<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), SerializeError> {
@@ -250,7 +256,7 @@ impl Serialize for isize {
     }
 }
 
-impl Serialize for str {
+impl Serialize for &'_ str {
     fn serialize<'a>(
         &self,
         serializer: <Self::Primitive<'a> as PrimitiveSerializer<'a>>::Serializer,
@@ -286,7 +292,49 @@ impl<T: Serialize> Serialize for alloc::vec::Vec<T> {
     }
 }
 
-impl<T: Serialize> Serialize for &'_ T {
+impl<T: Serialize> Serialize for [T] {
+    fn serialize<'a>(
+        &self,
+        serializer: <Self::Primitive<'a> as PrimitiveSerializer<'a>>::Serializer,
+    ) -> Result<(), SerializeError> {
+        serializer.serialize_list(self)
+    }
+}
+
+impl<T: Serialize, E: Serialize> Serialize for Result<T, E> {
+    fn serialize<'a>(
+        &self,
+        serializer: <Self::Primitive<'a> as PrimitiveSerializer<'a>>::Serializer,
+    ) -> Result<(), SerializeError> {
+        match self {
+            Ok(t) => serializer.serialize_variant(&0u32, t),
+            Err(e) => serializer.serialize_variant(&1u32, e),
+        }
+    }
+}
+
+impl<T: Serialize> Serialize for Option<T> {
+    fn serialize<'a>(
+        &self,
+        serializer: <Self::Primitive<'a> as PrimitiveSerializer<'a>>::Serializer,
+    ) -> Result<(), SerializeError> {
+        match self {
+            Some(t) => serializer.serialize_variant(&0u32, t),
+            None => serializer.serialize_variant(&1u32, &()),
+        }
+    }
+}
+
+impl Serialize for librust::capabilities::Capability {
+    fn serialize<'a>(
+        &self,
+        serializer: <Self::Primitive<'a> as PrimitiveSerializer<'a>>::Serializer,
+    ) -> Result<(), SerializeError> {
+        serializer.serialize_capability(*self)
+    }
+}
+
+impl<T: Serialize + ?Sized> Serialize for &'_ T {
     fn serialize<'a>(
         &self,
         serializer: <Self::Primitive<'a> as PrimitiveSerializer<'a>>::Serializer,
@@ -306,7 +354,7 @@ macro_rules! tuple_serialize {
                 &self,
                 _serializer: <Self::Primitive<'a> as PrimitiveSerializer<'a>>::Serializer,
             ) -> Result<(), SerializeError> {
-                $(let _serializer = _serializer.serialize_field(&self.${index()})?; ${ignore(t)})+
+                $(let _serializer = _serializer.serialize_field(&&self.${index()})?; ${ignore(t)})+
 
                 Ok(())
             }
@@ -377,7 +425,7 @@ mod test {
 
         let mut serializer = Serializer::new();
         serializer.serialize(&MyCoolStruct).unwrap();
-        let mut deserializer = Deserializer::new(&serializer.buffer[..]);
+        let mut deserializer = Deserializer::new(&serializer.buffer[..], &[]);
         deserializer.deserialize::<MyCoolStruct>().unwrap();
     }
 
@@ -445,7 +493,7 @@ mod test {
         };
 
         serializer.serialize(&strukt).unwrap();
-        let deserializer = Deserializer::new(&serializer.buffer[..]);
+        let deserializer = Deserializer::new(&serializer.buffer[..], &[]);
         assert_eq!(deserializer.deserialize::<ComplexStruct>(), Ok(strukt));
     }
 
@@ -459,7 +507,7 @@ mod test {
         let mut serializer = Serializer::new();
         serializer.serialize(&v).unwrap();
         pretty_print_buffer(&serializer.buffer);
-        let deserializer = Deserializer::new(&serializer.buffer[..]);
+        let deserializer = Deserializer::new(&serializer.buffer[..], &[]);
         assert_eq!(deserializer.deserialize::<std::vec::Vec<Padding>>(), Ok(v));
     }
 
@@ -485,17 +533,17 @@ mod test {
 
         let mut serializer = Serializer::new();
         serializer.serialize(&Fraz::Qux);
-        let deserializer = Deserializer::new(&serializer.buffer[..]);
+        let deserializer = Deserializer::new(&serializer.buffer[..], &[]);
         assert_eq!(deserializer.deserialize::<Fraz>(), Ok(Fraz::Qux));
 
         let mut serializer = Serializer::new();
         serializer.serialize(&Fraz::Baz);
-        let deserializer = Deserializer::new(&serializer.buffer[..]);
+        let deserializer = Deserializer::new(&serializer.buffer[..], &[]);
         assert_eq!(deserializer.deserialize::<Fraz>(), Ok(Fraz::Baz));
 
         let mut serializer = Serializer::new();
         serializer.serialize(&Fraz::Yeet);
-        let deserializer = Deserializer::new(&serializer.buffer[..]);
+        let deserializer = Deserializer::new(&serializer.buffer[..], &[]);
         assert_eq!(deserializer.deserialize::<Fraz>(), Ok(Fraz::Yeet));
 
         #[derive(Debug, PartialEq, Serializable, Deserialize, Serialize)]
@@ -508,18 +556,17 @@ mod test {
 
         let mut serializer = Serializer::new();
         serializer.serialize(&Fraz2::Qux(std::string::String::from("pindakaas")));
-        pretty_print_buffer(&serializer.buffer[..]);
-        let deserializer = Deserializer::new(&serializer.buffer[..]);
+        let deserializer = Deserializer::new(&serializer.buffer[..], &[]);
         assert_eq!(deserializer.deserialize::<Fraz2>(), Ok(Fraz2::Qux(std::string::String::from("pindakaas"))));
 
         let mut serializer = Serializer::new();
         serializer.serialize(&Fraz2::Baz { my_special_int: 0x55AA55AA });
-        let deserializer = Deserializer::new(&serializer.buffer[..]);
+        let deserializer = Deserializer::new(&serializer.buffer[..], &[]);
         assert_eq!(deserializer.deserialize::<Fraz2>(), Ok(Fraz2::Baz { my_special_int: 0x55AA55AA }));
 
         let mut serializer = Serializer::new();
         serializer.serialize(&Fraz2::Yeet(std::vec![(1, -1), (2, -2), (3, -3)]));
-        let deserializer = Deserializer::new(&serializer.buffer[..]);
+        let deserializer = Deserializer::new(&serializer.buffer[..], &[]);
         assert_eq!(deserializer.deserialize::<Fraz2>(), Ok(Fraz2::Yeet(std::vec![(1, -1), (2, -2), (3, -3)])));
     }
 }

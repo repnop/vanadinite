@@ -11,44 +11,19 @@ use std::ipc::ChannelReadFlags;
 
 use librust::{
     capabilities::{CapabilityDescription, CapabilityWithDescription},
-    syscalls::channel::{ChannelMessage, KernelMessage},
+    syscalls::channel::KernelMessage,
 };
 use ns16550::Uart16550;
 
-json::derive! {
-    #[derive(Debug)]
-    struct Device {
-        name: String,
-        compatible: Vec<String>,
-        interrupts: Vec<usize>,
-    }
-}
-
-json::derive! {
-    #[derive(Debug)]
-    struct Devices {
-        devices: Vec<Device>,
-    }
-}
-
-json::derive! {
-    Serialize,
-    struct WantedCompatible {
-        compatible: Vec<String>,
-    }
-}
-
 fn main() {
     let devicemgr = std::env::lookup_capability("devicemgr").unwrap();
-    let devicemgr = std::ipc::IpcChannel::new(devicemgr.capability.cptr);
+    let devicemgr = devicemgr::DevicemgrClient::new(devicemgr.capability.cptr);
 
-    let msg = &WantedCompatible { compatible: vec![String::from("ns16550"), String::from("ns16550a")] };
-    devicemgr.temp_send_json(ChannelMessage::default(), msg, &[]).unwrap();
+    let devices = devicemgr.request(&["ns16550", "ns16550a"]);
 
-    let (_devices, _message, caps) = devicemgr.temp_read_json::<Devices>(ChannelReadFlags::NONE).unwrap();
     let mut interrupt_buffer = [0];
     let (uart_info, _) =
-        librust::syscalls::io::query_mmio_cap(caps[0].capability.cptr, &mut interrupt_buffer[..]).unwrap();
+        librust::syscalls::io::query_mmio_cap(devices[0].capability.cptr, &mut interrupt_buffer[..]).unwrap();
 
     let uart = unsafe { &*(uart_info.address() as *mut _ as *const Uart16550) };
     uart.init();

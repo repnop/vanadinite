@@ -88,12 +88,20 @@ pub struct Enum {
 #[derive(Debug, PartialEq)]
 pub struct Variant {
     pub name: String,
+    pub associated_data: Option<VariantData>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum VariantData {
+    Tuple(Vec<Type>),
+    Struct(Vec<Field>),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Type {
     Path { path: Vec<String>, generics: Option<Vec<Type>> },
     Slice(Box<Type>),
+    Str,
 }
 
 pub fn parser() -> impl Parser<Error = crate::SourceError, Output = AstNode, Input = Token> {
@@ -175,6 +183,7 @@ fn parse_type() -> impl Parser<Error = crate::SourceError, Output = Type, Input 
                 delimited(single(Token::LeftBracket), this.clone(), single(Token::RightBracket))
                     .map(|ty| Type::Slice(Box::new(ty))),
             ),
+            (Token::Keyword(Keyword::String), single(Token::Keyword(Keyword::String)).map(|_| Type::Str)),
             (
                 identifier,
                 single_by(identifier)
@@ -226,13 +235,42 @@ fn parse_enum_definition() -> impl Parser<Error = crate::SourceError, Output = E
         .then(delimited(
             single(Token::LeftBrace),
             parse_ident()
+                .then(maybe(parse_enum_variant_data()))
                 .then_assert(single(Token::Comma))
-                .map(|name| Variant { name })
+                .map(|(name, associated_data)| Variant { name, associated_data })
                 .separated_by(single(Token::Comma))
                 .allow_trailing(),
             single(Token::RightBrace),
         ))
         .map(|((name, generics), variants)| Enum { name, generics, variants })
+}
+
+fn parse_enum_variant_data() -> impl Parser<Error = crate::SourceError, Output = VariantData, Input = Token> {
+    hinted_choice((
+        (
+            Token::LeftBrace,
+            delimited(
+                single(Token::LeftBrace),
+                parse_ident()
+                    .then_assert(single(Token::Colon))
+                    .then(parse_type())
+                    .map(|(name, ty)| Field { name, ty })
+                    .separated_by(single(Token::Comma))
+                    .allow_trailing(),
+                single(Token::RightBrace),
+            )
+            .map(VariantData::Struct),
+        ),
+        (
+            Token::LeftParenthesis,
+            delimited(
+                single(Token::LeftParenthesis),
+                parse_type().separated_by(single(Token::Comma)).allow_trailing(),
+                single(Token::RightParenthesis),
+            )
+            .map(VariantData::Tuple),
+        ),
+    ))
 }
 
 #[cfg(test)]

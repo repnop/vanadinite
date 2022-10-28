@@ -18,7 +18,7 @@ use core::{
 
 pub struct MemoryAllocation {
     pub cptr: CapabilityPtr,
-    pub ptr: NonNull<[u8]>,
+    ptr: NonNull<[u8]>,
 }
 
 impl MemoryAllocation {
@@ -34,7 +34,7 @@ impl MemoryAllocation {
     }
 
     pub fn public_rw(size: Bytes) -> Result<Self, SyscallError> {
-        Self::new(size, AllocationOptions::NONE, MemoryPermissions::READ | MemoryPermissions::WRITE)
+        Self::new(size, AllocationOptions::ZERO, MemoryPermissions::READ | MemoryPermissions::WRITE)
     }
 
     pub fn private_rw(size: Bytes) -> Result<Self, SyscallError> {
@@ -50,6 +50,10 @@ impl MemoryAllocation {
 
     pub unsafe fn as_ref(&self) -> &[u8] {
         self.ptr.as_ref()
+    }
+
+    pub fn into_parts(self) -> (CapabilityPtr, NonNull<[u8]>) {
+        (self.cptr, self.ptr)
     }
 }
 

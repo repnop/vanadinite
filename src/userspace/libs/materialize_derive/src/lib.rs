@@ -64,7 +64,7 @@ fn derive_serializable_struct(input: &DeriveInput, strukt: &DataStruct) -> proc_
     proc_macro::TokenStream::from(quote::quote! {
         impl #crate_path::Serializable for #struct_name {
             type Primitive<'a> = #crate_path::primitives::Struct<'a, (
-                #(#field_primitives),*
+                #(#field_primitives,)*
             )>;
         }
     })
@@ -123,12 +123,12 @@ fn derive_deserialize_struct(input: &DeriveInput, strukt: &DataStruct) -> proc_m
     let field_deserializes = strukt.fields.iter().enumerate().map(|(i, field)| match &field.ident {
         Some(ident) => {
             let ty = &field.ty;
-            quote::quote!(let (#ident, _strukt) = _strukt.advance().and_then(|(f, s)| Ok((<#ty as #crate_path::Deserialize<'de>>::deserialize(f)?, s)))?;)
+            quote::quote!(let (#ident, _strukt) = _strukt.advance().and_then(|(f, s)| Ok((<#ty as #crate_path::Deserialize<'de>>::deserialize(f, _capabilities)?, s)))?;)
         }
         None => {
             let ident = quote::format_ident!("_{}", i);
             let ty = &field.ty;
-            quote::quote!(let (#ident, _strukt) = _strukt.advance().and_then(|(f, s)| Ok((<#ty as #crate_path::Deserialize<'de>>::deserialize(f)?, s)))?;)
+            quote::quote!(let (#ident, _strukt) = _strukt.advance().and_then(|(f, s)| Ok((<#ty as #crate_path::Deserialize<'de>>::deserialize(f, _capabilities)?, s)))?;)
         }
     });
 
@@ -141,13 +141,13 @@ fn derive_deserialize_struct(input: &DeriveInput, strukt: &DataStruct) -> proc_m
     });
 
     let struct_construction = match is_tuple {
-        true => quote::quote!(Self(#(#field_names),*)),
+        true => quote::quote!(Self(#(#field_names,)*)),
         false => quote::quote!(Self { #(#field_names),* }),
     };
 
     proc_macro::TokenStream::from(quote::quote! {
         impl<'de> #crate_path::Deserialize<'de> for #struct_name {
-            fn deserialize(_strukt: <Self as Serializable>::Primitive<'de>) -> Result<Self, #crate_path::DeserializeError> {
+            fn deserialize(_strukt: <Self as #crate_path::Serializable>::Primitive<'de>, _capabilities: &[#crate_path::CapabilityWithDescription]) -> Result<Self, #crate_path::DeserializeError> {
                 #(#field_deserializes)*
                 Ok(#struct_construction)
             }
@@ -336,7 +336,7 @@ fn derive_deserialize_enum(input: &DeriveInput, enoom: &DataEnum) -> proc_macro:
                 Some(fields) => {
                     let (names, types): (Vec<_>, Vec<_>) = fields.into_iter().unzip();
                     block.extend(quote::quote!(let _strukt = _enum.associated_data::<<(#(#types,)*) as Serializable>::Primitive<'de>>()?;));
-                    block.extend(quote::quote!(#(let (#names, _strukt) = _strukt.advance().and_then(|(p, s)| Ok((<#types as Deserialize<'de>>::deserialize(p)?, s)))?;)*));
+                    block.extend(quote::quote!(#(let (#names, _strukt) = _strukt.advance().and_then(|(p, s)| Ok((<#types as Deserialize<'de>>::deserialize(p, _capabilities)?, s)))?;)*));
                     block.extend(match struct_like {
                         true => quote::quote!(Ok(Self::#variant_ident { #(#names),* })),
                         false => quote::quote!(Ok(Self::#variant_ident(#(#names),*))),
@@ -353,7 +353,7 @@ fn derive_deserialize_enum(input: &DeriveInput, enoom: &DataEnum) -> proc_macro:
         impl<'de> #crate_path::Deserialize<'de> for #struct_name {
             #[inline]
             #[allow(non_upper_case_globals)]
-            fn deserialize(_enum: <Self as Serializable>::Primitive<'de>) -> Result<Self, #crate_path::DeserializeError> {
+            fn deserialize(_enum: <Self as #crate_path::Serializable>::Primitive<'de>, _capabilities: &[#crate_path::CapabilityWithDescription]) -> Result<Self, #crate_path::DeserializeError> {
                 #consts
                 match _enum.discriminant()? {
                     #(#variant_arm_deserializes)*

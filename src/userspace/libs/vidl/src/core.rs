@@ -15,8 +15,13 @@ pub type U64 = u64;
 pub type I64 = i64;
 pub type U128 = u128;
 pub type I128 = i128;
+pub type USize = usize;
+pub type ISize = isize;
 
 pub type Result<T, E> = core::result::Result<T, E>;
 pub type Option<T> = core::option::Option<T>;
 pub type String = std::string::String;
+pub type Str = str;
 pub type Vec<T> = std::vec::Vec<T>;
+
+pub type Capability = librust::capabilities::Capability;

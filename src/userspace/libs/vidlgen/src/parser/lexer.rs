@@ -45,6 +45,7 @@ pub enum Keyword {
     Enum,
     Fn,
     Service,
+    String,
     Struct,
     Use,
 }
@@ -78,6 +79,7 @@ fn identifier() -> impl Parser<Error = crate::SourceError, Output = Token, Input
         "struct" => Token::Keyword(Keyword::Struct),
         "service" => Token::Keyword(Keyword::Service),
         "use" => Token::Keyword(Keyword::Use),
+        "String" => Token::Keyword(Keyword::String),
         _ => Token::Identifier(s),
     })
 }

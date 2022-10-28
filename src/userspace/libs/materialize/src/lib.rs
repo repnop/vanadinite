@@ -31,8 +31,8 @@ pub mod serialize;
 pub mod writer;
 
 pub use deserialize::{Deserialize, DeserializeError, Deserializer};
+pub use librust::capabilities::CapabilityWithDescription;
 pub use materialize_derive::*;
-use primitives::Primitive;
 pub use serialize::{Serialize, SerializeError, Serializer};
 
 const MINIMUM_ALIGNMENT: usize = core::mem::align_of::<u64>();
@@ -93,15 +93,15 @@ impl Serializable for str {
     type Primitive<'a> = &'a str;
 }
 
-impl Serializable for &'_ str {
-    type Primitive<'a> = &'a str;
-}
-
 impl Serializable for alloc::string::String {
     type Primitive<'a> = &'a str;
 }
 
 impl<T: Serializable> Serializable for alloc::vec::Vec<T> {
+    type Primitive<'a> = primitives::List<'a, T::Primitive<'a>>;
+}
+
+impl<T: Serializable> Serializable for [T] {
     type Primitive<'a> = primitives::List<'a, T::Primitive<'a>>;
 }
 
@@ -113,8 +113,24 @@ impl<const LENGTH: usize, S: Serializable> Serializable for [S; LENGTH] {
     type Primitive<'a> = primitives::Array<'a, S::Primitive<'a>, LENGTH>;
 }
 
-impl<T: Serializable> Serializable for &'_ T {
+impl<T: Serializable + ?Sized> Serializable for &'_ T {
     type Primitive<'a> = <T as Serializable>::Primitive<'a>;
+}
+
+impl Serializable for librust::capabilities::Capability {
+    type Primitive<'a> = primitives::Capability;
+}
+
+impl Serializable for CapabilityWithDescription {
+    type Primitive<'a> = primitives::Capability;
+}
+
+impl<T: Serializable, E: Serializable> Serializable for Result<T, E> {
+    type Primitive<'a> = primitives::Enum<'a, u32>;
+}
+
+impl<T: Serializable> Serializable for Option<T> {
+    type Primitive<'a> = primitives::Enum<'a, u32>;
 }
 
 macro_rules! tuple_serializable {

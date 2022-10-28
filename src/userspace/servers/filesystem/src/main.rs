@@ -46,14 +46,19 @@ fn main() {
     // let (message, capabilities) = virtiomgr.read_with_all_caps().unwrap();
     // let response: VirtIoDeviceResponse = json::deserialize(message.as_bytes()).unwrap();
 
-    let mut serializer = vidl::materialize::Serializer::new();
-    let my_device = Device {
-        name: String::from("virtio_mmio@1000000"),
-        compatible: vec![String::from("virtio")],
-        interrupts: vec![16, 20],
-    };
+    // let mut serializer = vidl::materialize::Serializer::new();
+    // let my_device = Device {
+    //     name: String::from("virtio_mmio@1000000"),
+    //     compatible: vec![String::from("virtio")],
+    //     interrupts: vec![16, 20],
+    // };
 
-    serializer.serialize(&my_device).unwrap();
-    let buffer = serializer.into_buffer();
-    println!("{:?}", vidl::materialize::Deserializer::new(&buffer).deserialize::<Device>());
+    // serializer.serialize(&my_device).unwrap();
+    // let buffer = serializer.into_buffer();
+    // println!("{:?}", vidl::materialize::Deserializer::new(&buffer, &[]).deserialize::<Device>());
+
+    // let mut serializer = vidl::materialize::Serializer::new();
+    // let _ = serializer.serialize(&(&&["mystr"][..],));
+    // let buffer = serializer.into_buffer();
+    // println!("{:?}", vidl::materialize::Deserializer::new(&buffer, &[]).deserialize::<(Vec<String>,)>());
 }
