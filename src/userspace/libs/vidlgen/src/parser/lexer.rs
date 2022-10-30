@@ -73,7 +73,7 @@ pub fn lexer() -> impl Parser<Error = crate::SourceError, Output = (Token, Span)
 }
 
 fn identifier() -> impl Parser<Error = crate::SourceError, Output = Token, Input = char> {
-    string((ascii_alphabetic(), ascii_alphanumeric() /*.or(single('_'))*/)).map(|s| match &*s {
+    string((ascii_alphabetic(), ascii_alphanumeric().or(single('_')))).map(|s| match &*s {
         "enum" => Token::Keyword(Keyword::Enum),
         "fn" => Token::Keyword(Keyword::Fn),
         "struct" => Token::Keyword(Keyword::Struct),

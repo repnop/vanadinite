@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let init_dumped = init.parent().unwrap().with_file_name("init.bin");
 
     std::process::Command::new("riscv64-unknown-elf-objcopy")
-        .args(&["-O", "binary", init.to_str().unwrap(), init_dumped.to_str().unwrap(), "--set-start", "0xF00D0000"])
+        .args(["-O", "binary", init.to_str().unwrap(), init_dumped.to_str().unwrap(), "--set-start", "0xF00D0000"])
         .spawn()?;
 
     println!("cargo:rustc-env=CARGO_BIN_FILE_INIT={}", init_dumped.display());

@@ -10,13 +10,10 @@ use librust::{
     syscalls::channel::{ChannelReadFlags, PARENT_CHANNEL},
 };
 
+#[naked]
 #[no_mangle]
 #[cfg_attr(feature = "init", link_section = ".rt.entry")]
-unsafe extern "C" fn _start(argc: isize, argv: *const *const u8, a2: usize) -> ! {
-    extern "C" {
-        fn main(_: isize, _: *const *const u8) -> isize;
-    }
-
+unsafe extern "C" fn _start() -> ! {
     #[rustfmt::skip]
     core::arch::asm!("
             .option push
@@ -24,16 +21,24 @@ unsafe extern "C" fn _start(argc: isize, argv: *const *const u8, a2: usize) -> !
             lla gp, __global_pointer$
             .option pop
 
-            lla {bss_start}, __bss_start
-            lla {bss_end}, end
+            lla t0, __bss_start
+            lla t1, end
             1:
-                sb zero, 0({bss_start})
-                addi {bss_start}, {bss_start}, 1
-                blt {bss_start}, {bss_end}, 1b
+                sb zero, 0(t0)
+                addi t0, t0, 1
+                blt t0, t1, 1b
+            j _rust_start
         ",
-        bss_start = out(reg) _,
-        bss_end = out(reg) _,
+        options(noreturn),
     );
+}
+
+#[no_mangle]
+#[cfg_attr(feature = "init", link_section = ".rt.entry")]
+unsafe extern "C" fn _rust_start(argc: isize, argv: *const *const u8, a2: usize) -> ! {
+    extern "C" {
+        fn main(_: isize, _: *const *const u8) -> isize;
+    }
 
     A2 = a2;
 

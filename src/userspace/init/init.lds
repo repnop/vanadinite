@@ -20,6 +20,20 @@ SECTIONS {
         *(.rodata .rodata.*)
     }
 
+    . = ALIGN(8);
+
+    PROVIDE(__bss_start = .);
+    .sbss : {
+        *(.sbss .sbss.*);
+    }
+
+    .bss : {
+        *(.bss .bss.*)
+        . = ALIGN(8);
+        PROVIDE(__bss_end = .);
+        PROVIDE(end = .);
+    }
+
     .data : {
         *(.data .data.*)
     }
@@ -31,16 +45,6 @@ SECTIONS {
         *(.sdata .sdata.*)
     }
 
-    PROVIDE(__bss_start = .);
-    .sbss : {
-        *(.sbss .sbss.*);
-    }
-
-    .bss : {
-        *(.bss .bss.*)
-        PROVIDE(__bss_end = .);
-        PROVIDE(end = .);
-    }
     . = ALIGN(4K);
 
     /DISCARD/ : { *(.eh_frame_hdr .eh_frame) }

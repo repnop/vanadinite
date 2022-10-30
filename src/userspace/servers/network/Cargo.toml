@@ -15,4 +15,5 @@ present = { path = "../../libs/present" }
 std = { path = "../../libs/std" }
 sync = { path = "../../../shared/sync" }
 virtio = { path = "../../libs/virtio" }
+virtiomgr = { path = "../virtiomgr" }
 volatile = { path = "../../../shared/volatile" }

@@ -27,6 +27,7 @@ use present::{
     ipc::{IpcChannel},
     sync::{mpsc::Sender, oneshot::OneshotTx},
 };
+use virtio::DeviceType;
 use std::{collections::BTreeMap, ipc::ChannelReadFlags};
 
 json::derive! {
@@ -76,20 +77,12 @@ pub enum PortType {
 }
 
 async fn real_main() {
-    let virtiomgr = std::ipc::IpcChannel::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr);
-
-    virtiomgr
-        .temp_send_json(ChannelMessage::default(), &VirtIoDeviceRequest { ty: virtio::DeviceType::NetworkCard as u32 }, &[])
-        .unwrap();
-
-    let (response, _, capabilities): (VirtIoDeviceResponse, _, _) = virtiomgr.temp_read_json(ChannelReadFlags::NONE).unwrap();
-
-    if response.devices.is_empty() {
-        return;
-    }
-
-    let (CapabilityWithDescription { capability: Capability { cptr: mmio_cap, .. }, .. }, device) = (capabilities[0], &response.devices[0]);
-    let (info, _) = librust::syscalls::io::query_mmio_cap(mmio_cap, &mut []).unwrap();
+    let mut virtio_devices = virtiomgr::VirtIoMgrClient::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr).request(DeviceType::NetworkCard as u32);
+    let device = match virtio_devices.is_empty() {
+        true => return,
+        false => virtio_devices.remove(0),
+    };
+    let (info, _) = librust::syscalls::io::query_mmio_cap(device.capability.cptr, &mut []).unwrap();
 
     let interrupt_id = device.interrupts[0];
     let mut net_device = drivers::virtio::VirtIoNetDevice::new(unsafe {

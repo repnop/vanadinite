@@ -1,0 +1,6 @@
+use core::U32;
+use devicemgr::Device;
+
+service VirtIoMgr {
+    fn request(virtio_device_type: U32) -> [Device];
+}

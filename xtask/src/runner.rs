@@ -80,9 +80,12 @@ impl Default for RunOptions {
 
 pub fn run(options: RunOptions) -> Result<()> {
     if !options.no_build {
-        build::build(match options.sbi {
-            SbiImpl::OpenSbi => BuildTarget::OpenSBI(options.vanadinite_options.clone()),
-            SbiImpl::Vanadium => BuildTarget::Vanadium(options.vanadinite_options.clone()),
+        build::build(match options.with {
+            Simulator::Spike => match options.sbi {
+                SbiImpl::OpenSbi => BuildTarget::OpenSBI(options.vanadinite_options.clone()),
+                SbiImpl::Vanadium => BuildTarget::Vanadium(options.vanadinite_options.clone()),
+            },
+            Simulator::Qemu => BuildTarget::Vanadinite(options.vanadinite_options.clone()),
         })?;
     }
 
@@ -143,7 +146,6 @@ pub fn run(options: RunOptions) -> Result<()> {
                     -netdev user,id=net1,hostfwd=udp:127.0.0.1:1111-10.0.2.15:1337
                     -device virtio-net-device,netdev=net1
                     -object filter-dump,id=f1,netdev=net1,file=testing_files/nettraffic.dat
-                    -bios {sbi_firmware}
                     -kernel {kernel_path}
                     {debug...}
                     {debug_log...}

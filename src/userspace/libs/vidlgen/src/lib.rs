@@ -110,7 +110,7 @@ const {}_{}_ID: usize = {};
 
 impl<T: {0}Provider> {0}<T> {{
     pub fn new(provider: T) -> Self {{ Self(provider) }}
-    pub fn serve(&mut self) {{
+    pub fn serve(&mut self) -> ! {{
         loop {{
             let vidl::internal::KernelMessage::NewChannelMessage(cptr) = vidl::internal::read_kernel_message() else {{ continue }};
             let channel = vidl::internal::IpcChannel::new(cptr);
@@ -271,6 +271,7 @@ impl {0}Client {{
         caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
         self.0.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]).unwrap();
         let (_msg, mut caps) = self.0.read_with_all_caps(vidl::ChannelReadFlags::NONE).unwrap();
+        let _ = vidl::internal::read_kernel_message();
 
         match caps.remove(0) {{
             vidl::CapabilityWithDescription {{ capability, description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions }} }} => {{

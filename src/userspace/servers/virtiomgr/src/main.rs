@@ -14,41 +14,28 @@ use librust::{
 use std::ipc::{ChannelMessage, ChannelReadFlags, IpcChannel};
 use virtio::DeviceType;
 
-json::derive! {
-    #[derive(Debug, Clone)]
-    struct Device {
-        name: String,
-        compatible: Vec<String>,
-        interrupts: Vec<usize>,
-    }
+struct DiscoveredDevice {
+    virtio_device_type: DeviceType,
+    device: devicemgr::Device,
 }
 
-json::derive! {
-    Deserialize,
-    #[derive(Debug)]
-    struct Devices {
-        devices: Vec<Device>,
-    }
+struct Provider {
+    devices: Vec<DiscoveredDevice>,
 }
 
-json::derive! {
-    Serialize,
-    struct WantedCompatible {
-        compatible: Vec<String>,
-    }
-}
+impl virtiomgr::VirtIoMgrProvider for Provider {
+    type Error = ();
 
-json::derive! {
-    Deserialize,
-    struct VirtIoDeviceRequest {
-        ty: u32,
-    }
-}
-
-json::derive! {
-    Serialize,
-    struct VirtIoDeviceResponse {
-        devices: Vec<Device>,
+    fn request(
+        &mut self,
+        virtio_device_type: vidl::core::U32,
+    ) -> Result<vidl::core::Vec<devicemgr::Device>, Self::Error> {
+        match DeviceType::from_u32(virtio_device_type) {
+            None => Ok(vec![]),
+            Some(ty) => {
+                Ok(self.devices.drain_filter(|dev| dev.virtio_device_type == ty).map(|dev| dev.device).collect())
+            }
+        }
     }
 }
 
@@ -71,48 +58,8 @@ fn main() {
         //     println!("[virtiomgr] We have a VirtIO {:?} device: {:?}", dev_type, device);
         // }
 
-        virtio_devices.push((device.capability.cptr, info, dev_type, header, device));
+        virtio_devices.push(DiscoveredDevice { device, virtio_device_type: dev_type });
     }
 
-    loop {
-        let cptr = match librust::syscalls::channel::read_kernel_message() {
-            KernelMessage::NewChannelMessage(cptr) => cptr,
-            _ => continue,
-        };
-
-        let channel = IpcChannel::new(cptr);
-        let (req, _, _): (VirtIoDeviceRequest, _, _) = match channel.temp_read_json(ChannelReadFlags::NONBLOCKING) {
-            Ok(data) => data,
-            Err(_) => continue,
-        };
-
-        let dev_type = req.ty;
-
-        println!("[virtiomgr] Got request for device type: {:?}", DeviceType::from_u32(dev_type));
-
-        let devices: Vec<_> = virtio_devices.drain_filter(|device| device.2 as u32 == dev_type).collect();
-        let caps: Vec<_> = devices
-            .iter()
-            .map(|(cap, _, _, _, _)| {
-                Capability::new(*cap, CapabilityRights::READ | CapabilityRights::WRITE | CapabilityRights::GRANT)
-            })
-            .collect();
-
-        channel
-            .temp_send_json(
-                ChannelMessage::default(),
-                &VirtIoDeviceResponse {
-                    devices: devices
-                        .iter()
-                        .map(|dev| Device {
-                            name: dev.4.name.clone(),
-                            compatible: dev.4.compatible.clone(),
-                            interrupts: dev.4.interrupts.clone(),
-                        })
-                        .collect(),
-                },
-                &caps,
-            )
-            .unwrap();
-    }
+    virtiomgr::VirtIoMgr::new(Provider { devices: virtio_devices }).serve();
 }
