@@ -58,7 +58,8 @@ impl UdpSocket {
     }
 
     pub fn recv(&mut self) -> Result<&[u8], NetworkError> {
-        self.client.recv(self.socket)?;
-        Ok(self.buffer.read())
+        let len = self.client.recv(self.socket)?;
+        let buf = self.buffer.read();
+        Ok(&buf[..usize::min(len, buf.len())])
     }
 }
