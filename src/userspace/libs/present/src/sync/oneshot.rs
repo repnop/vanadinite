@@ -9,7 +9,7 @@
 
 use core::{future::Future, pin::Pin};
 use std::{sync::{ SyncRc, SyncRefCell}, task::{Context, Poll}};
-use crate::reactor::{EVENT_REGISTRY, BlockType};
+use crate::executor::reactor::{EVENT_REGISTRY, BlockType};
 
 pub struct OneshotTx<T: Send + 'static> {
     inner: SyncRc<SyncRefCell<Option<T>>>,

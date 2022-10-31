@@ -18,6 +18,8 @@ pub type I128 = i128;
 pub type USize = usize;
 pub type ISize = isize;
 
+pub type Unit = ();
+
 pub type Result<T, E> = core::result::Result<T, E>;
 pub type Option<T> = core::option::Option<T>;
 pub type String = std::string::String;

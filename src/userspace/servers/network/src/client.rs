@@ -8,7 +8,7 @@
 use crate::{ClientMessage, ControlMessage, PortType};
 use librust::{capabilities::CapabilityPtr, syscalls::channel::ChannelMessage};
 use netstack::ipv4::IpV4Socket;
-use present::{ipc::IpcChannel, sync::mpsc::Sender};
+use present::{ipc::IpcChannel, sync::mpsc::Sender, futures::stream::{IntoStream, StreamExt}};
 
 json::derive! {
     #[derive(Debug, Clone)]
@@ -101,6 +101,8 @@ pub async fn handle_client(
         }
         msg => unreachable!("bad response message: {:?}", msg),
     }
+
+    let stream = IntoStream::into_stream(client_rx).map(ClientEvent::ClientMessage).merge(IntoStream);
 
     loop {
         present::select! {

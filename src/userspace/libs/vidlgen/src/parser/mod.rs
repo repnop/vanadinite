@@ -10,8 +10,9 @@ pub mod lexer;
 use self::lexer::{Keyword, Token};
 use alloc::{boxed::Box, string::String, vec::Vec};
 use comb::{
-    combinators::{delimited, hinted_choice, maybe, single, single_by, until},
+    combinators::{delimited, hinted_choice, many1, maybe, single, single_by, until},
     recursive::recursive,
+    text::ascii_digit,
     Parser,
 };
 
@@ -19,7 +20,7 @@ use comb::{
 pub enum AstNode {
     Service(Service),
     Use(Use),
-    TypeDefinition(TypeDefinition),
+    TypeDefinition(Vec<String>, TypeDefinition),
 }
 
 #[derive(Debug, PartialEq)]
@@ -99,6 +100,7 @@ pub enum VariantData {
 
 #[derive(Debug, PartialEq)]
 pub enum Type {
+    Array(Box<Type>, usize),
     Path { path: Vec<String>, generics: Option<Vec<Type>> },
     Slice(Box<Type>),
     Str,
@@ -110,12 +112,13 @@ pub fn parser() -> impl Parser<Error = crate::SourceError, Output = AstNode, Inp
         (Token::Keyword(Keyword::Use), parse_use()),
         (
             Token::Keyword(Keyword::Struct),
-            parse_struct_definition().map(|d| AstNode::TypeDefinition(TypeDefinition::Struct(d))),
+            parse_struct_definition().map(|d| AstNode::TypeDefinition(alloc::vec![], TypeDefinition::Struct(d))),
         ),
         (
             Token::Keyword(Keyword::Enum),
-            parse_enum_definition().map(|d| AstNode::TypeDefinition(TypeDefinition::Enum(d))),
+            parse_enum_definition().map(|d| AstNode::TypeDefinition(alloc::vec![], TypeDefinition::Enum(d))),
         ),
+        (Token::At, parse_attributes_then_type_definition()),
         // ...
     ))
 }
@@ -176,24 +179,34 @@ fn parse_argument() -> impl Parser<Error = crate::SourceError, Output = (String,
 
 fn parse_type() -> impl Parser<Error = crate::SourceError, Output = Type, Input = Token> {
     let identifier = (|t: &Token| matches!(t, Token::Identifier(_))) as fn(&Token) -> bool;
+    let number = (|t: &Token| matches!(t, Token::Number(_))) as fn(&Token) -> bool;
     recursive(move |this| {
         hinted_choice((
             (
                 Token::LeftBracket,
-                delimited(single(Token::LeftBracket), this.clone(), single(Token::RightBracket))
-                    .map(|ty| Type::Slice(Box::new(ty))),
+                delimited(
+                    single(Token::LeftBracket),
+                    this.clone()
+                        .then(maybe(single(Token::Semicolon).then_to(single_by(number).map(Token::into_number)))),
+                    single(Token::RightBracket),
+                )
+                .map(|(ty, maybe_array)| match maybe_array {
+                    None => Type::Slice(Box::new(ty)),
+                    Some(n) => Type::Array(Box::new(ty), n),
+                }),
             ),
             (Token::Keyword(Keyword::String), single(Token::Keyword(Keyword::String)).map(|_| Type::Str)),
             (
                 identifier,
                 single_by(identifier)
                     .map(Token::into_identifier)
+                    .separated_by(single(Token::PathSeparator))
                     .then(maybe(delimited(
                         single(Token::LeftAngleBracket),
                         this.separated_by(single(Token::Comma)).allow_trailing(),
                         single(Token::RightAngleBracket),
                     )))
-                    .map(|(s, generics)| Type::Path { path: alloc::vec![s], generics }),
+                    .map(|(path, generics)| Type::Path { path, generics }),
             ),
         ))
     })
@@ -201,6 +214,15 @@ fn parse_type() -> impl Parser<Error = crate::SourceError, Output = Type, Input 
 
 fn parse_ident() -> impl Parser<Error = crate::SourceError, Output = String, Input = Token> {
     single_by(|t| matches!(t, Token::Identifier(_))).map(Token::into_identifier)
+}
+
+fn parse_attributes_then_type_definition() -> impl Parser<Error = crate::SourceError, Output = AstNode, Input = Token> {
+    many1(single(Token::At).then_to(parse_ident()))
+        .then(hinted_choice((
+            (Token::Keyword(Keyword::Struct), parse_struct_definition().map(|s| TypeDefinition::Struct(s))),
+            (Token::Keyword(Keyword::Enum), parse_enum_definition().map(|s| TypeDefinition::Enum(s))),
+        )))
+        .map(|(attrs, def)| AstNode::TypeDefinition(attrs, def))
 }
 
 fn parse_struct_definition() -> impl Parser<Error = crate::SourceError, Output = Struct, Input = Token> {
@@ -236,7 +258,6 @@ fn parse_enum_definition() -> impl Parser<Error = crate::SourceError, Output = E
             single(Token::LeftBrace),
             parse_ident()
                 .then(maybe(parse_enum_variant_data()))
-                .then_assert(single(Token::Comma))
                 .map(|(name, associated_data)| Variant { name, associated_data })
                 .separated_by(single(Token::Comma))
                 .allow_trailing(),

@@ -1,0 +1,27 @@
+use core::{U8, U16, Unit, USize};
+use sync::SharedBuffer;
+
+@comparable
+enum NetworkError {
+    AlreadyBound,
+    NotBound,
+}
+
+@comparable
+@trivial
+struct IpV4Address {
+    address: [U8; 4],
+}
+
+@comparable
+@trivial
+struct IpV4Socket {
+    ip: IpV4Address,
+    port: U16,
+}
+
+service Network {
+    fn bind_udp(socket: IpV4Socket) -> Result<SharedBuffer, NetworkError>;
+    fn send(recipient: IpV4Socket, len: USize) -> Result<Unit, NetworkError>;
+    fn recv(socket: IpV4Socket) -> Result<USize, NetworkError>;
+}

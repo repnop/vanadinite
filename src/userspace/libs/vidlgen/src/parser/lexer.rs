@@ -8,15 +8,17 @@
 use alloc::string::String;
 use comb::{
     combinators::{hinted_choice, sequence, single},
-    text::{ascii_alphabetic, ascii_alphanumeric, string, whitespace},
+    text::{ascii_alphabetic, ascii_alphanumeric, ascii_digit, string, whitespace},
     Parser, Span,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
+    At,
     Arrow,
     Keyword(Keyword),
     Identifier(String),
+    Number(usize),
     LeftAngleBracket,
     LeftBrace,
     LeftBracket,
@@ -38,6 +40,13 @@ impl Token {
             _ => panic!("attempted to unwrap an identifier"),
         }
     }
+
+    pub fn into_number(self) -> usize {
+        match self {
+            Self::Number(n) => n,
+            _ => panic!("attempted to unwrap an identifier"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,8 +61,10 @@ pub enum Keyword {
 
 pub fn lexer() -> impl Parser<Error = crate::SourceError, Output = (Token, Span), Input = char> {
     let alphabetic = (|c: &char| c.is_ascii_alphabetic()) as fn(&char) -> bool;
+    let numeric = (|c: &char| c.is_ascii_digit()) as fn(&char) -> bool;
     hinted_choice((
         (alphabetic, identifier()),
+        (numeric, number()),
         (';', single(';').to(Token::Semicolon)),
         (':', sequence(&[':', ':']).to(Token::PathSeparator).or(single(':').to(Token::Colon))),
         (';', single(';').to(Token::Semicolon)),
@@ -67,9 +78,14 @@ pub fn lexer() -> impl Parser<Error = crate::SourceError, Output = (Token, Span)
         ('>', single('>').to(Token::RightAngleBracket)),
         (',', single(',').to(Token::Comma)),
         ('-', single('-').then(single('>')).to(Token::Arrow)),
+        ('@', single('@').to(Token::At)),
     ))
     .with_span()
     .padded_by(whitespace())
+}
+
+fn number() -> impl Parser<Error = crate::SourceError, Output = Token, Input = char> {
+    string(ascii_digit()).map(|s| Token::Number(s.parse().unwrap()))
 }
 
 fn identifier() -> impl Parser<Error = crate::SourceError, Output = Token, Input = char> {

@@ -20,6 +20,7 @@ pub enum DeserializeError {
     MismatchedId { wanted: u64, found: u64 },
     NotEnoughCapabilities,
     InvalidUtf8,
+    InvalidCapabilityProperty,
     UnknownDiscriminantValue,
 }
 
@@ -47,6 +48,16 @@ pub trait Deserialize<'de>: Serializable + Sized {
         primitive: <Self as Serializable>::Primitive<'de>,
         capabilities: &[CapabilityWithDescription],
     ) -> Result<Self, DeserializeError>;
+}
+
+impl<'de> Deserialize<'de> for () {
+    #[inline]
+    fn deserialize(
+        primitive: <Self as Serializable>::Primitive<'de>,
+        _: &[CapabilityWithDescription],
+    ) -> Result<Self, DeserializeError> {
+        Ok(primitive)
+    }
 }
 
 impl<'de> Deserialize<'de> for u8 {

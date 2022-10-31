@@ -267,7 +267,7 @@ mod tests {
             identification: Identification([0x00, 0x00]),
             flags_fragment_offset: FlagsFragmentOffset([0x40, 0x00]),
             ttl: 0x40,
-            protocol: 0x11,
+            protocol: Protocol(0x11),
             header_checksum: IpV4HeaderChecksum::new(),
             source_ip: IpV4Address::new(0xC0, 0xA8, 0x00, 0x01),
             destination_ip: IpV4Address::new(0xC0, 0xA8, 0x00, 0xC7),

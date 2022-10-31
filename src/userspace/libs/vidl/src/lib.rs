@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+#![feature(slice_ptr_get)]
+
 #[macro_export]
 macro_rules! vidl_include {
     ($vidl:literal) => {
@@ -21,6 +23,7 @@ pub use librust::{
 };
 
 pub mod core;
+pub mod sync;
 pub mod materialize {
     pub use materialize::*;
 }

@@ -29,10 +29,9 @@ pub struct Compiler {
 impl Compiler {
     pub fn new() -> Self {
         let mut this = Self { providers: BTreeMap::new(), usages: BTreeMap::new() };
-        this.usages.insert(String::from("U8"), String::from("core::U8"));
-        this.usages.insert(String::from("String"), String::from("core::String"));
         this.usages.insert(String::from("Result"), String::from("core::Result"));
-        this.provider("core", "vidl::core")
+        this.usages.insert(String::from("Option"), String::from("core::Option"));
+        this.provider("sync", "vidl::sync").provider("core", "vidl::core")
     }
 
     pub fn provider(mut self, namespace: &str, dep: &str) -> Self {
@@ -75,7 +74,7 @@ impl Compiler {
             match node {
                 AstNode::Service(service) => self.lower_service(&mut compiled, &service)?,
                 AstNode::Use(_) => unreachable!(),
-                AstNode::TypeDefinition(typedef) => self.lower_typedef(&mut compiled, &typedef)?,
+                AstNode::TypeDefinition(attrs, typedef) => self.lower_typedef(&mut compiled, &attrs, &typedef)?,
                 _ => todo!(),
             }
         }
@@ -292,7 +291,12 @@ impl {0}Client {{
             Type::Path { path, generics } => {
                 // TODO: check for import vs defined in scope here
                 let path = match self.usages.get(path.first().unwrap()) {
-                    None => path.join("::"),
+                    None => match self.providers.get(path.first().unwrap()) {
+                        Some(provider) => {
+                            alloc::format!("{}::{}", provider, path.get(1..).unwrap_or_default().join("::"))
+                        }
+                        None => path.join("::"),
+                    },
                     Some(full_path) => {
                         let name = full_path.split("::").next().unwrap();
                         let mut out_path = self.providers.get(name).unwrap().clone();
@@ -339,23 +343,40 @@ impl {0}Client {{
                 true => compiled.write_str("vidl::core::String"),
                 false => compiled.write_str("&vidl::core::Str"),
             },
+            Type::Array(ty, size) => {
+                compiled.write_str("[");
+                self.lower_type(compiled, ty, in_return_position)?;
+                compiled.write_fmt(format_args!("; {}]", size));
+            }
         }
 
         Ok(())
     }
 
-    fn lower_typedef(&self, compiled: &mut CompiledVidl, typedef: &TypeDefinition) -> Result<(), CompileError> {
+    fn lower_typedef(
+        &self,
+        compiled: &mut CompiledVidl,
+        attributes: &[String],
+        typedef: &TypeDefinition,
+    ) -> Result<(), CompileError> {
         match typedef {
-            TypeDefinition::Struct(strukt) => self.lower_struct(compiled, strukt),
-            TypeDefinition::Enum(enoom) => self.lower_enum(compiled, enoom),
+            TypeDefinition::Struct(strukt) => self.lower_struct(compiled, attributes, strukt),
+            TypeDefinition::Enum(enoom) => self.lower_enum(compiled, attributes, enoom),
         }
     }
 
-    fn lower_struct(&self, compiled: &mut CompiledVidl, strukt: &Struct) -> Result<(), CompileError> {
+    fn lower_struct(
+        &self,
+        compiled: &mut CompiledVidl,
+        attributes: &[String],
+        strukt: &Struct,
+    ) -> Result<(), CompileError> {
+        let extra_traits = self.attributes_to_traits(attributes);
         compiled.write_fmt(format_args!(
-            r#"#[derive(Debug, vidl::materialize::Deserialize, vidl::materialize::Serializable, vidl::materialize::Serialize)]
+            r#"#[derive(Debug, vidl::materialize::Deserialize, vidl::materialize::Serializable, vidl::materialize::Serialize{})]
 #[materialize(reexport_path = "vidl::materialize")]
 pub struct {}"#,
+            extra_traits,
             strukt.name
         ));
 
@@ -380,11 +401,13 @@ pub struct {}"#,
         Ok(())
     }
 
-    fn lower_enum(&self, compiled: &mut CompiledVidl, enoom: &Enum) -> Result<(), CompileError> {
+    fn lower_enum(&self, compiled: &mut CompiledVidl, attributes: &[String], enoom: &Enum) -> Result<(), CompileError> {
+        let extra_traits = self.attributes_to_traits(attributes);
         compiled.write_fmt(format_args!(
-            r#"#[derive(Debug, vidl::materialize::Deserialize, vidl::materialize::Serializable, vidl::materialize::Serialize)]
+            r#"#[derive(Debug, vidl::materialize::Deserialize, vidl::materialize::Serializable, vidl::materialize::Serialize{})]
 #[materialize(reexport_path = "vidl::materialize")]
 pub enum {}"#,
+            extra_traits,
             enoom.name
         ));
 
@@ -429,6 +452,26 @@ pub enum {}"#,
         }
         compiled.write_str("}\n\n");
         Ok(())
+    }
+
+    fn attributes_to_traits(&self, attributes: &[String]) -> String {
+        let mut traits = String::new();
+
+        for attribute in attributes {
+            match &**attribute {
+                "trivial" => traits.push_str("Clone, Copy, "),
+                "comparable" => traits.push_str("PartialEq, Eq, "),
+                _ => {}
+            }
+        }
+
+        if !traits.is_empty() {
+            traits.insert_str(0, ", ");
+            traits.pop();
+            traits.pop();
+        }
+
+        traits
     }
 }
 

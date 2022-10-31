@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use librust::{units::Bytes, syscalls::{mem::{AllocationOptions, MemoryPermissions}, channel::{ReadResult, ChannelMessage, ChannelReadFlags, self, KERNEL_CHANNEL}}, capabilities::{Capability, CapabilityRights, CapabilityPtr, CapabilityWithDescription, CapabilityDescription}, error::SyscallError};
-use crate::reactor::{BlockType, EVENT_REGISTRY, NEW_IPC_CHANNELS};
+use crate::{executor::reactor::{BlockType, EVENT_REGISTRY, NEW_IPC_CHANNELS}, futures::stream::Stream};
 use core::{future::Future, pin::Pin};
 use std::{
     task::{Context, Poll},
@@ -21,21 +21,29 @@ impl NewChannelListener {
     pub fn new() -> Self {
         Self(())
     }
-
-    pub async fn recv(&self) -> CapabilityPtr {
-        NewChannelListenerRecv.await
-    }
 }
 
-struct NewChannelListenerRecv;
-
-impl Future for NewChannelListenerRecv {
+impl Future for NewChannelListener {
     type Output = CapabilityPtr;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match NEW_IPC_CHANNELS.borrow_mut().pop_front() {
             Some(cptr) => Poll::Ready(cptr),
             None => {
                 EVENT_REGISTRY.register(BlockType::NewIpcChannel, cx.waker().clone());
+                Poll::Pending
+            }
+        }
+    }
+}
+
+impl Stream for NewChannelListener {
+    type Item = CapabilityPtr;
+
+    fn poll_next(self: Pin<&mut Self>, context: &mut Context) -> Poll<Option<Self::Item>> {
+        match NEW_IPC_CHANNELS.borrow_mut().pop_front() {
+            Some(cptr) => Poll::Ready(Some(cptr)),
+            None => {
+                EVENT_REGISTRY.register(BlockType::NewIpcChannel, context.waker().clone());
                 Poll::Pending
             }
         }
