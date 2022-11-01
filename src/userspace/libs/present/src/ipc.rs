@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use librust::{units::Bytes, syscalls::{mem::{AllocationOptions, MemoryPermissions}, channel::{ReadResult, ChannelMessage, ChannelReadFlags, self, KERNEL_CHANNEL}}, capabilities::{Capability, CapabilityRights, CapabilityPtr, CapabilityWithDescription, CapabilityDescription}, error::SyscallError};
-use crate::{executor::reactor::{BlockType, EVENT_REGISTRY, NEW_IPC_CHANNELS}, futures::stream::Stream};
+use crate::{executor::reactor::{BlockType, EVENT_REGISTRY, NEW_IPC_CHANNELS}, futures::stream::{Stream, IntoStream}};
 use core::{future::Future, pin::Pin};
 use std::{
     task::{Context, Poll},
@@ -121,6 +121,46 @@ impl IpcChannel {
 impl Drop for IpcChannel {
     fn drop(&mut self) {
         EVENT_REGISTRY.unregister_interest(BlockType::IpcChannelMessage(self.0));
+    }
+}
+
+impl IntoStream for IpcChannel {
+    type Item = Result<(ChannelMessage, Vec<CapabilityWithDescription>), SyscallError>;
+    type Stream = IpcMessageStream;
+
+    fn into_stream(self) -> Self::Stream {
+        IpcMessageStream { channel: self }
+    }
+}
+
+pub struct IpcMessageStream {
+    channel: IpcChannel,
+}
+
+impl Stream for IpcMessageStream {
+    type Item = Result<(ChannelMessage, Vec<CapabilityWithDescription>), SyscallError>;
+
+    fn poll_next(self: Pin<&mut Self>, context: &mut Context) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+
+        match channel::read_message(this.channel.0, &mut [], ChannelReadFlags::NONBLOCKING) {
+            Ok(rr) => {
+                let ReadResult { message, capabilities_remaining, .. } = rr;
+                let mut caps = Vec::new();
+
+                if capabilities_remaining > 0 {
+                    caps.resize(capabilities_remaining, CapabilityWithDescription::default());
+                    let _ = channel::read_message(this.channel.0, &mut caps[..], ChannelReadFlags::NONBLOCKING)?;
+                }
+
+                Poll::Ready(Some(Ok((message, caps))))
+            },
+            Err(SyscallError::WouldBlock) => {
+                EVENT_REGISTRY.register(BlockType::IpcChannelMessage(this.channel.0), context.waker().clone());
+                Poll::Pending
+            }
+            Err(e) => Poll::Ready(Some(Err(e))),
+        }
     }
 }
 

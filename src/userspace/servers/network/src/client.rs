@@ -102,7 +102,7 @@ pub async fn handle_client(
         msg => unreachable!("bad response message: {:?}", msg),
     }
 
-    let stream = IntoStream::into_stream(client_rx).map(ClientEvent::ClientMessage).merge(IntoStream);
+    let stream = IntoStream::into_stream(client_rx).map(ClientEvent::ClientMessage).merge(IntoStream::into_stream(ipc_channel));
 
     loop {
         present::select! {

@@ -24,10 +24,11 @@ mod parser;
 pub struct Compiler {
     providers: BTreeMap<String, String>,
     usages: BTreeMap<String, String>,
+    generate_async: bool,
 }
 
 impl Compiler {
-    pub fn new() -> Self {
+    pub fn new(generate_async: bool) -> Self {
         let mut this = Self { providers: BTreeMap::new(), usages: BTreeMap::new() };
         this.usages.insert(String::from("Result"), String::from("core::Result"));
         this.usages.insert(String::from("Option"), String::from("core::Option"));
@@ -70,6 +71,10 @@ impl Compiler {
 
         let mut compiled = CompiledVidl { output: String::new() };
 
+        if self.generate_async {
+            compiled.write_str("#![feature(async_fn_in_trait)]\n#![allow(incomplete_features)]\n\n");
+        }
+
         for node in ast {
             match node {
                 AstNode::Service(service) => self.lower_service(&mut compiled, &service)?,
@@ -96,6 +101,10 @@ const {}_{}_ID: usize = {};
     }
 
     fn lower_service_server(&self, compiled: &mut CompiledVidl, service: &Service) -> Result<(), CompileError> {
+        if self.generate_async {
+            self.lower_service_server_async(compiled, service);
+        }
+
         compiled.write_fmt(format_args!(
             "pub trait {}Provider {{
     type Error;",
@@ -282,6 +291,115 @@ impl {0}Client {{
     }}
     
 "#, service.name, method.name));
+
+        Ok(())
+    }
+
+    fn lower_service_server_async(&self, compiled: &mut CompiledVidl, service: &Service) -> Result<(), CompileError> {
+        compiled.write_fmt(format_args!(
+            "pub trait Async{}Provider {{
+    type Error;",
+            service.name
+        ));
+        for method in &service.methods {
+            self.lower_method_server(compiled, method)?;
+        }
+        compiled.write_str("\n}\n\n");
+        compiled.write_fmt(format_args!(r#"pub struct Async{0}<T: Async{0}Provider>(T, vidl::present::IpcChannel);
+
+impl<T: Async{0}Provider> Async{0}<T> {{
+    pub fn new(provider: T, channel: vidl::CapabilityPtr) -> Self {{ Self(provider, vidl::present::IpcChannel::new(channel)) }}
+    pub async fn serve(&mut self) -> ! {{
+        loop {{
+            let vidl::internal::KernelMessage::NewChannelMessage(cptr) = vidl::internal::read_kernel_message() else {{ continue }};
+            let channel = vidl::internal::IpcChannel::new(cptr);
+            let Ok((msg, mut caps)) = channel.read_with_all_caps(vidl::internal::ChannelReadFlags::NONBLOCKING) else {{ continue }};
+            if caps.is_empty() {{
+                // Need at least one cap for the RPC message
+                continue;
+            }}
+
+            // If its not a memory cap we got a problem
+            let vidl::CapabilityWithDescription {{
+                capability,
+                description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions: vidl::internal::MemoryPermissions::READ_WRITE }},
+            }} = caps.remove(0) else {{ continue }};
+            let buffer = unsafe {{ core::slice::from_raw_parts(ptr, len) }};
+
+            match msg.0[0] {{
+"#, service.name));
+
+        for method in &service.methods {
+            compiled.write_fmt(format_args!(
+                r#"                {}_{}_ID => {{
+                let deserializer = vidl::materialize::Deserializer::new(buffer, &caps[..]);
+                let Ok(("#,
+                service.name, method.name
+            ));
+            for arg in &method.arguments {
+                compiled.write_fmt(format_args!("{},", arg.0));
+            }
+            compiled.write_str(")) = deserializer.deserialize::<(");
+            for arg in &method.arguments {
+                self.lower_type(compiled, &arg.1, true)?;
+                compiled.write_str(", ");
+            }
+            compiled.write_str(")>() else { continue };\n");
+            compiled.write_fmt(format_args!("                if let Ok(response) = self.0.{}(", method.name));
+            for (i, arg) in method.arguments.iter().enumerate() {
+                compiled.write_fmt(format_args!("{}", arg.0));
+                if i + 1 != method.arguments.len() {
+                    compiled.write_str(", ");
+                }
+            }
+            compiled.write_fmt(format_args!(
+                r#") {{
+                    let mut serializer = vidl::materialize::Serializer::new();
+                    serializer.serialize(&response).unwrap();
+                    let (buffer, mut caps) = serializer.into_parts();
+                    let mut mem = vidl::MemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
+                    unsafe {{ mem.as_mut()[..buffer.len()].copy_from_slice(&buffer) }};
+                    caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
+                    let _ = channel.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]);
+                }}"#,
+                service.name, method.name
+            ));
+
+            compiled.write_str("            },\n");
+        }
+
+        compiled.write_str(
+            r#"                _ => {},
+            }
+        }
+    }
+}
+        "#,
+        );
+
+        Ok(())
+    }
+
+    fn lower_service_client(&self, compiled: &mut CompiledVidl, service: &Service) -> Result<(), CompileError> {
+        compiled.write_fmt(format_args!(
+            r"pub struct {0}Client(std::ipc::IpcChannel);
+
+impl {0}Client {{
+
+",
+            service.name
+        ));
+
+        compiled.write_str(
+            r"    pub fn new(cptr: std::ipc::CapabilityPtr) -> Self { Self(std::ipc::IpcChannel::new(cptr)) }
+
+",
+        );
+
+        for method in &service.methods {
+            self.lower_method_client(compiled, method, service)?;
+        }
+        compiled.write_str("\n}\n\n");
 
         Ok(())
     }

@@ -28,6 +28,12 @@ pub mod materialize {
     pub use materialize::*;
 }
 
+#[cfg(feature = "async")]
+#[doc(hidden)]
+pub mod present {
+    pub use present::ipc::IpcChannel;
+}
+
 #[doc(hidden)]
 pub mod internal {
     pub use librust::syscalls::{
