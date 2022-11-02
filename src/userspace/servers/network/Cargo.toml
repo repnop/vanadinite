@@ -14,7 +14,7 @@ netstack = { path = "../../libs/netstack" }
 present = { path = "../../libs/present" }
 std = { path = "../../libs/std" }
 sync = { path = "../../../shared/sync" }
-vidl = { path = "../../libs/vidl" }
+vidl = { path = "../../libs/vidl", features = ["async"] }
 virtio = { path = "../../libs/virtio" }
 virtiomgr = { path = "../virtiomgr" }
 volatile = { path = "../../../shared/volatile" }

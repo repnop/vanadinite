@@ -29,7 +29,7 @@ pub struct Compiler {
 
 impl Compiler {
     pub fn new(generate_async: bool) -> Self {
-        let mut this = Self { providers: BTreeMap::new(), usages: BTreeMap::new() };
+        let mut this = Self { providers: BTreeMap::new(), usages: BTreeMap::new(), generate_async };
         this.usages.insert(String::from("Result"), String::from("core::Result"));
         this.usages.insert(String::from("Option"), String::from("core::Option"));
         this.provider("sync", "vidl::sync").provider("core", "vidl::core")
@@ -71,16 +71,15 @@ impl Compiler {
 
         let mut compiled = CompiledVidl { output: String::new() };
 
-        if self.generate_async {
-            compiled.write_str("#![feature(async_fn_in_trait)]\n#![allow(incomplete_features)]\n\n");
-        }
+        // if self.generate_async {
+        //     compiled.write_str("#![feature(async_fn_in_trait)]\n#![allow(incomplete_features)]\n\n");
+        // }
 
         for node in ast {
             match node {
                 AstNode::Service(service) => self.lower_service(&mut compiled, &service)?,
                 AstNode::Use(_) => unreachable!(),
                 AstNode::TypeDefinition(attrs, typedef) => self.lower_typedef(&mut compiled, &attrs, &typedef)?,
-                _ => todo!(),
             }
         }
 
@@ -93,7 +92,9 @@ impl Compiler {
                 r"#[allow(non_upper_case_globals)]
 const {}_{}_ID: usize = {};
 ",
-                service.name, method.name, i
+                service.name.to_uppercase(),
+                method.name.to_uppercase(),
+                i
             ));
         }
         self.lower_service_server(compiled, service)?;
@@ -102,7 +103,7 @@ const {}_{}_ID: usize = {};
 
     fn lower_service_server(&self, compiled: &mut CompiledVidl, service: &Service) -> Result<(), CompileError> {
         if self.generate_async {
-            self.lower_service_server_async(compiled, service);
+            self.lower_service_server_async(compiled, service)?;
         }
 
         compiled.write_fmt(format_args!(
@@ -130,7 +131,7 @@ impl<T: {0}Provider> {0}<T> {{
 
             // If its not a memory cap we got a problem
             let vidl::CapabilityWithDescription {{
-                capability,
+                capability: _,
                 description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions: vidl::internal::MemoryPermissions::READ_WRITE }},
             }} = caps.remove(0) else {{ continue }};
             let buffer = unsafe {{ core::slice::from_raw_parts(ptr, len) }};
@@ -143,7 +144,8 @@ impl<T: {0}Provider> {0}<T> {{
                 r#"                {}_{}_ID => {{
                 let deserializer = vidl::materialize::Deserializer::new(buffer, &caps[..]);
                 let Ok(("#,
-                service.name, method.name
+                service.name.to_uppercase(),
+                method.name.to_uppercase()
             ));
             for arg in &method.arguments {
                 compiled.write_fmt(format_args!("{},", arg.0));
@@ -171,7 +173,8 @@ impl<T: {0}Provider> {0}<T> {{
                     caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
                     let _ = channel.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]);
                 }}"#,
-                service.name, method.name
+                service.name.to_uppercase(),
+                method.name.to_uppercase()
             ));
 
             compiled.write_str("            },\n");
@@ -190,6 +193,10 @@ impl<T: {0}Provider> {0}<T> {{
     }
 
     fn lower_service_client(&self, compiled: &mut CompiledVidl, service: &Service) -> Result<(), CompileError> {
+        if self.generate_async {
+            self.lower_service_client_async(compiled, service)?;
+        }
+
         compiled.write_fmt(format_args!(
             r"pub struct {0}Client(std::ipc::IpcChannel);
 
@@ -282,7 +289,7 @@ impl {0}Client {{
         let _ = vidl::internal::read_kernel_message();
 
         match caps.remove(0) {{
-            vidl::CapabilityWithDescription {{ capability, description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions }} }} => {{
+            vidl::CapabilityWithDescription {{ capability: _, description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions }} }} => {{
                 let deserializer = vidl::materialize::Deserializer::new(unsafe {{ core::slice::from_raw_parts(ptr, len) }}, &caps);
                 deserializer.deserialize().expect("deserialize success")
             }}
@@ -290,7 +297,7 @@ impl {0}Client {{
         }}  
     }}
     
-"#, service.name, method.name));
+"#, service.name.to_uppercase(), method.name.to_uppercase()));
 
         Ok(())
     }
@@ -302,7 +309,7 @@ impl {0}Client {{
             service.name
         ));
         for method in &service.methods {
-            self.lower_method_server(compiled, method)?;
+            self.lower_method_server_async(compiled, method)?;
         }
         compiled.write_str("\n}\n\n");
         compiled.write_fmt(format_args!(r#"pub struct Async{0}<T: Async{0}Provider>(T, vidl::present::IpcChannel);
@@ -311,20 +318,20 @@ impl<T: Async{0}Provider> Async{0}<T> {{
     pub fn new(provider: T, channel: vidl::CapabilityPtr) -> Self {{ Self(provider, vidl::present::IpcChannel::new(channel)) }}
     pub async fn serve(&mut self) -> ! {{
         loop {{
-            let vidl::internal::KernelMessage::NewChannelMessage(cptr) = vidl::internal::read_kernel_message() else {{ continue }};
-            let channel = vidl::internal::IpcChannel::new(cptr);
-            let Ok((msg, mut caps)) = channel.read_with_all_caps(vidl::internal::ChannelReadFlags::NONBLOCKING) else {{ continue }};
+            let Ok((msg, mut caps)) = self.1.read_with_all_caps().await else {{ continue }};
             if caps.is_empty() {{
                 // Need at least one cap for the RPC message
                 continue;
             }}
 
             // If its not a memory cap we got a problem
-            let vidl::CapabilityWithDescription {{
-                capability,
-                description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions: vidl::internal::MemoryPermissions::READ_WRITE }},
-            }} = caps.remove(0) else {{ continue }};
-            let buffer = unsafe {{ core::slice::from_raw_parts(ptr, len) }};
+            let buffer = {{
+                let vidl::CapabilityWithDescription {{
+                    capability: _,
+                    description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions: vidl::internal::MemoryPermissions::READ_WRITE }},
+                }} = caps.remove(0) else {{ continue }};
+                unsafe {{ core::slice::from_raw_parts(ptr, len) }}
+            }};
 
             match msg.0[0] {{
 "#, service.name));
@@ -334,7 +341,8 @@ impl<T: Async{0}Provider> Async{0}<T> {{
                 r#"                {}_{}_ID => {{
                 let deserializer = vidl::materialize::Deserializer::new(buffer, &caps[..]);
                 let Ok(("#,
-                service.name, method.name
+                service.name.to_uppercase(),
+                method.name.to_uppercase()
             ));
             for arg in &method.arguments {
                 compiled.write_fmt(format_args!("{},", arg.0));
@@ -353,16 +361,17 @@ impl<T: Async{0}Provider> Async{0}<T> {{
                 }
             }
             compiled.write_fmt(format_args!(
-                r#") {{
+                r#").await {{
                     let mut serializer = vidl::materialize::Serializer::new();
                     serializer.serialize(&response).unwrap();
                     let (buffer, mut caps) = serializer.into_parts();
                     let mut mem = vidl::MemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
                     unsafe {{ mem.as_mut()[..buffer.len()].copy_from_slice(&buffer) }};
                     caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
-                    let _ = channel.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]);
+                    let _ = self.1.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]);
                 }}"#,
-                service.name, method.name
+                service.name.to_uppercase(),
+                method.name.to_uppercase()
             ));
 
             compiled.write_str("            },\n");
@@ -380,26 +389,107 @@ impl<T: Async{0}Provider> Async{0}<T> {{
         Ok(())
     }
 
-    fn lower_service_client(&self, compiled: &mut CompiledVidl, service: &Service) -> Result<(), CompileError> {
-        compiled.write_fmt(format_args!(
-            r"pub struct {0}Client(std::ipc::IpcChannel);
+    fn lower_method_server_async(&self, compiled: &mut CompiledVidl, method: &Method) -> Result<(), CompileError> {
+        compiled.write_fmt(format_args!("\n    async fn {}(&mut self, ", method.name));
 
-impl {0}Client {{
+        for (i, arg) in method.arguments.iter().enumerate() {
+            compiled.write_fmt(format_args!("{}: ", arg.0));
+            self.lower_type(compiled, &arg.1, true)?;
+            if i + 1 != method.arguments.len() {
+                compiled.write_str(", ");
+            }
+        }
+
+        compiled.write_str(")");
+
+        match &method.return_type {
+            Some(ret_type) => {
+                compiled.write_str(" -> Result<");
+                self.lower_type(compiled, ret_type, true)?;
+                compiled.write_str(", Self::Error>")
+            }
+            None => compiled.write_str(" -> Result<(), Self::Error>"),
+        }
+
+        compiled.write_str(";");
+
+        Ok(())
+    }
+
+    fn lower_service_client_async(&self, compiled: &mut CompiledVidl, service: &Service) -> Result<(), CompileError> {
+        compiled.write_fmt(format_args!(
+            r"pub struct Async{0}Client(vidl::present::IpcChannel);
+
+impl Async{0}Client {{
 
 ",
             service.name
         ));
 
         compiled.write_str(
-            r"    pub fn new(cptr: std::ipc::CapabilityPtr) -> Self { Self(std::ipc::IpcChannel::new(cptr)) }
+            r"    pub fn new(cptr: std::ipc::CapabilityPtr) -> Self { Self(vidl::present::IpcChannel::new(cptr)) }
 
 ",
         );
 
         for method in &service.methods {
-            self.lower_method_client(compiled, method, service)?;
+            self.lower_method_client_async(compiled, method, service)?;
         }
         compiled.write_str("\n}\n\n");
+
+        Ok(())
+    }
+
+    fn lower_method_client_async(
+        &self,
+        compiled: &mut CompiledVidl,
+        method: &Method,
+        service: &Service,
+    ) -> Result<(), CompileError> {
+        compiled.write_fmt(format_args!("    pub async fn {}(&self, ", method.name));
+        for (i, arg) in method.arguments.iter().enumerate() {
+            compiled.write_fmt(format_args!("{}: ", arg.0));
+            self.lower_type(compiled, &arg.1, false)?;
+            if i + 1 != method.arguments.len() {
+                compiled.write_str(",");
+            }
+        }
+
+        compiled.write_str(")");
+
+        if let Some(ret_type) = &method.return_type {
+            compiled.write_str(" ->");
+            self.lower_type(compiled, ret_type, true)?;
+        }
+
+        compiled.write_str(
+            r" {
+        let mut serializer = vidl::materialize::Serializer::new();
+        serializer.serialize(&(",
+        );
+
+        for arg in &method.arguments {
+            compiled.write_fmt(format_args!("&{},", arg.0));
+        }
+
+        compiled.write_fmt(format_args!(r#")).unwrap();
+        let (buffer, mut caps) = serializer.into_parts();
+        let mut mem = vidl::MemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
+        unsafe {{ mem.as_mut()[..buffer.len()].copy_from_slice(&buffer) }};
+        caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
+        self.0.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]).unwrap();
+        let (_msg, mut caps) = self.0.read_with_all_caps().await.unwrap();
+
+        match caps.remove(0) {{
+            vidl::CapabilityWithDescription {{ capability: _, description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions }} }} => {{
+                let deserializer = vidl::materialize::Deserializer::new(unsafe {{ core::slice::from_raw_parts(ptr, len) }}, &caps);
+                deserializer.deserialize().expect("deserialize success")
+            }}
+            _ => panic!("First cap in response not memory!"),
+        }}  
+    }}
+    
+"#, service.name.to_uppercase(), method.name.to_uppercase()));
 
         Ok(())
     }

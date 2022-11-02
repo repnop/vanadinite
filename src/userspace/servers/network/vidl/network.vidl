@@ -20,8 +20,13 @@ struct IpV4Socket {
     port: U16,
 }
 
+struct RecvInfo {
+    from: IpV4Socket,
+    len: USize,
+}
+
 service Network {
     fn bind_udp(socket: IpV4Socket) -> Result<SharedBuffer, NetworkError>;
-    fn send(recipient: IpV4Socket, len: USize) -> Result<Unit, NetworkError>;
-    fn recv(socket: IpV4Socket) -> Result<USize, NetworkError>;
+    fn send(socket: IpV4Socket, recipient: IpV4Socket, len: USize) -> Result<Unit, NetworkError>;
+    fn recv(socket: IpV4Socket) -> Result<RecvInfo, NetworkError>;
 }

@@ -8,5 +8,5 @@ enum Error {
 
 service Filesystem {
     fn open(path: String) -> Result<FileHandle, Error>;
-    fn read(handle: FileHandle) -> [U8];
+    fn read(handle: FileHandle) -> [core::U8];
 }

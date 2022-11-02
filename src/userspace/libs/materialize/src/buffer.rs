@@ -13,7 +13,6 @@ use core::{
     ptr::NonNull,
 };
 use librust::{
-    capabilities::CapabilityPtr,
     mem::MemoryAllocation,
     syscalls::mem::{AllocationOptions, MemoryPermissions},
     units::Bytes,

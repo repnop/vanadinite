@@ -5,7 +5,10 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-mod raw {
+#![feature(async_fn_in_trait)]
+#![allow(incomplete_features)]
+
+pub mod raw {
     use core::str::FromStr;
 
     vidl::vidl_include!("network");
@@ -16,6 +19,7 @@ mod raw {
         }
     }
 
+    #[derive(Debug)]
     pub struct IpV4AddressParseErr;
     impl FromStr for IpV4Address {
         type Err = IpV4AddressParseErr;
@@ -54,12 +58,12 @@ impl UdpSocket {
 
     pub fn send(&mut self, recipient: IpV4Socket, data: &[u8]) -> Result<(), NetworkError> {
         let copied = self.buffer.copy_from_slice(data);
-        self.client.send(recipient, copied)
+        self.client.send(self.socket, recipient, copied)
     }
 
-    pub fn recv(&mut self) -> Result<&[u8], NetworkError> {
-        let len = self.client.recv(self.socket)?;
+    pub fn recv(&mut self) -> Result<(IpV4Socket, &[u8]), NetworkError> {
+        let info = self.client.recv(self.socket)?;
         let buf = self.buffer.read();
-        Ok(&buf[..usize::min(len, buf.len())])
+        Ok((info.from, &buf[..usize::min(info.len, buf.len())]))
     }
 }

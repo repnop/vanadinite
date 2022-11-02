@@ -14,6 +14,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .spawn()?;
 
     println!("cargo:rustc-env=CARGO_BIN_FILE_INIT={}", init_dumped.display());
-    println!("cargo:rustc-link-arg=-Tvanadinite/lds/{}.lds", std::env::var("VANADINITE_TARGET_PLATFORM").unwrap());
+    println!(
+        "cargo:rustc-link-arg=-Tvanadinite/lds/{}.lds",
+        std::env::var("VANADINITE_TARGET_PLATFORM").unwrap_or_else(|_| String::from("virt"))
+    );
     Ok(())
 }

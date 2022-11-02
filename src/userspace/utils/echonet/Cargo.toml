@@ -6,5 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-json = { path="../../libs/json" }
-std = { path="../../libs/std" }
+json = { path = "../../libs/json" }
+network = { path = "../../servers/network" }
+std = { path = "../../libs/std" }

@@ -15,7 +15,7 @@ impl devicemgr::DevicemgrProvider for Provider<'_> {
     type Error = ();
 
     fn request(&mut self, compatible: Vec<String>) -> Result<Vec<devicemgr::Device>, Self::Error> {
-        println!("Request for: {:?}", compatible);
+        println!("[devicemgr] Request for: {:?}", compatible);
         let mut devices = Vec::new();
 
         for compatible in self.fdt.all_nodes().filter_map(|n| {

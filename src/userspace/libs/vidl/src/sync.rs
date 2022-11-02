@@ -69,7 +69,17 @@ impl SharedBuffer {
     pub fn len(&self) -> usize {
         self.memory.len()
     }
+
+    /// # Safety
+    /// You must ensure that the cloned value is not used to access the underlying memory
+    // TODO: remove this and use a 2 buffer approach
+    pub unsafe fn clone(&self) -> Self {
+        Self { cptr: self.cptr, memory: self.memory }
+    }
 }
+
+unsafe impl Send for SharedBuffer {}
+unsafe impl Sync for SharedBuffer {}
 
 impl materialize::Serializable for SharedBuffer {
     type Primitive<'a> = materialize::primitives::Capability;

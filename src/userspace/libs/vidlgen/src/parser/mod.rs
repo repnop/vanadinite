@@ -12,7 +12,6 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 use comb::{
     combinators::{delimited, hinted_choice, many1, maybe, single, single_by, until},
     recursive::recursive,
-    text::ascii_digit,
     Parser,
 };
 
@@ -219,8 +218,8 @@ fn parse_ident() -> impl Parser<Error = crate::SourceError, Output = String, Inp
 fn parse_attributes_then_type_definition() -> impl Parser<Error = crate::SourceError, Output = AstNode, Input = Token> {
     many1(single(Token::At).then_to(parse_ident()))
         .then(hinted_choice((
-            (Token::Keyword(Keyword::Struct), parse_struct_definition().map(|s| TypeDefinition::Struct(s))),
-            (Token::Keyword(Keyword::Enum), parse_enum_definition().map(|s| TypeDefinition::Enum(s))),
+            (Token::Keyword(Keyword::Struct), parse_struct_definition().map(TypeDefinition::Struct)),
+            (Token::Keyword(Keyword::Enum), parse_enum_definition().map(TypeDefinition::Enum)),
         )))
         .map(|(attrs, def)| AstNode::TypeDefinition(attrs, def))
 }

@@ -25,6 +25,7 @@ pub(crate) static GLOBAL_EXECUTOR: SyncRefCell<Lazy<PresentExecutor>> =
 pub struct Present {}
 
 impl Present {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {}
     }

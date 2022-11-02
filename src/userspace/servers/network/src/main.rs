@@ -5,6 +5,9 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+#![feature(async_fn_in_trait)]
+#![allow(incomplete_features)]
+
 mod arp;
 mod client;
 mod dhcp_helpers;
@@ -13,7 +16,7 @@ mod drivers;
 use crate::{arp::ARP_CACHE, drivers::NetworkDriver};
 use alchemy::PackedStruct;
 use dhcp::{options::DhcpMessageType, DhcpMessageParser, DhcpOption};
-use librust::{capabilities::{Capability, CapabilityWithDescription, CapabilityPtr}, syscalls::channel::ChannelMessage};
+use librust::{capabilities::{CapabilityPtr}};
 use netstack::{
     arp::{ArpHeader, ArpOperation, ArpPacket, HardwareType},
     ethernet::EthernetHeader,
@@ -22,35 +25,10 @@ use netstack::{
     MacAddress,
 };
 use present::{
-    ipc::{IpcChannel},
     sync::{mpsc::Sender, oneshot::OneshotTx}, futures::stream::{StreamExt, IntoStream},
 };
 use virtio::DeviceType;
-use std::{collections::BTreeMap, ipc::ChannelReadFlags};
-
-json::derive! {
-    #[derive(Debug, Clone)]
-    struct Device {
-        name: String,
-        compatible: Vec<String>,
-        interrupts: Vec<usize>,
-    }
-}
-
-json::derive! {
-    Serialize,
-    struct VirtIoDeviceRequest {
-        ty: u32,
-    }
-}
-
-json::derive! {
-    Deserialize,
-    #[derive(Debug)]
-    struct VirtIoDeviceResponse {
-        devices: Vec<Device>,
-    }
-}
+use std::{collections::BTreeMap};
 
 #[derive(Debug)]
 pub enum ControlMessage {
@@ -74,6 +52,7 @@ pub enum PortType {
     Raw,
 }
 
+#[derive(Debug)]
 pub enum Event {
     Interrupt(usize),
     NewChannel(CapabilityPtr),
@@ -335,7 +314,7 @@ async fn real_main() {
                     ControlMessage::ClientDisconnect { port } => drop(ports.remove(&port)),
                     ControlMessage::NewInterfaceIp(ip) => {
                         interface_ips.push(ip);
-                        println!("New IP on network interface: {}", ip);
+                        println!("[network] New IP on network interface: {}", ip);
                     }
                     ControlMessage::NewDefaultGateway(ip) => default_gateway = Some(ip),
                     ControlMessage::NewClient { port, port_type, tx } => {

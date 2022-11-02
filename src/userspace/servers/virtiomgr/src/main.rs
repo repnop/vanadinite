@@ -7,11 +7,6 @@
 
 #![feature(drain_filter)]
 
-use librust::{
-    capabilities::{Capability, CapabilityRights, CapabilityWithDescription},
-    syscalls::channel::KernelMessage,
-};
-use std::ipc::{ChannelMessage, ChannelReadFlags, IpcChannel};
 use virtio::DeviceType;
 
 struct DiscoveredDevice {
@@ -30,6 +25,7 @@ impl virtiomgr::VirtIoMgrProvider for Provider {
         &mut self,
         virtio_device_type: vidl::core::U32,
     ) -> Result<vidl::core::Vec<devicemgr::Device>, Self::Error> {
+        println!("[virtiomgr] Request for: {:?}", DeviceType::from_u32(virtio_device_type));
         match DeviceType::from_u32(virtio_device_type) {
             None => Ok(vec![]),
             Some(ty) => {
@@ -44,7 +40,6 @@ fn main() {
     let devicemgr_client = devicemgr::DevicemgrClient::new(devicemgr_cptr);
 
     let devices = devicemgr_client.request(&["virtio,mmio"]);
-    let _ = librust::syscalls::channel::read_kernel_message();
     let mut virtio_devices = Vec::new();
 
     for device in devices {
@@ -60,6 +55,8 @@ fn main() {
 
         virtio_devices.push(DiscoveredDevice { device, virtio_device_type: dev_type });
     }
+
+    println!("[virtiomgr] Serving!");
 
     virtiomgr::VirtIoMgr::new(Provider { devices: virtio_devices }).serve();
 }
