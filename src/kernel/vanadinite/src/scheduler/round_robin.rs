@@ -14,7 +14,7 @@ use crate::{
     task::TaskState,
     utils::{ticks_per_us, SameHartDeadlockDetection},
 };
-use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
+use alloc::{collections::VecDeque, vec::Vec};
 use sync::Lazy;
 
 type SpinMutex<T> = sync::SpinMutex<T, SameHartDeadlockDetection>;

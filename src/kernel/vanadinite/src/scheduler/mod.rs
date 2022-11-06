@@ -39,7 +39,7 @@ impl core::ops::Deref for LockedTaskGuard<'_> {
     type Target = Task;
 
     fn deref(&self) -> &Self::Target {
-        &*self.0
+        &self.0
     }
 }
 

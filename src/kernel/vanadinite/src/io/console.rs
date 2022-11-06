@@ -130,7 +130,7 @@ fn console_interrupt(
     claim: crate::drivers::generic::plic::InterruptClaim<'_>,
     _: usize,
 ) -> Result<(), &'static str> {
-    let c = CONSOLE.lock().read();
+    let _ = CONSOLE.lock().read();
     claim.complete();
     Ok(())
 }

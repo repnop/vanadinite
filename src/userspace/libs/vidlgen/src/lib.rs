@@ -289,7 +289,7 @@ impl {0}Client {{
         let _ = vidl::internal::read_kernel_message();
 
         match caps.remove(0) {{
-            vidl::CapabilityWithDescription {{ capability: _, description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions }} }} => {{
+            vidl::CapabilityWithDescription {{ capability: _, description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions: vidl::internal::MemoryPermissions::READ_WRITE }} }} => {{
                 let deserializer = vidl::materialize::Deserializer::new(unsafe {{ core::slice::from_raw_parts(ptr, len) }}, &caps);
                 deserializer.deserialize().expect("deserialize success")
             }}
@@ -481,7 +481,7 @@ impl Async{0}Client {{
         let (_msg, mut caps) = self.0.read_with_all_caps().await.unwrap();
 
         match caps.remove(0) {{
-            vidl::CapabilityWithDescription {{ capability: _, description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions }} }} => {{
+            vidl::CapabilityWithDescription {{ capability: _, description: vidl::CapabilityDescription::Memory {{ ptr, len, permissions: vidl::internal::MemoryPermissions::READ_WRITE }} }} => {{
                 let deserializer = vidl::materialize::Deserializer::new(unsafe {{ core::slice::from_raw_parts(ptr, len) }}, &caps);
                 deserializer.deserialize().expect("deserialize success")
             }}

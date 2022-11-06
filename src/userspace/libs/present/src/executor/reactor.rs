@@ -36,10 +36,6 @@ impl EventRegistry {
         assert!(self.interest.borrow_mut().remove(&block_type).is_none());
     }
 
-    pub(crate) fn is_interest(&self, block_type: BlockType) -> bool {
-        self.interest.borrow().get(&block_type).is_some()
-    }
-
     pub(crate) fn add_interested_event(&self, block_type: BlockType) {
         if let Some(n) = self.interest.borrow_mut().get_mut(&block_type) {
             *n += 1;
@@ -65,11 +61,6 @@ impl EventRegistry {
 
     pub(crate) fn unregister(&self, block_type: BlockType) -> Option<Waker> {
         self.waiting_for_event.borrow_mut().remove(&block_type)
-    }
-
-    #[track_caller]
-    pub(crate) fn wake(&self, block_type: BlockType) {
-        self.unregister(block_type).expect("blocked task doesn't exist").wake();
     }
 }
 

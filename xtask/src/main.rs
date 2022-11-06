@@ -8,25 +8,29 @@
 pub mod build;
 pub mod runner;
 
+use anyhow::Context;
 use build::{BuildTarget, Platform};
-use clap::{AppSettings, ArgEnum, Parser};
+use clap::{Parser, ValueEnum};
 use runner::RunOptions;
 use std::sync::{atomic::AtomicBool, Arc};
-use xshell::{pushd, rm_rf};
+use tracing_subscriber::prelude::*;
+use xshell::Shell;
 
 pub type Result<T> = anyhow::Result<T>;
 
 #[derive(Parser)]
-#[clap(rename_all = "snake_case", setting = AppSettings::DisableVersionFlag)]
+#[clap(rename_all = "snake_case")]
 enum Arguments {
     /// Build the various components needed to work with `vanadinite`
     Build {
-        #[clap(subcommand)]
+        #[command(subcommand)]
         target: BuildTarget,
+        #[arg(long, short, default_value = "false")]
+        quiet: bool,
     },
     /// Clean all or specific components
     Clean {
-        #[clap(arg_enum)]
+        #[clap(value_enum)]
         target: CleanTarget,
     },
     /// Run `vanadinite`
@@ -35,7 +39,7 @@ enum Arguments {
     Test(RunOptions),
 }
 
-#[derive(ArgEnum, Clone, Copy)]
+#[derive(ValueEnum, Clone, Copy)]
 enum CleanTarget {
     All,
     #[clap(name = "opensbi")]
@@ -49,22 +53,21 @@ enum CleanTarget {
 #[derive(Parser, Clone)]
 pub struct VanadiniteBuildOptions {
     /// The platform to target for the `vanadinite` build
-    #[clap(arg_enum, long, default_value = "virt")]
+    #[arg(value_enum, long, default_value = "virt")]
     platform: Platform,
 
     /// Extra kernel features to enable, space separated
-    //#[clap(setting = ArgSettings::AllowEmptyValues)]
-    #[clap(long, default_value = "")]
+    #[arg(long, default_value = "")]
     kernel_features: String,
 
-    #[clap(skip)]
+    #[arg(skip)]
     test: bool,
 
-    #[clap(long)]
+    #[arg(long)]
     debug_build: bool,
 }
 
-#[derive(ArgEnum, Clone, Copy)]
+#[derive(ValueEnum, Clone, Copy)]
 #[clap(rename_all = "snake_case")]
 pub enum Simulator {
     /// The RISC-V ISA simulator Spike
@@ -72,7 +75,7 @@ pub enum Simulator {
     Qemu,
 }
 
-#[derive(ArgEnum, Clone, Copy)]
+#[derive(ValueEnum, Clone, Copy)]
 #[clap(rename_all = "snake_case")]
 pub enum SbiImpl {
     /// The RISC-V reference SBI implementation
@@ -85,51 +88,57 @@ pub enum SbiImpl {
 fn main() -> Result<()> {
     let args = Arguments::parse();
 
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
     let _sig = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&_sig)).unwrap();
+    let shell = Shell::new().context("Unable to create shell instance")?;
 
     match args {
-        Arguments::Build { target } => build::build(target)?,
-        Arguments::Clean { target } => clean(target)?,
-        Arguments::Run(target) => runner::run(target)?,
-        Arguments::Test(target) => runner::test(target)?,
+        Arguments::Build { target, quiet } => build::build(&shell, target, quiet)?,
+        Arguments::Clean { target } => clean(&shell, target)?,
+        Arguments::Run(target) => runner::run(&shell, target)?,
+        Arguments::Test(target) => runner::test(&shell, target)?,
     }
 
     Ok(())
 }
 
-fn clean(target: CleanTarget) -> Result<()> {
+fn clean(shell: &Shell, target: CleanTarget) -> Result<()> {
     match target {
         CleanTarget::All => {
-            clean(CleanTarget::OpenSBI)?;
-            clean(CleanTarget::Spike)?;
-            clean(CleanTarget::Userspace)?;
-            clean(CleanTarget::Vanadinite)?;
-            clean(CleanTarget::Vanadium)?;
+            clean(shell, CleanTarget::OpenSBI)?;
+            clean(shell, CleanTarget::Spike)?;
+            clean(shell, CleanTarget::Userspace)?;
+            clean(shell, CleanTarget::Vanadinite)?;
+            clean(shell, CleanTarget::Vanadium)?;
         }
         CleanTarget::OpenSBI => {
-            let _dir = pushd("./submodules/opensbi")?;
-            rm_rf("./build")?;
+            let _dir = shell.push_dir("./submodules/opensbi");
+            shell.remove_path("./build")?;
             println!("Cleaned OpenSBI");
         }
         CleanTarget::Spike => {
-            let _dir = pushd("./submodules/riscv-isa-sim")?;
-            rm_rf("./build")?;
+            let _dir = shell.push_dir("./submodules/riscv-isa-sim");
+            shell.remove_path("./build")?;
             println!("Cleaned Spike");
         }
         CleanTarget::Userspace => {
-            let _dir = pushd("./src/userspace")?;
-            rm_rf("./target")?;
+            let _dir = shell.push_dir("./src/userspace");
+            shell.remove_path("./target")?;
             println!("Cleaned userspace");
         }
         CleanTarget::Vanadinite => {
-            let _dir = pushd("./src/kernel")?;
-            rm_rf("./target")?;
+            let _dir = shell.push_dir("./src/kernel");
+            shell.remove_path("./target")?;
             println!("Cleaned vanadinite");
         }
         CleanTarget::Vanadium => {
-            let _dir = pushd("./src/vanadium")?;
-            rm_rf("./target")?;
+            let _dir = shell.push_dir("./src/vanadium");
+            shell.remove_path("./target")?;
             println!("Cleaned vanadium");
         }
     }

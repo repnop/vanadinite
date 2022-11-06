@@ -10,8 +10,10 @@ debug = false
 
 [dependencies]
 anyhow = "1.0"
-clap = { version = "3.2.16", features = ["derive"] }
-tar = "0.4"
-walkdir = "2.3"
-xshell = "0.1"
+clap = { version = "4.0.18", features = ["derive"] }
 signal-hook = "0.3.7"
+tar = "0.4"
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
+walkdir = "2.3"
+xshell = "0.2.2"

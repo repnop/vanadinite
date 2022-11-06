@@ -6,11 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-json = { path = "../../libs/json" }
 librust = { path = "../../../shared/librust" }
 std = { path = "../../libs/std" }
 vidl = { path = "../../libs/vidl" }
 virtio = { path = "../../libs/virtio" }
+virtiomgr = { path = "../virtiomgr" }
 volatile = { path = "../../../shared/volatile" }
 
 [build-dependencies]

@@ -6,10 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::VirtualAddress;
-use crate::mem::{
-    paging::flags::{self, Flags},
-    region::MemoryRegion,
-};
+use crate::mem::{paging::flags::Flags, region::MemoryRegion};
 use alloc::collections::BTreeMap;
 use core::ops::Range;
 

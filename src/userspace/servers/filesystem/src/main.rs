@@ -5,60 +5,35 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use librust::syscalls::io::query_mmio_cap;
+
 mod drivers;
 
-use librust::capabilities::{Capability, CapabilityPtr};
-use std::ipc::IpcChannel;
-use vidl::materialize::{Deserialize, Serializable, Serialize};
-
-#[derive(Debug, Clone, Serializable, Serialize, Deserialize)]
-#[materialize(reexport_path = "vidl::materialize")]
-struct Device {
-    name: String,
-    compatible: Vec<String>,
-    interrupts: Vec<usize>,
-}
-
-struct VirtIoDeviceRequest {
-    ty: u32,
-}
-
-struct VirtIoDeviceResponse {
-    devices: Vec<Device>,
-}
-
-struct BlockDevice {
-    #[allow(dead_code)]
-    mmio_cap: CapabilityPtr,
-    #[allow(dead_code)]
-    interrupts: Vec<usize>,
-    device: drivers::virtio::BlockDevice,
-}
-
 fn main() {
-    // let mut block_devices = Vec::new();
-    // let mut virtiomgr = IpcChannel::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr);
+    let mut block_devices = Vec::new();
+    let virtiomgr = virtiomgr::VirtIoMgrClient::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr);
+    let devices = virtiomgr.request(virtio::DeviceType::BlockDevice as u32);
 
-    // virtiomgr
-    //     .send_bytes(&json::to_bytes(&VirtIoDeviceRequest { ty: virtio::DeviceType::BlockDevice as u32 }), &[])
-    //     .unwrap();
-    // // println!("[filesystem] Sent device request");
-    // let (message, capabilities) = virtiomgr.read_with_all_caps().unwrap();
-    // let response: VirtIoDeviceResponse = json::deserialize(message.as_bytes()).unwrap();
+    for device in devices {
+        let (mmio, _) = query_mmio_cap(device.capability.cptr, &mut []).unwrap();
+        block_devices.push(
+            drivers::virtio::BlockDevice::new(unsafe {
+                &*mmio.address().cast::<virtio::devices::block::VirtIoBlockDevice>()
+            })
+            .unwrap(),
+        );
+    }
 
-    // let mut serializer = vidl::materialize::Serializer::new();
-    // let my_device = Device {
-    //     name: String::from("virtio_mmio@1000000"),
-    //     compatible: vec![String::from("virtio")],
-    //     interrupts: vec![16, 20],
-    // };
+    block_devices[0].queue_read(0);
 
-    // serializer.serialize(&my_device).unwrap();
-    // let buffer = serializer.into_buffer();
-    // println!("{:?}", vidl::materialize::Deserializer::new(&buffer, &[]).deserialize::<Device>());
-
-    // let mut serializer = vidl::materialize::Serializer::new();
-    // let _ = serializer.serialize(&(&&["mystr"][..],));
-    // let buffer = serializer.into_buffer();
-    // println!("{:?}", vidl::materialize::Deserializer::new(&buffer, &[]).deserialize::<(Vec<String>,)>());
+    loop {
+        let notif = librust::syscalls::channel::read_kernel_message();
+        match notif {
+            vidl::internal::KernelMessage::InterruptOccurred(id) => {
+                println!("[filesystem] {:?}", block_devices[0].finish_command().unwrap());
+                librust::syscalls::io::complete_interrupt(id).unwrap();
+            }
+            _ => {}
+        }
+    }
 }

@@ -11,7 +11,7 @@ fn main() {
         let file = file.unwrap();
         let out_file_name = file.file_name().into_string().unwrap().replace(".vidl", ".rs");
         println!("cargo:rerun-if-changed=vidl/{}", file.file_name().into_string().unwrap());
-        let source = std::fs::read_to_string(&file.path()).unwrap();
+        let source = std::fs::read_to_string(file.path()).unwrap();
         match vidlgen::Compiler::new(false).provider("devicemgr", "devicemgr").compile(&source) {
             Ok(out) => std::fs::write(out_dir.join(out_file_name), out.to_string()).unwrap(),
             Err(e) => {

@@ -8,7 +8,6 @@
 #![feature(
     adt_const_params,
     allocator_api,
-    arbitrary_enum_discriminant,
     const_option,
     generic_const_exprs,
     inline_const_pat,

@@ -93,23 +93,6 @@ pub(super) struct Receiver {
     pub(super) wake: Arc<SpinMutex<Option<WakeToken>>>,
 }
 
-impl Receiver {
-    fn try_receive(&self) -> Result<Option<ChannelMessage>, ()> {
-        // TODO: is it worth trying to `.read()` then `.upgrade()` if not empty?
-        match self.inner.write().pop_front() {
-            Some(message) => Ok(Some(message)),
-            None => match self.alive.load(Ordering::Acquire) {
-                true => Ok(None),
-                false => Err(()),
-            },
-        }
-    }
-
-    fn register_wake(&self, token: WakeToken) {
-        self.wake.lock().replace(token);
-    }
-}
-
 impl Drop for Receiver {
     fn drop(&mut self) {
         // FIXME: this currently breaks sending messages...

@@ -7,9 +7,7 @@
 
 mod fields;
 
-use crate::{
-    deserialize::DeserializeError, hash::FxHasher, sealed, serialize::serializers::PrimitiveSerializer, Deserialize,
-};
+use crate::{deserialize::DeserializeError, hash::FxHasher, sealed, serialize::serializers::PrimitiveSerializer};
 use core::{alloc::Layout, convert::TryFrom};
 
 pub(crate) unsafe trait Integer: Sized + Copy {}

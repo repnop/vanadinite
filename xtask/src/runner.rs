@@ -11,7 +11,7 @@ use crate::{
 };
 use clap::Parser;
 use std::path::PathBuf;
-use xshell::cmd;
+use xshell::{cmd, Shell};
 
 #[derive(Parser)]
 pub struct RunOptions {
@@ -48,12 +48,16 @@ pub struct RunOptions {
     vanadinite_options: VanadiniteBuildOptions,
 
     /// Which simulator to run with
-    #[clap(arg_enum, long, default_value = "qemu")]
+    #[clap(value_enum, long, default_value = "qemu")]
     with: Simulator,
 
     /// Which SBI implementation to run with
-    #[clap(arg_enum, long, default_value = "opensbi")]
+    #[clap(value_enum, long, default_value = "opensbi")]
     sbi: SbiImpl,
+
+    /// Quietly build the project
+    #[arg(short, long, default_value = "false")]
+    quiet: bool,
 }
 
 impl Default for RunOptions {
@@ -74,19 +78,24 @@ impl Default for RunOptions {
             },
             with: Simulator::Qemu,
             sbi: SbiImpl::OpenSbi,
+            quiet: false,
         }
     }
 }
 
-pub fn run(options: RunOptions) -> Result<()> {
+pub fn run(shell: &Shell, options: RunOptions) -> Result<()> {
     if !options.no_build {
-        build::build(match options.with {
-            Simulator::Spike => match options.sbi {
-                SbiImpl::OpenSbi => BuildTarget::OpenSBI(options.vanadinite_options.clone()),
-                SbiImpl::Vanadium => BuildTarget::Vanadium(options.vanadinite_options.clone()),
+        build::build(
+            shell,
+            match options.with {
+                Simulator::Spike => match options.sbi {
+                    SbiImpl::OpenSbi => BuildTarget::OpenSBI(options.vanadinite_options.clone()),
+                    SbiImpl::Vanadium => BuildTarget::Vanadium(options.vanadinite_options.clone()),
+                },
+                Simulator::Qemu => BuildTarget::Vanadinite(options.vanadinite_options.clone()),
             },
-            Simulator::Qemu => BuildTarget::Vanadinite(options.vanadinite_options.clone()),
-        })?;
+            options.quiet,
+        )?;
     }
 
     let platform = options.vanadinite_options.platform.to_string();
@@ -134,7 +143,7 @@ pub fn run(options: RunOptions) -> Result<()> {
                 None => vec![String::from("-serial"), String::from("mon:stdio"), String::from("-nographic")],
             };
 
-            cmd!("
+            cmd!(shell, "
                 qemu-system-riscv64
                     -machine {platform}
                     -cpu rv64
@@ -157,7 +166,7 @@ pub fn run(options: RunOptions) -> Result<()> {
                 false => vec![],
             };
 
-            cmd!("
+            cmd!(shell, "
                 ./build/spike
                     -p{cpu_count}
                     -m{ram}
@@ -172,12 +181,12 @@ pub fn run(options: RunOptions) -> Result<()> {
     Ok(())
 }
 
-pub fn test(mut options: RunOptions) -> Result<()> {
+pub fn test(shell: &Shell, mut options: RunOptions) -> Result<()> {
     options.vanadinite_options.test = true;
     options.vanadinite_options.platform = Platform::Virt;
 
     let build_opts = &options.vanadinite_options;
-    build::build(BuildTarget::Vanadinite(build_opts.clone()))?;
+    build::build(shell, BuildTarget::Vanadinite(build_opts.clone()), options.quiet)?;
 
     let platform = options.vanadinite_options.platform.to_string();
     let cpu_count = options.cpus.to_string();
@@ -197,7 +206,7 @@ pub fn test(mut options: RunOptions) -> Result<()> {
     };
 
     #[rustfmt::skip]
-    cmd!("
+    cmd!(shell, "
         qemu-system-riscv64
             -machine {platform}
             -cpu rv64
