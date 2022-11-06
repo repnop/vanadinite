@@ -23,24 +23,26 @@ impl<'a> Archive<'a> {
     }
 
     pub fn file(&self, filename: &str) -> Option<File<'a>> {
+        self.files().find(|file| file.metadata.filename == filename)
+    }
+
+    pub fn files(&self) -> impl Iterator<Item = File<'a>> + '_ {
         let mut archive_index = 0;
-
-        while let Some(header) = self.data.get(archive_index..).and_then(FileHeader::from_bytes) {
-            log::debug!("found file: {:?}", header.file_name);
-
-            let content_start = archive_index + 512;
-            let content_end = content_start + header.file_size;
-            let content_padding = 512 - (header.file_size % 512);
-
-            if header.file_name == filename {
-                return Some(File { metadata: header, contents: self.data.get(content_start..content_end)? });
-            } else {
+        core::iter::from_fn(move || {
+            if let Some(header) = self.data.get(archive_index..).and_then(FileHeader::from_bytes) {
+                let content_start = archive_index;
+                let content_end = content_start + header.file_size;
+                let mut content_padding = 512 - (header.file_size % 512);
+                if content_end % 512 != 0 {
+                    content_padding += 512;
+                }
                 archive_index = content_end + content_padding;
-                log::debug!("{:#X}", archive_index);
-            }
-        }
 
-        None
+                return Some(File { metadata: header, contents: self.data.get(content_start + 512..content_end)? });
+            }
+
+            None
+        })
     }
 }
 
@@ -52,7 +54,7 @@ pub struct File<'a> {
 
 #[derive(Debug)]
 pub struct FileHeader<'a> {
-    pub file_name: &'a str,
+    pub filename: &'a str,
     pub file_mode: usize,
     pub uid: usize,
     pub gid: usize,
@@ -79,7 +81,7 @@ impl<'a> FileHeader<'a> {
             _ => return None,
         }
 
-        let file_name = {
+        let filename = {
             let nul = bytes[..100].iter().copied().position(|b| b == b'\0').unwrap_or(100);
             from_utf8(&bytes[..nul])?
         };
@@ -116,7 +118,7 @@ impl<'a> FileHeader<'a> {
         };
 
         Some(Self {
-            file_name,
+            filename,
             file_mode,
             uid,
             gid,

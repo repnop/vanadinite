@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::reactor::{BlockType, EVENT_REGISTRY};
+use crate::{executor::reactor::{BlockType, EVENT_REGISTRY}, futures::stream::{IntoStream, Stream}};
 use core::{future::Future, pin::Pin};
 use std::{sync::{SyncRc, SyncRefCell}, task::{Context, Poll}};
 
@@ -58,6 +58,37 @@ impl<T: Send + 'static> Future for ReceiverRecv<'_, T> {
                 // to wake here, so to avoid a TOCTOU race condition and losing
                 // the wake event
                 EVENT_REGISTRY.register(BlockType::AsyncChannel(self.0.id), cx.waker().clone());
+                drop(locked);
+                Poll::Pending
+            }
+        }
+    }
+}
+
+impl<T: Send + 'static> IntoStream for Receiver<T> {
+    type Item = T;
+    type Stream = ReceiverStream<T>;
+
+    fn into_stream(self) -> Self::Stream {
+        ReceiverStream { receiver: self }
+    }
+}
+
+pub struct ReceiverStream<T: Send + 'static> {
+    receiver: Receiver<T>,
+}
+
+impl<T: Send + 'static> Stream for ReceiverStream<T> {
+    type Item = T;
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut locked = self.receiver.inner.borrow_mut();
+        match locked.pop_front() {
+            Some(t) => Poll::Ready(Some(t)),
+            None => {
+                // Note: its important to keep the lock held while we register
+                // to wake here, so to avoid a TOCTOU race condition and losing
+                // the wake event
+                EVENT_REGISTRY.register(BlockType::AsyncChannel(self.receiver.id), cx.waker().clone());
                 drop(locked);
                 Poll::Pending
             }

@@ -5,7 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(const_btree_new)]
+#![feature(async_fn_in_trait)]
+#![allow(incomplete_features)]
 
 mod arp;
 mod client;
@@ -15,7 +16,7 @@ mod drivers;
 use crate::{arp::ARP_CACHE, drivers::NetworkDriver};
 use alchemy::PackedStruct;
 use dhcp::{options::DhcpMessageType, DhcpMessageParser, DhcpOption};
-use librust::{capabilities::{Capability, CapabilityWithDescription}, syscalls::channel::ChannelMessage};
+use librust::{capabilities::{CapabilityPtr}};
 use netstack::{
     arp::{ArpHeader, ArpOperation, ArpPacket, HardwareType},
     ethernet::EthernetHeader,
@@ -24,34 +25,10 @@ use netstack::{
     MacAddress,
 };
 use present::{
-    ipc::{IpcChannel},
-    sync::{mpsc::Sender, oneshot::OneshotTx},
+    sync::{mpsc::Sender, oneshot::OneshotTx}, futures::stream::{StreamExt, IntoStream},
 };
-use std::{collections::BTreeMap, ipc::ChannelReadFlags};
-
-json::derive! {
-    #[derive(Debug, Clone)]
-    struct Device {
-        name: String,
-        compatible: Vec<String>,
-        interrupts: Vec<usize>,
-    }
-}
-
-json::derive! {
-    Serialize,
-    struct VirtIoDeviceRequest {
-        ty: u32,
-    }
-}
-
-json::derive! {
-    Deserialize,
-    #[derive(Debug)]
-    struct VirtIoDeviceResponse {
-        devices: Vec<Device>,
-    }
-}
+use virtio::DeviceType;
+use std::{collections::BTreeMap};
 
 #[derive(Debug)]
 pub enum ControlMessage {
@@ -75,21 +52,27 @@ pub enum PortType {
     Raw,
 }
 
+#[derive(Debug)]
+pub enum Event {
+    Interrupt(usize),
+    NewChannel(CapabilityPtr),
+    PacketToSend {
+        port: u16,
+        socket: IpV4Socket,
+        data: Vec<u8>,
+    },
+    ArpRequest(Vec<u8>),
+    DhcpResponse(Vec<u8>),
+    ControlMessage(ControlMessage),
+}
+
 async fn real_main() {
-    let virtiomgr = std::ipc::IpcChannel::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr);
-
-    virtiomgr
-        .temp_send_json(ChannelMessage::default(), &VirtIoDeviceRequest { ty: virtio::DeviceType::NetworkCard as u32 }, &[])
-        .unwrap();
-
-    let (response, _, capabilities): (VirtIoDeviceResponse, _, _) = virtiomgr.temp_read_json(ChannelReadFlags::NONE).unwrap();
-
-    if response.devices.is_empty() {
-        return;
-    }
-
-    let (CapabilityWithDescription { capability: Capability { cptr: mmio_cap, .. }, .. }, device) = (capabilities[0], &response.devices[0]);
-    let (info, _) = librust::syscalls::io::query_mmio_cap(mmio_cap, &mut []).unwrap();
+    let mut virtio_devices = virtiomgr::VirtIoMgrClient::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr).request(DeviceType::NetworkCard as u32);
+    let device = match virtio_devices.is_empty() {
+        true => return,
+        false => virtio_devices.remove(0),
+    };
+    let (info, _) = librust::syscalls::io::query_mmio_cap(device.capability.cptr, &mut []).unwrap();
 
     let interrupt_id = device.interrupts[0];
     let mut net_device = drivers::virtio::VirtIoNetDevice::new(unsafe {
@@ -188,9 +171,18 @@ async fn real_main() {
         arp::ARP_CACHE.set_lookup_task_sender(arp_lookup_tx);
         present::spawn(async move {
             let mut resolving_map: BTreeMap<IpV4Address, OneshotTx<MacAddress>> = BTreeMap::new();
-            loop {
-                present::select! {
-                    (ip, sender) = arp_lookup_rx.recv() => {
+
+            enum ArpEvent {
+                Lookup((IpV4Address, OneshotTx<MacAddress>)),
+                Data(Vec<u8>),
+            }
+
+            let stream = IntoStream::into_stream(arp_lookup_rx).map(ArpEvent::Lookup).merge(IntoStream::into_stream(arp_packet_task_rx).map(ArpEvent::Data));
+            present::pin!(stream);
+
+            while let Some(event) = stream.next().await {
+                match event {
+                    ArpEvent::Lookup((ip, sender)) => {
                         let mut lookup_packet = vec![0; core::mem::size_of::<ArpPacket::<netstack::arp::Ethernet, netstack::arp::IpV4>>()];
 
                         let mut arp_packet = ArpPacket::<netstack::arp::Ethernet, netstack::arp::IpV4>::try_from_mut_byte_slice(&mut lookup_packet[..]).unwrap();
@@ -203,7 +195,7 @@ async fn real_main() {
                         arp_packet_task_tx.send(lookup_packet);
                         resolving_map.insert(ip, sender);
                     }
-                    packet_data = arp_packet_task_rx.recv() => {
+                    ArpEvent::Data(packet_data) => {
                         if let Ok(arp_response @ ArpPacket { header: ArpHeader { operation: ArpOperation::REPLY, .. }, .. }) = ArpPacket::<netstack::arp::Ethernet, netstack::arp::IpV4>::try_from_byte_slice(&packet_data[..]) {
                             if let Some(sender) = resolving_map.remove(&IpV4Address::from(arp_response.sender_protocol_address)) {
                                 sender.send(MacAddress::new(arp_response.sender_hardware_address));
@@ -218,9 +210,11 @@ async fn real_main() {
     });
 
     let channel_listener = present::ipc::NewChannelListener::new();
-    loop {
-        present::select! {
-            _ = interrupt.wait() => {
+    let stream = interrupt.map(Event::Interrupt).merge(IntoStream::into_stream(channel_listener).map(Event::NewChannel)).merge(IntoStream::into_stream(packet_recv).map(|(port, socket, data)| Event::PacketToSend { port, socket, data })).merge(IntoStream::into_stream(arp_packet_nic_rx).map(Event::ArpRequest)).merge(IntoStream::into_stream(dhcp_packet_nic_rx).map(Event::DhcpResponse)).merge(IntoStream::into_stream(control_rx).map(Event::ControlMessage));
+    present::pin!(stream);
+    while let Some(event) = stream.next().await {
+        match event {
+            Event::Interrupt(interrupt_id) => {
                 if let Ok(Some(packet)) = net_device.process_interrupt(interrupt_id) {
                     let (eth_header, payload, _) = EthernetHeader::split_slice_ref(packet).unwrap();
                     match eth_header.frame_type {
@@ -254,10 +248,10 @@ async fn real_main() {
 
                 librust::syscalls::io::complete_interrupt(interrupt_id).unwrap();
             }
-            cptr = channel_listener.recv() => {
+            Event::NewChannel(cptr) => {
                 present::spawn(client::handle_client(control_tx.clone(), packet_tx.clone(), cptr));
             }
-            (outgoing_port, dst_socket, pkt_data) = packet_recv.recv() => {
+            Event::PacketToSend { port: outgoing_port, socket: dst_socket, data: pkt_data } => {
                 if !interface_ips.is_empty() && default_gateway.is_some() {
                     if let Some(mac) = ARP_CACHE.lookup(default_gateway.unwrap()) {
                         if let Some((port_type, _)) = ports.get(&outgoing_port) {
@@ -285,7 +279,7 @@ async fn real_main() {
                     }
                 }
             }
-            arp_request = arp_packet_nic_rx.recv() => {
+            Event::ArpRequest(arp_request) => {
                 net_device.tx_raw(&move |bytes| {
                     let (eth_header, payload, _) = EthernetHeader::split_slice_mut(bytes).ok()?;
                     eth_header.destination_mac = MacAddress::BROADCAST;
@@ -296,7 +290,7 @@ async fn real_main() {
                     Some(core::mem::size_of::<EthernetHeader>() + arp_request.len())
                 }).unwrap();
             }
-            dhcp_response = dhcp_packet_nic_rx.recv() => {
+            Event::DhcpResponse(dhcp_response) => {
                 net_device.tx_udp4(
                     IpV4Socket::new(
                         IpV4Address::new(0, 0, 0, 0),
@@ -315,12 +309,12 @@ async fn real_main() {
                     }
                 ).unwrap();
             }
-            control_message = control_rx.recv() => {
+            Event::ControlMessage(control_message) => {
                 match control_message {
                     ControlMessage::ClientDisconnect { port } => drop(ports.remove(&port)),
                     ControlMessage::NewInterfaceIp(ip) => {
                         interface_ips.push(ip);
-                        println!("New IP on network interface: {}", ip);
+                        println!("[network] New IP on network interface: {}", ip);
                     }
                     ControlMessage::NewDefaultGateway(ip) => default_gateway = Some(ip),
                     ControlMessage::NewClient { port, port_type, tx } => {

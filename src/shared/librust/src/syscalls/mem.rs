@@ -35,14 +35,16 @@ pub fn query_memory_capability(cptr: CapabilityPtr) -> Result<(*mut u8, usize, M
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct MemoryPermissions(usize);
 
 impl MemoryPermissions {
-    pub const READ: Self = Self(0);
-    pub const WRITE: Self = Self(1);
-    pub const EXECUTE: Self = Self(2);
+    pub const READ: Self = Self(1 << 0);
+    pub const WRITE: Self = Self(1 << 1);
+    pub const EXECUTE: Self = Self(1 << 2);
+
+    pub const READ_WRITE: Self = Self(Self::READ.0 | Self::WRITE.0);
 
     pub fn new(flags: usize) -> Self {
         Self(flags)

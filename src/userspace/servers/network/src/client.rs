@@ -5,52 +5,93 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeMap;
+
 use crate::{ClientMessage, ControlMessage, PortType};
-use librust::{capabilities::CapabilityPtr, syscalls::channel::ChannelMessage};
-use netstack::ipv4::IpV4Socket;
-use present::{ipc::IpcChannel, sync::mpsc::Sender};
+use librust::capabilities::CapabilityPtr;
+use netstack::ipv4::{IpV4Address, IpV4Socket};
+use network::NetworkError;
+use present::sync::mpsc::{Receiver, Sender};
+use vidl::sync::SharedBuffer;
 
-json::derive! {
-    #[derive(Debug, Clone)]
-    struct BindRequest {
-        port: u16,
-        port_type: String,
-    }
+struct BoundPort {
+    packet_rx: Receiver<ClientMessage>,
+    buffer: SharedBuffer,
 }
 
-json::derive! {
-    #[derive(Debug, Clone)]
-    struct BindResponse {
-        msg: String,
-        port: Option<u16>,
-    }
+struct ClientProvider {
+    control_tx: Sender<ControlMessage>,
+    packet_tx: Sender<(u16, IpV4Socket, Vec<u8>)>,
+    bound_ports: BTreeMap<u16, BoundPort>,
 }
 
-json::derive! {
-    #[derive(Debug, Clone)]
-    struct SendRequest {
-        // FIXME: this should be an IpV4Socket
-        to_ip: String,
-        to_port: u16,
-        data: Vec<u8>,
-    }
-}
+impl network::raw::AsyncNetworkProvider for ClientProvider {
+    type Error = ();
 
-json::derive! {
-    #[derive(Debug, Clone)]
-    struct SendResponse {
-        msg: String,
-        ok: bool,
-    }
-}
+    async fn bind_udp(
+        &mut self,
+        socket: network::IpV4Socket,
+    ) -> Result<Result<vidl::sync::SharedBuffer, NetworkError>, Self::Error> {
+        if self.bound_ports.get(&socket.port).is_some() {
+            return Ok(Err(NetworkError::AlreadyBound));
+        }
 
-json::derive! {
-    #[derive(Debug, Clone)]
-    struct Received {
-        // FIXME: this should be an IpV4Socket
-        from_ip: String,
-        from_port: u16,
-        data: Vec<u8>,
+        let (packet_tx, packet_rx) = present::sync::mpsc::unbounded();
+        self.control_tx.send(ControlMessage::NewClient { port: socket.port, port_type: PortType::Udp, tx: packet_tx });
+
+        match packet_rx.recv().await {
+            ClientMessage::PortInUse => {
+                return Ok(Err(NetworkError::AlreadyBound));
+            }
+            ClientMessage::PortBound => {}
+            msg => unreachable!("bad response message: {:?}", msg),
+        }
+
+        let buffer = SharedBuffer::new(4096).unwrap();
+        let buffer2 = unsafe { buffer.clone() };
+
+        self.bound_ports.insert(socket.port, BoundPort { packet_rx, buffer });
+
+        Ok(Ok(buffer2))
+    }
+
+    async fn send(
+        &mut self,
+        socket: network::IpV4Socket,
+        recipient: network::IpV4Socket,
+        len: usize,
+    ) -> Result<Result<(), NetworkError>, Self::Error> {
+        let Some(bound_port) = self.bound_ports.get_mut(&socket.port) else { return Ok(Err(NetworkError::NotBound)) };
+        self.packet_tx.send((
+            socket.port,
+            IpV4Socket::new(
+                IpV4Address::new(
+                    recipient.ip.address[0],
+                    recipient.ip.address[1],
+                    recipient.ip.address[2],
+                    recipient.ip.address[3],
+                ),
+                recipient.port,
+            ),
+            bound_port.buffer.read()[..len].to_vec(),
+        ));
+
+        Ok(Ok(()))
+    }
+
+    async fn recv(
+        &mut self,
+        socket: network::IpV4Socket,
+    ) -> Result<Result<network::raw::RecvInfo, NetworkError>, Self::Error> {
+        let Some(bound_port) = self.bound_ports.get_mut(&socket.port) else { return Ok(Err(NetworkError::NotBound)) };
+        let ClientMessage::Received { from, data } = bound_port.packet_rx.recv().await else { unreachable!() };
+        // TODO: check for data size
+        bound_port.buffer.copy_from_slice(&data[..]);
+
+        Ok(Ok(network::raw::RecvInfo {
+            from: network::IpV4Socket { ip: network::IpV4Address { address: from.ip.to_bytes() }, port: from.port },
+            len: data.len(),
+        }))
     }
 }
 
@@ -59,89 +100,7 @@ pub async fn handle_client(
     packet_tx: Sender<(u16, IpV4Socket, Vec<u8>)>,
     cptr: CapabilityPtr,
 ) {
-    let ipc_channel = IpcChannel::new(cptr);
-    let msg = ipc_channel.temp_read_json().await;
-
-    let (request, _msg, _): (BindRequest, _, _) = match msg {
-        Ok(msg) => msg,
-        Err(e) => {
-            println!("Error reading from IPC channel: {:?}", e);
-            return;
-        }
-    };
-
-    let port = request.port;
-    let port_type = match &*request.port_type {
-        "udp" => PortType::Udp,
-        "raw" => PortType::Raw,
-        _ => {
-            let _ = ipc_channel
-                .temp_send_json(ChannelMessage::default(), &BindResponse { msg: String::from("unknown port type"), port: None }, &[]);
-            return;
-        }
-    };
-
-    let (client_tx, client_rx) = present::sync::mpsc::unbounded();
-    control_tx.send(ControlMessage::NewClient { port, port_type, tx: client_tx.clone() });
-
-    match client_rx.recv().await {
-        ClientMessage::PortInUse => {
-            let _ = ipc_channel
-                .temp_send_json(ChannelMessage::default(), &BindResponse { msg: String::from("port in use"), port: None }, &[]);
-            return;
-        }
-        ClientMessage::PortBound => {
-            if ipc_channel
-                .temp_send_json(ChannelMessage::default(), &BindResponse { msg: String::new(), port: Some(port) }, &[])
-                .is_err()
-            {
-                control_tx.send(ControlMessage::ClientDisconnect { port });
-                return;
-            }
-        }
-        msg => unreachable!("bad response message: {:?}", msg),
-    }
-
-    loop {
-        present::select! {
-            msg = client_rx.recv() => {
-                match msg {
-                    ClientMessage::Received { from, data } => {
-                        if ipc_channel.temp_send_json(
-                            ChannelMessage::default(),
-                            &Received {
-                                from_ip: from.ip.to_string(),
-                                from_port: from.port,
-                                data,
-                            },
-                            &[]
-                        ).is_err() {
-                            control_tx.send(ControlMessage::ClientDisconnect { port });
-                            break;
-                        }
-                    },
-                    _ => {}
-                }
-            }
-            msg = ipc_channel.temp_read_json() => {
-                let (request, msg, _): (SendRequest, _, _) = match msg {
-                    Ok(msg) => msg,
-                    Err(_) => {
-                        control_tx.send(ControlMessage::ClientDisconnect { port });
-                        break;
-                    },
-                };
-
-                let ip = match request.to_ip.parse() {
-                    Ok(ip) => ip,
-                    Err(_) => {
-                        control_tx.send(ControlMessage::ClientDisconnect { port });
-                        break;
-                    }
-                };
-
-                packet_tx.send((port, IpV4Socket::new(ip, request.to_port), request.data));
-            }
-        }
-    }
+    network::raw::AsyncNetwork::new(ClientProvider { control_tx, packet_tx, bound_ports: BTreeMap::new() }, cptr)
+        .serve()
+        .await;
 }

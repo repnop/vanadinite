@@ -13,52 +13,19 @@ use librust::{
 
 static SERVERS: &[u8] = include_bytes!("../../../../build/initfs.tar");
 
-static INIT_ORDER: &str = r#"{
-    "servers": [
-        {
-            "name": "devicemgr",
-            "caps": ["fdt"],
-        },
-        {
-            "name": "stdio",
-            "caps": ["devicemgr"],
-        },
-        {
-            "name": "virtiomgr",
-            "caps": ["devicemgr", "stdio"],
-        },
-        {
-            "name": "filesystem",
-            "caps": ["virtiomgr", "stdio"],
-        },
-        {
-            "name": "network",
-            "caps": ["virtiomgr", "stdio"],
-        },
-        {
-            "name": "servicemgr",
-            "caps": ["devicemgr", "stdio", "network"],
-        },
-        {
-            "name": "echonet",
-            "caps": ["stdio", "network"],
-        },
-    ]
-}"#;
+static INIT_ORDER: &[Service] = &[
+    Service { name: "devicemgr", caps: &["fdt"] },
+    Service { name: "stdio", caps: &["devicemgr"] },
+    Service { name: "virtiomgr", caps: &["devicemgr", "stdio"] },
+    Service { name: "filesystem", caps: &["virtiomgr", "stdio"] },
+    Service { name: "network", caps: &["virtiomgr", "stdio"] },
+    Service { name: "servicemgr", caps: &["devicemgr", "stdio"] },
+    Service { name: "echonet", caps: &["network", "stdio"] },
+];
 
-json::derive! {
-    Deserialize,
-    struct InitOrder {
-        servers: Vec<Server>,
-    }
-}
-
-json::derive! {
-    Deserialize,
-    struct Server {
-        name: String,
-        caps: Vec<String>,
-    }
+struct Service {
+    name: &'static str,
+    caps: &'static [&'static str],
 }
 
 fn main() {
@@ -67,15 +34,14 @@ fn main() {
     let fdt_size = fdt.total_size();
     let tar = tar::Archive::new(SERVERS).unwrap();
 
-    let mut caps = std::collections::BTreeMap::<String, CapabilityPtr>::new();
-    let init_order: InitOrder = json::deserialize(INIT_ORDER.as_bytes()).unwrap();
+    let mut caps = std::collections::BTreeMap::<&'static str, CapabilityPtr>::new();
 
-    for server in init_order.servers {
-        let file = tar.file(&server.name).unwrap();
-        let (mut space, mut env) = loadelf::load_elf(&server.name, &loadelf::Elf::new(file.contents).unwrap()).unwrap();
+    for server in INIT_ORDER {
+        let Some(file) = tar.file(server.name) else { panic!("Couldn't find service: {}", server.name) };
+        let (mut space, mut env) = loadelf::load_elf(server.name, &loadelf::Elf::new(file.contents).unwrap()).unwrap();
 
         for cap in server.caps {
-            if cap == "fdt" {
+            if cap == &"fdt" {
                 let mut fdt_obj = space.create_object(core::ptr::null(), fdt_size, MemoryPermissions::READ).unwrap();
                 fdt_obj.as_slice()[..fdt_size]
                     .copy_from_slice(unsafe { core::slice::from_raw_parts(fdt_ptr, fdt_size) });
@@ -83,8 +49,8 @@ fn main() {
                 continue;
             }
 
-            let cptr = *caps.get(&cap).unwrap();
-            space.grant(&cap, cptr, CapabilityRights::READ | CapabilityRights::WRITE);
+            let cptr = *caps.get(cap).unwrap();
+            space.grant(cap, cptr, CapabilityRights::READ | CapabilityRights::WRITE);
         }
 
         env.a0 = 0;

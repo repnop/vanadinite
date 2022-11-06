@@ -10,3 +10,7 @@ fdt = "0.1.3"
 librust = { path = "../../../shared/librust" }
 std = { path = "../../libs/std" }
 json = { path = "../../libs/json" }
+vidl = { path = "../../libs/vidl" }
+
+[build-dependencies]
+vidlgen = { path = "../../libs/vidlgen" }

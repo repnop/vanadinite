@@ -7,4 +7,5 @@
 
 fn main() {
     println!("cargo:rustc-link-arg=-Tinit.lds");
+    println!("cargo:rerun-if-changed=../../../../build/initfs.tar");
 }

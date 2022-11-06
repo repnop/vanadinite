@@ -6,8 +6,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+devicemgr = { path = "../devicemgr" }
 librust = { path = "../../../shared/librust" }
 json = { path = "../../libs/json" }
 std = { path = "../../libs/std" }
+vidl = { path = "../../libs/vidl" }
 virtio = { path = "../../libs/virtio" }
 volatile = { path = "../../../shared/volatile" }
+
+[build-dependencies]
+vidlgen = { path = "../../libs/vidlgen" }

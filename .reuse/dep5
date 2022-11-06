@@ -9,6 +9,10 @@ Source: https://github.com/repnop/vanadinite
 # Copyright: $YEAR $NAME <$CONTACT>
 # License: ...
 
+Files: **/*.vidl
+Copyright: 2022 The vanadinite developers
+License: MPL-2.0
+
 Files: **/Cargo.toml **/config.toml **/*.png rust-toolchain rustfmt.toml README.md .gitignore .gitmodules .vscode/settings.json .vscode/snippets.code-snippets
 Copyright: 2021 The vanadinite developers
 License: CC0-1.0

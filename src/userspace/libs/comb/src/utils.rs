@@ -7,10 +7,7 @@
 
 use alloc::rc::Rc;
 
-use crate::{
-    stream::{ErrorCollectStream, Stream},
-    Error, Parser,
-};
+use crate::{stream::Stream, Error, Parser};
 
 pub fn cheap_clone<I, O, E, P>(parser: P) -> CheapClone<I, O, E, P>
 where
@@ -50,77 +47,114 @@ where
     type Input = I;
 
     #[inline]
-    fn parse<S>(&self, stream: &mut S) -> Result<Self::Output, Self::Error>
-    where
-        S: Stream<Item = Self::Input>,
-    {
+    fn parse(&self, stream: &mut Stream<'_, Self::Input>) -> Result<Self::Output, Self::Error> {
         self.parser.parse(stream)
     }
 }
 
-pub fn try_adapter<I, O, E, P>(parser: P) -> TryAdapter<I, O, E, P>
+pub fn todo<E, I, O>() -> TodoParser<E, I, O>
 where
     E: Error,
-    P: Parser<Error = E, Output = O, Input = I>,
+    I: core::fmt::Debug,
 {
-    TryAdapter { parser }
+    TodoParser::new()
 }
 
-#[derive(Debug)]
-pub struct TryAdapter<I, O, E, P>
-where
-    E: Error,
-    P: Parser<Error = E, Output = O, Input = I>,
-{
-    parser: P,
-}
+#[derive(Debug, Clone, Copy)]
+pub struct TodoParser<E, I, O>(
+    core::marker::PhantomData<fn() -> E>,
+    core::marker::PhantomData<fn() -> I>,
+    core::marker::PhantomData<fn() -> O>,
+);
 
-impl<I, O, E, P> TryAdapter<I, O, E, P>
-where
-    E: Error,
-    P: Parser<Error = E, Output = O, Input = I>,
-{
-    pub fn new(parser: P) -> Self {
-        Self { parser }
+impl<E, I, O> TodoParser<E, I, O> {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl<I, O, E, P> Clone for TryAdapter<I, O, E, P>
-where
-    E: Error,
-    P: Parser<Error = E, Output = O, Input = I> + Clone,
-{
-    fn clone(&self) -> Self {
-        Self { parser: self.parser.clone() }
+impl<E, I, O> Default for TodoParser<E, I, O> {
+    fn default() -> Self {
+        Self(core::marker::PhantomData, core::marker::PhantomData, core::marker::PhantomData)
     }
 }
 
-impl<I, O, E, P> Parser for TryAdapter<I, O, E, P>
+impl<E, I, O> Parser for TodoParser<E, I, O>
 where
-    I: core::fmt::Debug + Clone,
-    O: core::fmt::Debug + Clone,
-    E: Error + Clone,
-    P: Parser<Error = E, Output = O, Input = I>,
+    E: Error,
+    I: core::fmt::Debug,
 {
-    type Error = P::Error;
+    type Error = E;
+    type Input = I;
     type Output = O;
-    type Input = Result<I, E>;
 
     #[inline]
-    fn parse<S>(&self, stream: &mut S) -> Result<Self::Output, Self::Error>
-    where
-        S: Stream<Item = Self::Input>,
-    {
-        let mut error_collect = ErrorCollectStream { stream: stream.clone(), error_dump: None };
-        match self.parser.parse(&mut error_collect) {
-            Ok(output) => {
-                core::mem::swap(stream, &mut error_collect.stream);
-                Ok(output)
-            }
-            Err(e) => match error_collect.error_dump {
-                Some(e) => Err(e),
-                None => Err(e),
-            },
-        }
+    #[track_caller]
+    fn parse(&self, _: &mut Stream<'_, Self::Input>) -> Result<Self::Output, Self::Error> {
+        todo!("make a parser")
     }
 }
+
+// pub fn try_adapter<I, O, E, P>(parser: P) -> TryAdapter<I, O, E, P>
+// where
+//     E: Error,
+//     P: Parser<Error = E, Output = O, Input = I>,
+// {
+//     TryAdapter { parser }
+// }
+
+// #[derive(Debug)]
+// pub struct TryAdapter<I, O, E, P>
+// where
+//     E: Error,
+//     P: Parser<Error = E, Output = O, Input = I>,
+// {
+//     parser: P,
+// }
+
+// impl<I, O, E, P> TryAdapter<I, O, E, P>
+// where
+//     E: Error,
+//     P: Parser<Error = E, Output = O, Input = I>,
+// {
+//     pub fn new(parser: P) -> Self {
+//         Self { parser }
+//     }
+// }
+
+// impl<I, O, E, P> Clone for TryAdapter<I, O, E, P>
+// where
+//     E: Error,
+//     P: Parser<Error = E, Output = O, Input = I> + Clone,
+// {
+//     fn clone(&self) -> Self {
+//         Self { parser: self.parser.clone() }
+//     }
+// }
+
+// impl<I, O, E, P> Parser for TryAdapter<I, O, E, P>
+// where
+//     I: core::fmt::Debug + Clone,
+//     O: core::fmt::Debug + Clone,
+//     E: Error + Clone,
+//     P: Parser<Error = E, Output = O, Input = I>,
+// {
+//     type Error = P::Error;
+//     type Output = O;
+//     type Input = Result<I, E>;
+
+//     #[inline]
+//     fn parse(&self, stream: &mut Stream<'_, Self::Input>) -> Result<Self::Output, Self::Error> {
+//         let mut error_collect = ErrorCollectStream::new(stream.clone());
+//         match self.parser.parse(&mut error_collect) {
+//             Ok(output) => {
+//                 core::mem::swap(stream, &mut error_collect.into_parts().0);
+//                 Ok(output)
+//             }
+//             Err(e) => match error_collect.error() {
+//                 Some(e) => Err(e),
+//                 None => Err(e),
+//             },
+//         }
+//     }
+// }

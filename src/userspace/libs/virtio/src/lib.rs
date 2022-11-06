@@ -59,7 +59,7 @@ impl VirtIoHeader {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum DeviceType {
     Reserved = 0,

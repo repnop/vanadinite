@@ -35,10 +35,12 @@ pub trait Error: Sized + core::fmt::Debug {
     }
 
     fn unexpected_value<V: core::fmt::Debug>(value: V, span: Option<Span>) -> Self {
-        match span {
-            Some(span) => Self::custom(format!("unexpected value `{:?}` @ {}", value, span), Some(span)),
-            None => Self::custom(format!("unexpected value `{:?}`", value), None),
-        }
+        Self::custom(format!("unexpected value `{:?}`", value), span)
+    }
+
+    #[doc(hidden)]
+    fn hopefully_cheap() -> Self {
+        Self::custom("", None)
     }
 }
 

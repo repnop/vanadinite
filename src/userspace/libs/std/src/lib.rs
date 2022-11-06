@@ -8,10 +8,10 @@
 #![feature(
     allocator_api,
     alloc_error_handler,
-    const_btree_new,
     extern_types,
     inline_const,
     lang_items,
+    naked_functions,
     prelude_import,
     thread_local
 )]
@@ -30,6 +30,12 @@ pub mod rt;
 pub mod sync;
 pub mod task;
 mod task_local;
+pub mod string {
+    pub use alloc::string::*;
+}
+pub mod vec {
+    pub use alloc::vec::*;
+}
 pub mod vmspace;
 
 pub use alloc::collections;

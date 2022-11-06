@@ -1,0 +1,9 @@
+[build]
+target = "riscv64gc-unknown-none-elf"
+
+[target.riscv64gc-unknown-none-elf]
+rustflags = ["-C", "code-model=medium", "-C", "relocation-model=static", "-C", "link-arg=-znognustack", "-C", "link-arg=--no-pie"]
+
+[unstable]
+build-std = ["core", "alloc", "compiler_builtins"]
+build-std-features = ["compiler-builtins-mem"]

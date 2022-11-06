@@ -1,0 +1,12 @@
+struct FileHandle {
+    handle: usize,
+}
+
+enum Error {
+    UnknownPath,
+}
+
+service Filesystem {
+    fn open(path: String) -> Result<FileHandle, Error>;
+    fn read(handle: FileHandle) -> [core::U8];
+}

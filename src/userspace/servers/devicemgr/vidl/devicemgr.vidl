@@ -1,0 +1,12 @@
+use core::{Capability, USize};
+
+struct Device {
+    name: String,
+    compatible: [String],
+    interrupts: [USize],
+    capability: Capability,
+}
+
+service Devicemgr {
+    fn request(compatible: [String]) -> [Device];
+}
