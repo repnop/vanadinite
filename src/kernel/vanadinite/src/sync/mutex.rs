@@ -5,12 +5,43 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{DeadlockDetection, NoCheck};
+use super::{DeadlockDetection, NoCheck};
 use core::{
     cell::UnsafeCell,
     marker::PhantomData,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
+
+#[repr(C)]
+pub struct StableSpinMutex<T: Send> {
+    lock: AtomicU64,
+    data: UnsafeCell<T>,
+}
+
+impl<T: Send> StableSpinMutex<T> {
+    pub fn new(value: T) -> Self {
+        Self { lock: AtomicU64::new(0), data: UnsafeCell::new(value) }
+    }
+
+    pub unsafe fn lock_into_parts(&self) -> (*mut T, &AtomicU64) {
+        self.acquire_lock();
+
+        (self.data.get(), &self.lock)
+    }
+
+    fn acquire_lock(&self) {
+        while self.lock.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed).is_err() {
+            crate::asm::pause();
+        }
+    }
+
+    unsafe fn unlock(&self) {
+        self.lock.store(0, Ordering::Release);
+    }
+}
+
+unsafe impl<T: Send> Send for StableSpinMutex<T> {}
+unsafe impl<T: Send> Sync for StableSpinMutex<T> {}
 
 pub struct SpinMutex<T: Send, D: DeadlockDetection = NoCheck> {
     lock: AtomicBool,
@@ -51,6 +82,12 @@ impl<T: Send, D: DeadlockDetection> SpinMutex<T, D> {
             }
             Err(_) => None,
         }
+    }
+
+    pub fn get_mut(&mut self) -> &mut T {
+        // Safety: `&mut self` enforces that there's no shared references
+        // lingering, so its safe to immediate get the underlying data
+        unsafe { &mut *self.data.get() }
     }
 
     #[track_caller]

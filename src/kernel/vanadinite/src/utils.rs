@@ -127,7 +127,7 @@ impl_units!(u16, u32, u64, u128, i16, i32, i64, i128, usize, isize);
 
 pub struct SameHartDeadlockDetection;
 
-impl sync::DeadlockDetection for SameHartDeadlockDetection {
+impl crate::sync::DeadlockDetection for SameHartDeadlockDetection {
     fn would_deadlock(metadata: usize) -> bool {
         crate::HART_ID.get() == metadata
     }

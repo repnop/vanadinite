@@ -8,8 +8,8 @@
 use crate::{
     drivers::{generic::uart16550::Uart16550, sifive::fu540_c000::uart::SifiveUart, CompatibleWith},
     interrupts::isr::register_isr,
+    sync::SpinMutex,
 };
-use sync::SpinMutex;
 
 pub trait ConsoleDevice: 'static {
     fn init(&mut self);

@@ -25,10 +25,11 @@ use core::sync::atomic::Ordering;
 use librust::{capabilities::CapabilityRights, error::SyscallError, syscalls::channel::KernelMessage};
 
 pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
+    let task_state = task.mutable_state.get_mut();
     let start = VirtualAddress::new(regs.a1);
     let len = regs.a2;
     let user_slice = RawUserSlice::readable(start, len);
-    let user_slice = match unsafe { user_slice.validate(&task.memory_manager) } {
+    let user_slice = match unsafe { user_slice.validate(&task_state.memory_manager) } {
         Ok(slice) => slice,
         Err((_, e)) => {
             log::error!("Bad memory from process: {:?}", e);
@@ -66,7 +67,11 @@ pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), 
                 Some(fdt::standard_nodes::MemoryRegion { size: Some(len), starting_address }) => {
                     claimed.upgrade().insert(node_path.into(), task.tid);
                     let map_to = unsafe {
-                        task.memory_manager.map_mmio_device(PhysicalAddress::from_ptr(starting_address), None, len)
+                        task_state.memory_manager.map_mmio_device(
+                            PhysicalAddress::from_ptr(starting_address),
+                            None,
+                            len,
+                        )
                     };
 
                     // FIXME: this probably needs marked as `Clone` in
@@ -76,7 +81,7 @@ pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), 
                         let start = PhysicalAddress::from_ptr(starting_address);
                         start..start.offset(len)
                     };
-                    let cptr = task.cspace.mint(Capability {
+                    let cptr = task_state.cspace.mint(Capability {
                         resource: CapabilityResource::Mmio(phys_range, map_to, interrupts.collect()),
                         rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
                     });
@@ -94,7 +99,7 @@ pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), 
                         crate::interrupts::isr::register_isr(interrupt, move |plic, _, id| {
                             plic.disable_interrupt(crate::platform::current_plic_context(), id);
                             let task = TASKS.get(current_tid).unwrap();
-                            let mut task = task.lock();
+                            let mut task_state = task.mutable_state.lock();
 
                             log::debug!(
                                 "Interrupt {} triggered (hart: {}), notifying task {}",
@@ -103,18 +108,18 @@ pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), 
                                 task.name
                             );
 
-                            task.claimed_interrupts.insert(id, HART_ID.get());
+                            task_state.claimed_interrupts.insert(id, HART_ID.get());
                             // FIXME: not sure if this is entirely correct..
-                            let mut send_lock = task.kernel_channel.sender.inner.write();
+                            let mut send_lock = task_state.kernel_channel.sender.inner.write();
                             send_lock.push_back(ChannelMessage {
                                 data: Into::into(KernelMessage::InterruptOccurred(id)),
                                 caps: Vec::new(),
                             });
 
-                            let token = task.kernel_channel.sender.wake.lock().take();
+                            let token = task_state.kernel_channel.sender.wake.lock().take();
                             if let Some(token) = token {
                                 drop(send_lock);
-                                drop(task);
+                                drop(task_state);
                                 SCHEDULER.unblock(token);
                             }
 
@@ -134,7 +139,7 @@ pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), 
 
 pub fn complete_interrupt(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let interrupt_id = regs.a1;
-    match task.claimed_interrupts.remove(&interrupt_id) {
+    match task.mutable_state.get_mut().claimed_interrupts.remove(&interrupt_id) {
         None => Err(SyscallError::InvalidArgument(0)),
         Some(hart) => {
             log::debug!("Task {} completing interrupt {}", task.name, interrupt_id);

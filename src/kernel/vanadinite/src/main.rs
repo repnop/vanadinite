@@ -11,6 +11,7 @@
     alloc_error_handler,
     allocator_api,
     arbitrary_self_types,
+    asm_const,
     custom_test_frameworks,
     extern_types,
     fn_align,
@@ -18,6 +19,7 @@
     inline_const_pat,
     naked_functions,
     new_uninit,
+    strict_provenance,
     sync_unsafe_cell,
     thread_local
 )]
@@ -44,6 +46,7 @@ pub mod io;
 pub mod mem;
 pub mod platform;
 pub mod scheduler;
+pub mod sync;
 pub mod syscall;
 pub mod task;
 #[cfg(debug_assertions)]
@@ -69,7 +72,6 @@ use alloc::boxed::Box;
 use fdt::Fdt;
 use mem::kernel_patching::kernel_section_v2p;
 use sbi::{base::probe_extension, base::ExtensionAvailability, hart_state_management::hart_start};
-use scheduler::Scheduler;
 pub use vanadinite_macros::{debug, error, info, trace, warn};
 
 static N_CPUS: AtomicUsize = AtomicUsize::new(1);
@@ -272,18 +274,6 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
-    let ptr = Box::leak(Box::new(task::ThreadControlBlock {
-        kernel_stack: mem::alloc_kernel_stack(8.kib()),
-        kernel_thread_local: cpu_local::tp(),
-        kernel_global_ptr: asm::gp(),
-        saved_sp: 0,
-        saved_tp: 0,
-        saved_gp: 0,
-        kernel_stack_size: 8.kib(),
-    }));
-
-    csr::sscratch::write(ptr as *mut _ as usize);
-
     #[cfg(test)]
     {
         log::info!("Running tests");
@@ -309,7 +299,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     }
 
     info!(brightgreen, "Scheduling init process!");
-    scheduler::SCHEDULER.schedule();
+    unsafe { scheduler::SCHEDULER.begin_scheduling() }
 }
 
 #[no_mangle]
@@ -326,21 +316,10 @@ extern "C" fn kalt(hart_id: usize) -> ! {
         plic.set_context_threshold(platform::current_plic_context(), 0);
     }
 
-    let ptr = Box::leak(Box::new(task::ThreadControlBlock {
-        kernel_stack: mem::alloc_kernel_stack(8.kib()),
-        kernel_thread_local: cpu_local::tp(),
-        kernel_global_ptr: asm::gp(),
-        saved_sp: 0,
-        saved_tp: 0,
-        saved_gp: 0,
-        kernel_stack_size: 8.kib(),
-    }));
-
-    csr::sscratch::write(ptr as *mut _ as usize);
     csr::sstatus::set_fs(csr::sstatus::FloatingPointStatus::Initial);
     csr::sie::enable();
 
-    scheduler::SCHEDULER.schedule();
+    unsafe { scheduler::SCHEDULER.begin_scheduling() }
 }
 
 #[naked]

@@ -13,6 +13,7 @@ use crate::{
         user::{self, RawUserSlice},
     },
     scheduler::{Scheduler, WakeToken, SCHEDULER, TASKS},
+    sync::{SpinMutex, SpinRwLock},
     task::Task,
     trap::GeneralRegisters,
     HART_ID,
@@ -28,7 +29,6 @@ use librust::{
     },
     task::Tid,
 };
-use sync::{SpinMutex, SpinRwLock};
 
 #[derive(Debug, Clone)]
 pub struct UserspaceChannel {

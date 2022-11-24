@@ -10,12 +10,13 @@ pub mod console;
 pub mod logging;
 pub mod terminal;
 
+use crate::sync::SpinRwLock;
 use alloc::{collections::BTreeMap, string::String};
 pub use console::*;
 use core::fmt::Write;
 use librust::task::Tid;
 
-pub static CLAIMED_DEVICES: sync::SpinRwLock<BTreeMap<String, Tid>> = sync::SpinRwLock::new(BTreeMap::new());
+pub static CLAIMED_DEVICES: SpinRwLock<BTreeMap<String, Tid>> = SpinRwLock::new(BTreeMap::new());
 
 #[macro_export]
 macro_rules! print {

@@ -10,7 +10,7 @@ use core::num::NonZeroUsize;
 use crate::{
     capabilities::{Capability, CapabilityResource, CapabilitySpace},
     mem::{
-        manager::{AddressRegionKind, FillOption, MemoryManager, RegionDescription},
+        manager::{AddressRegionKind, FillOption, RegionDescription, UserspaceMemoryManager},
         paging::{flags::Flags, PageSize, VirtualAddress},
         user::RawUserSlice,
     },
@@ -33,14 +33,18 @@ use librust::{
 };
 
 pub struct VmspaceObject {
-    pub memory_manager: MemoryManager,
+    pub memory_manager: UserspaceMemoryManager,
     pub inprocess_mappings: Vec<VirtualAddress>,
     pub cspace: CapabilitySpace,
 }
 
 impl VmspaceObject {
     pub fn new() -> Self {
-        Self { memory_manager: MemoryManager::new(), inprocess_mappings: Vec::new(), cspace: CapabilitySpace::new() }
+        Self {
+            memory_manager: UserspaceMemoryManager::new(),
+            inprocess_mappings: Vec::new(),
+            cspace: CapabilitySpace::new(),
+        }
     }
 }
 

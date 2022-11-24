@@ -8,7 +8,7 @@
 pub mod isr;
 
 use crate::drivers::generic::plic;
-use sync::SpinMutex;
+use crate::sync::SpinMutex;
 
 pub static PLIC: SpinMutex<Option<&'static plic::Plic>> = SpinMutex::new(None);
 

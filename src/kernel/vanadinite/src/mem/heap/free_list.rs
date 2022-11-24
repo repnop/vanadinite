@@ -5,6 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::sync::SpinMutex;
 use crate::{
     mem::{
         paging::PageSize,
@@ -14,7 +15,6 @@ use crate::{
     utils::{round_up_to_next, Units},
 };
 use core::ptr::NonNull;
-use sync::SpinMutex;
 
 pub struct FreeListAllocator {
     inner: SpinMutex<FreeList>,
