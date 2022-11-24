@@ -13,7 +13,7 @@ pub mod vmspace;
 
 use crate::{
     mem::paging::VirtualAddress,
-    scheduler::{Scheduler, SCHEDULER},
+    scheduler::{Scheduler, SCHEDULER, CURRENT_TASK},
     task::TaskState,
     trap::TrapFrame,
 };
@@ -26,9 +26,8 @@ pub enum Outcome {
 }
 
 pub fn handle(frame: &mut TrapFrame, sepc: usize) -> Outcome {
-    let task_lock = SCHEDULER.active_on_cpu().unwrap();
-    let mut task_lock = task_lock.lock();
-    let task = &mut *task_lock;
+    let task_lock = CURRENT_TASK.borrow();
+    let task = &*task_lock;
 
     let mut regs = &mut frame.registers;
 
@@ -43,9 +42,8 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> Outcome {
     let res = match syscall {
         Syscall::Exit => {
             log::trace!("Task {} ({:?}) exited", task.tid, task.name);
-            task.state = TaskState::Dead;
-            drop(task_lock);
-            SCHEDULER.schedule();
+            SCHEDULER.schedule(TaskState::Dead);
+            unreachable!("Dead task [{}] {} rescheduled?", task.tid, task.name)
         }
         Syscall::GetTid => {
             regs.a1 = task.tid.value();
@@ -63,11 +61,6 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> Outcome {
         Syscall::QueryMmioCapability => mem::query_mmio_cap(task, regs),
         Syscall::ReadChannel => match channel::read_message(task, regs) {
             Ok(Outcome::Blocked) => {
-                let tid = task.tid;
-                task.context.gp_regs = frame.registers;
-                task.context.pc = sepc;
-                drop(task_lock);
-                SCHEDULER.block(tid);
                 return Outcome::Blocked;
             }
             Ok(Outcome::Completed) => Ok(()),
@@ -76,7 +69,7 @@ pub fn handle(frame: &mut TrapFrame, sepc: usize) -> Outcome {
         Syscall::WriteChannel => channel::send_message(task, regs),
         Syscall::MintCapability => todo!(),
         Syscall::RevokeCapability => todo!(),
-        Syscall::EnableNotifications => Ok(task.subscribes_to_events = true),
+        Syscall::EnableNotifications => Ok(task.mutable_state.lock().subscribes_to_events = true),
     };
 
     match res {

@@ -22,7 +22,9 @@ use librust::{
     syscalls::mem::{AllocationOptions, DmaAllocationOptions, MemoryPermissions},
 };
 
-pub fn alloc_virtual_memory(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+pub fn alloc_virtual_memory(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+    let mut task = task.mutable_state.lock();
+
     let size = frame.a1;
     let options = AllocationOptions::new(frame.a2);
     let permissions = MemoryPermissions::new(frame.a3);
@@ -119,10 +121,11 @@ pub fn alloc_virtual_memory(task: &mut Task, frame: &mut GeneralRegisters) -> Re
     }
 }
 
-pub fn alloc_dma_memory(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+pub fn alloc_dma_memory(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let size = frame.a1;
     let options = DmaAllocationOptions::new(frame.a2);
     let page_size = PageSize::Kilopage;
+    let mut task = task.mutable_state.lock();
 
     match size {
         0 => Err(SyscallError::InvalidArgument(0)),
@@ -154,10 +157,10 @@ pub fn alloc_dma_memory(task: &mut Task, frame: &mut GeneralRegisters) -> Result
     }
 }
 
-pub fn query_mem_cap(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+pub fn query_mem_cap(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let cptr = CapabilityPtr::new(frame.a1);
 
-    match task.cspace.resolve(cptr) {
+    match task.mutable_state.lock().cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Memory(_, vmem, _), rights }) => {
             let memory_perms = match (*rights & CapabilityRights::READ, *rights & CapabilityRights::WRITE) {
                 (true, true) => MemoryPermissions::READ | MemoryPermissions::WRITE,
@@ -174,7 +177,9 @@ pub fn query_mem_cap(task: &mut Task, frame: &mut GeneralRegisters) -> Result<()
     }
 }
 
-pub fn query_mmio_cap(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+pub fn query_mmio_cap(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+    let mut task = task.mutable_state.lock();
+
     let cptr = CapabilityPtr::new(frame.a1);
     let buffer_ptr = VirtualAddress::new(frame.a2);
     let buffer_len = frame.a3;

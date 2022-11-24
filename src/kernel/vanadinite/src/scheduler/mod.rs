@@ -118,6 +118,29 @@ impl Scheduler {
         }
     }
 
+    pub fn enqueue_with(&self, f: impl FnOnce(Tid) -> Task) {
+        let (tid, task) = TASKS.insert_with(|tid| {
+            let mut task = f(tid);
+            task.mutable_state.get_mut().state = TaskState::Ready;
+            task
+        });
+
+        let mut inner = self.inner.lock();
+
+        inner.run_queue.insert(tid, (task, TaskMetadata::new()));
+        inner.policy.task_enqueued(tid, TaskMetadata::new());
+
+        if CURRENT_TASK.borrow().inner.is_null() {
+            CURRENT_TASK.borrow_mut().set(task);
+
+            let idle = Task::idle();
+            let tid = idle.tid;
+            IDLE_TASK.borrow_mut().set(Arc::new(idle));
+
+            inner.policy.task_enqueued(tid, TaskMetadata::new());
+        }
+    }
+
     #[inline(never)]
     pub fn schedule(&self, next_state: TaskState) {
         let mut inner = self.inner.lock();

@@ -12,13 +12,13 @@ use crate::{
     mem::{
         manager::{AddressRegionKind, FillOption, RegionDescription, UserspaceMemoryManager},
         paging::{flags::Flags, PageSize, VirtualAddress},
-        user::RawUserSlice,
+        user::RawUserSlice, alloc_kernel_stack,
     },
-    scheduler::{Scheduler, SCHEDULER},
+    scheduler::{Scheduler, SCHEDULER, return_to_usermode},
     syscall::channel::UserspaceChannel,
-    task::{Context, Task},
-    trap::GeneralRegisters,
-    utils::{self, Units},
+    task::{Context, Task, MutableState},
+    trap::{GeneralRegisters, TrapFrame},
+    utils::{self, Units}, sync::{SpinMutex, mutex::StableSpinMutex},
 };
 use alloc::{collections::BTreeMap, vec::Vec};
 use librust::{
@@ -48,7 +48,8 @@ impl VmspaceObject {
     }
 }
 
-pub fn create_vmspace(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+pub fn create_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+    let mut task = task.mutable_state.lock();
     let id = task.vmspace_next_id;
     task.vmspace_next_id += 1;
     task.vmspace_objects.insert(VmspaceObjectId::new(id), VmspaceObject::new());
@@ -57,7 +58,9 @@ pub fn create_vmspace(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(
     Ok(())
 }
 
-pub fn alloc_vmspace_object(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+pub fn alloc_vmspace_object(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+    let mut task = task.mutable_state.lock();
+
     let id = frame.a1;
     let address = VirtualAddress::new(frame.a2);
     let size = frame.a3;
@@ -133,7 +136,9 @@ pub fn alloc_vmspace_object(task: &mut Task, frame: &mut GeneralRegisters) -> Re
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn spawn_vmspace(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+    let mut task_state = task.mutable_state.lock();
+
     let id: VmspaceObjectId = VmspaceObjectId::new(frame.a1);
     let name: VirtualAddress = VirtualAddress::new(frame.a2);
     let len: usize = frame.a3;
@@ -144,13 +149,13 @@ pub fn spawn_vmspace(task: &mut Task, frame: &mut GeneralRegisters) -> Result<()
     let sp: usize = frame.t4;
     let tp: usize = frame.t5;
 
-    let object = match task.vmspace_objects.remove(&id) {
+    let object = match task_state.vmspace_objects.remove(&id) {
         Some(map) => map,
         None => return Err(SyscallError::InvalidArgument(0)),
     };
 
     let user_slice = RawUserSlice::readable(name, len);
-    let user_slice = match unsafe { user_slice.validate(&task.memory_manager) } {
+    let user_slice = match unsafe { user_slice.validate(&task_state.memory_manager) } {
         Ok(slice) => slice,
         Err((_, e)) => {
             log::error!("Bad memory from process: {:?}", e);
@@ -178,15 +183,24 @@ pub fn spawn_vmspace(task: &mut Task, frame: &mut GeneralRegisters) -> Result<()
     );
     log::debug!("Memory map:\n{:#?}", object.memory_manager.address_map_debug(None));
 
+    let kernel_stack = alloc_kernel_stack(2.mib());
+    let trap_frame = unsafe { kernel_stack.sub(core::mem::size_of::<TrapFrame>()).cast::<TrapFrame>() };
+    unsafe {
+        *trap_frame =
+            TrapFrame { sepc: pc, registers: GeneralRegisters { sp, tp, a0, a1, a2, ..Default::default() } }
+    };
+
     let (kernel_channel, user_read) = UserspaceChannel::new();
     let mut new_task = Task {
         tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),
         name: alloc::string::String::from(task_name).into_boxed_str(),
-        context: Context {
-            pc,
-            gp_regs: GeneralRegisters { a0, a1, a2, sp, tp, ..Default::default() },
-            fp_regs: Default::default(),
-        },
+        context: StableSpinMutex::new(Context {
+            ra: return_to_usermode as usize,
+            sp: kernel_stack.addr(),
+            sx: [0; 12], 
+        }),
+        kernel_stack,
+        mutable_state: SpinMutex::new(MutableState {
         memory_manager: object.memory_manager,
         state: crate::task::TaskState::Running,
         vmspace_next_id: 0,
@@ -195,11 +209,13 @@ pub fn spawn_vmspace(task: &mut Task, frame: &mut GeneralRegisters) -> Result<()
         kernel_channel,
         claimed_interrupts: BTreeMap::new(),
         subscribes_to_events: true,
+        }),
     };
 
     let (mut channel1, mut channel2) = UserspaceChannel::new();
 
     new_task
+    .mutable_state.get_mut()
         .cspace
         .mint_with_id(
             KERNEL_CHANNEL,
@@ -212,14 +228,15 @@ pub fn spawn_vmspace(task: &mut Task, frame: &mut GeneralRegisters) -> Result<()
         channel2.sender.other_tid = Some(task.tid);
 
         for region in object.inprocess_mappings {
-            task.memory_manager.dealloc_region(region);
+            task_state.memory_manager.dealloc_region(region);
         }
 
-        let cptr = task.cspace.mint_with(|cptr| {
+        let cptr = task_state.cspace.mint_with(|cptr| {
             channel1.sender.other_cptr = PARENT_CHANNEL;
             channel2.sender.other_cptr = cptr;
 
             new_task
+            .mutable_state.get_mut()
                 .cspace
                 .mint_with_id(
                     PARENT_CHANNEL,

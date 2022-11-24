@@ -148,7 +148,7 @@ impl Drop for Sender {
     }
 }
 
-pub fn send_message(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+pub fn send_message(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let cptr = CapabilityPtr::new(frame.a1);
     let caps =
         RawUserSlice::<user::Read, librust::capabilities::Capability>::new(VirtualAddress::new(frame.a2), frame.a3);
@@ -209,7 +209,7 @@ pub fn send_message(task: &mut Task, frame: &mut GeneralRegisters) -> Result<(),
     Ok(())
 }
 
-pub fn read_message(task: &mut Task, regs: &mut GeneralRegisters) -> Result<super::Outcome, SyscallError> {
+pub fn read_message(task: &Task, regs: &mut GeneralRegisters) -> Result<super::Outcome, SyscallError> {
     let cptr = CapabilityPtr::new(regs.a1);
     let cap_buffer = RawUserSlice::<user::ReadWrite, librust::capabilities::CapabilityWithDescription>::new(
         VirtualAddress::new(regs.a2),

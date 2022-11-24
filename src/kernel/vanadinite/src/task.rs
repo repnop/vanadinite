@@ -65,7 +65,7 @@ pub struct Context {
     pub sx: [usize; 12],
 }
 
-struct MutableState {
+pub struct MutableState {
     pub memory_manager: UserspaceMemoryManager,
     pub state: TaskState,
     pub vmspace_objects: BTreeMap<VmspaceObjectId, VmspaceObject>,

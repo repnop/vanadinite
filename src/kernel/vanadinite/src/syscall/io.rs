@@ -24,7 +24,7 @@ use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
 use librust::{capabilities::CapabilityRights, error::SyscallError, syscalls::channel::KernelMessage};
 
-pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
+pub fn claim_device(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let task_state = task.mutable_state.get_mut();
     let start = VirtualAddress::new(regs.a1);
     let len = regs.a2;
@@ -120,7 +120,7 @@ pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), 
                             if let Some(token) = token {
                                 drop(send_lock);
                                 drop(task_state);
-                                SCHEDULER.unblock(token);
+                                // FIXME: unblock task
                             }
 
                             Ok(())
@@ -137,7 +137,7 @@ pub fn claim_device(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), 
     }
 }
 
-pub fn complete_interrupt(task: &mut Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
+pub fn complete_interrupt(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let interrupt_id = regs.a1;
     match task.mutable_state.get_mut().claimed_interrupts.remove(&interrupt_id) {
         None => Err(SyscallError::InvalidArgument(0)),
