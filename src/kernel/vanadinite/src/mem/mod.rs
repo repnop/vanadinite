@@ -5,8 +5,6 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::sync::SpinMutex;
-
 use {
     core::{
         arch::asm,
@@ -16,8 +14,8 @@ use {
     phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
 };
 
-pub static KERNEL_MEMORY_MANAGER: SpinMutex<manager::UserspaceMemoryManager> =
-    SpinMutex::new(manager::UserspaceMemoryManager::new());
+// pub static KERNEL_MEMORY_MANAGER: SpinMutex<manager::UserspaceMemoryManager> =
+//     SpinMutex::new(manager::UserspaceMemoryManager::new());
 
 pub mod heap;
 pub mod manager;

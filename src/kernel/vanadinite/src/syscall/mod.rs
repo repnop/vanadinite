@@ -13,7 +13,7 @@ pub mod vmspace;
 
 use crate::{
     mem::paging::VirtualAddress,
-    scheduler::{Scheduler, SCHEDULER, CURRENT_TASK},
+    scheduler::{CURRENT_TASK, SCHEDULER},
     task::TaskState,
     trap::TrapFrame,
 };
@@ -25,8 +25,8 @@ pub enum Outcome {
     Completed,
 }
 
-pub fn handle(frame: &mut TrapFrame, sepc: usize) -> Outcome {
-    let task_lock = CURRENT_TASK.borrow();
+pub fn handle(frame: &mut TrapFrame) -> Outcome {
+    let task_lock = CURRENT_TASK.borrow().get();
     let task = &*task_lock;
 
     let mut regs = &mut frame.registers;

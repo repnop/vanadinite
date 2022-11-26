@@ -128,7 +128,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8) -> ! {
         root_page_table.static_map(
             addr,
             crate::kernel_patching::kernel_section_p2v(addr),
-            Flags::ACCESSED | Flags::EXECUTE | Flags::VALID,
+            Flags::ACCESSED | Flags::EXECUTE | Flags::READ | Flags::VALID,
             PageSize::Kilopage,
         );
     }

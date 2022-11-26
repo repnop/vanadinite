@@ -15,11 +15,10 @@ use crate::{
     interrupts,
     mem::{self, paging::PhysicalAddress, phys2virt},
     platform::{self, ExitStatus},
-    task, trap,
+    trap,
     utils::Units,
     HART_ID, N_CPUS, TIMER_FREQ,
 };
-use alloc::boxed::Box;
 use core::sync::atomic::Ordering;
 use fdt::Fdt;
 

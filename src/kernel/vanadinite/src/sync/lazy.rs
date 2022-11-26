@@ -52,7 +52,7 @@ impl<T, F: Fn() -> T> Lazy<T, F> {
     }
 
     unsafe fn get_ref(&self) -> &T {
-        (&*self.value.get()).assume_init_ref()
+        (*self.value.get()).assume_init_ref()
     }
 
     pub fn get_mut(&mut self) -> &mut T {
@@ -62,9 +62,9 @@ impl<T, F: Fn() -> T> Lazy<T, F> {
             0b00 => {
                 unsafe { self.value.get().write(MaybeUninit::new((self.f)())) };
                 self.init_state.store(0b10, Ordering::Release);
-                unsafe { (&mut *self.value.get()).assume_init_mut() }
+                unsafe { (*self.value.get()).assume_init_mut() }
             }
-            0b10 => unsafe { (&mut *self.value.get()).assume_init_mut() },
+            0b10 => unsafe { (*self.value.get()).assume_init_mut() },
             _ => unreachable!("this state should never be reached with exclusive access"),
         }
     }

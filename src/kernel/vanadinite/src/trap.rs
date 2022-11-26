@@ -5,8 +5,10 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use core::sync::atomic::Ordering;
+
 use crate::{
-    csr::sstatus,
+    csr::{self},
     interrupts::{isr::invoke_isr, PLIC},
     mem::{
         manager::AddressRegion,
@@ -16,6 +18,7 @@ use crate::{
     scheduler::{CURRENT_TASK, SCHEDULER},
     syscall,
     task::TaskState,
+    utils::ticks_per_us,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -262,7 +265,7 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, scause: usize, stval: usize
     let trap_kind = Trap::from_cause(scause);
     match trap_kind {
         Trap::SupervisorTimerInterrupt => SCHEDULER.schedule(TaskState::Ready),
-        Trap::UserModeEnvironmentCall => match syscall::handle(regs, regs.sepc) {
+        Trap::UserModeEnvironmentCall => match syscall::handle(regs) {
             syscall::Outcome::Completed => regs.sepc += 4,
             syscall::Outcome::Blocked => SCHEDULER.schedule(TaskState::Blocked),
         },
@@ -367,6 +370,10 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, scause: usize, stval: usize
         }
         trap => panic!("Ignoring trap: {:?}, sepc: {:#x}, stval: {:#x}", trap, regs.sepc, stval),
     }
+
+    let task = CURRENT_TASK.borrow();
+    log::debug!("Scheduling {:?}, pc: {:#x}", task.name, regs.sepc);
+    sbi::timer::set_timer(csr::time::read() + ticks_per_us(10_000, crate::TIMER_FREQ.load(Ordering::Relaxed))).unwrap();
 }
 
 /// # Safety
@@ -427,6 +434,9 @@ pub unsafe extern "C" fn stvec_trap_shim() -> ! {
         sd t3, 224(sp)
         sd t4, 232(sp)
         sd t5, 240(sp)
+
+        ld tp, 8(t6)
+        ld gp, 16(t6)
 
         // Swap `t6` and `sscratch` again
         csrrw t6, sscratch, t6

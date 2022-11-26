@@ -9,8 +9,9 @@ pub mod isr;
 
 use crate::drivers::generic::plic;
 use crate::sync::SpinMutex;
+use crate::utils::SameHartDeadlockDetection;
 
-pub static PLIC: SpinMutex<Option<&'static plic::Plic>> = SpinMutex::new(None);
+pub static PLIC: SpinMutex<Option<&'static plic::Plic>, SameHartDeadlockDetection> = SpinMutex::new(None);
 
 pub fn register_plic(plic: &'static plic::Plic) {
     *PLIC.lock() = Some(plic);

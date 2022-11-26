@@ -25,7 +25,7 @@ impl SchedulerPolicy for RoundRobinPolicy {
         match self.tids.is_empty() {
             true => None,
             false => {
-                for i in 0..self.tids.len() {
+                for _ in 0..self.tids.len() {
                     self.tids.rotate_left(1);
 
                     if !matches!(self.tids.front().unwrap().1, TaskState::Ready) {

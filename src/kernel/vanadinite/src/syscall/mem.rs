@@ -178,7 +178,7 @@ pub fn query_mem_cap(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
 }
 
 pub fn query_mmio_cap(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
-    let mut task = task.mutable_state.lock();
+    let task = task.mutable_state.lock();
 
     let cptr = CapabilityPtr::new(frame.a1);
     let buffer_ptr = VirtualAddress::new(frame.a2);

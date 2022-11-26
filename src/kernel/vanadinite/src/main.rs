@@ -286,6 +286,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
     //scheduler::init_scheduler(Box::new(scheduler::round_robin::RoundRobinScheduler::new()));
 
     scheduler::SCHEDULER.enqueue(task::Task::load_init(INIT, init_args.into_iter().flatten()));
+    scheduler::SCHEDULER.enqueue(task::Task::idle());
 
     let other_hart_boot_phys = unsafe { kernel_section_v2p(VirtualAddress::from_ptr(other_hart_boot as *const u8)) };
 
@@ -318,6 +319,8 @@ extern "C" fn kalt(hart_id: usize) -> ! {
 
     csr::sstatus::set_fs(csr::sstatus::FloatingPointStatus::Initial);
     csr::sie::enable();
+
+    scheduler::SCHEDULER.enqueue(task::Task::idle());
 
     unsafe { scheduler::SCHEDULER.begin_scheduling() }
 }

@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::TIMER_FREQ;
+
 use super::{DeadlockDetection, NoCheck};
 use core::{
     cell::UnsafeCell,
@@ -23,7 +25,7 @@ impl<T: Send> StableSpinMutex<T> {
         Self { lock: AtomicU64::new(0), data: UnsafeCell::new(value) }
     }
 
-    pub unsafe fn lock_into_parts(&self) -> (*mut T, &AtomicU64) {
+    pub unsafe fn lock_into_parts(&self) -> (*mut T, *const AtomicU64) {
         self.acquire_lock();
 
         (self.data.get(), &self.lock)
@@ -92,14 +94,19 @@ impl<T: Send, D: DeadlockDetection> SpinMutex<T, D> {
 
     #[track_caller]
     fn acquire_lock(&self) {
-        let mut spin_check_count = 100;
+        let freq = TIMER_FREQ.load(Ordering::Relaxed);
+        let max_wait_time = crate::utils::ticks_per_us(1 * 1000 * 1000, freq);
+        let start_time = crate::csr::time::read();
+        let end_time = start_time + max_wait_time;
 
         while self.lock.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
-            if spin_check_count != 0 && D::would_deadlock(self.deadlock_metadata.load(Ordering::Acquire)) {
+            if D::would_deadlock(self.deadlock_metadata.load(Ordering::Acquire)) {
                 panic!("Deadlock detected");
+            } else if crate::csr::time::read() >= end_time {
+                panic!("Likely deadlock detected -- reached maximum wait time");
             }
 
-            spin_check_count -= 1;
+            core::hint::spin_loop();
         }
 
         self.deadlock_metadata.store(D::gather_metadata(), Ordering::Release);

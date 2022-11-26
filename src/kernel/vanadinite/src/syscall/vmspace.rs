@@ -10,15 +10,17 @@ use core::num::NonZeroUsize;
 use crate::{
     capabilities::{Capability, CapabilityResource, CapabilitySpace},
     mem::{
+        alloc_kernel_stack,
         manager::{AddressRegionKind, FillOption, RegionDescription, UserspaceMemoryManager},
         paging::{flags::Flags, PageSize, VirtualAddress},
-        user::RawUserSlice, alloc_kernel_stack,
+        user::RawUserSlice,
     },
-    scheduler::{Scheduler, SCHEDULER, return_to_usermode},
+    scheduler::{return_to_usermode, SCHEDULER},
+    sync::{mutex::StableSpinMutex, SpinMutex},
     syscall::channel::UserspaceChannel,
-    task::{Context, Task, MutableState},
+    task::{Context, MutableState, Task},
     trap::{GeneralRegisters, TrapFrame},
-    utils::{self, Units}, sync::{SpinMutex, mutex::StableSpinMutex},
+    utils::{self, Units},
 };
 use alloc::{collections::BTreeMap, vec::Vec};
 use librust::{
@@ -60,13 +62,14 @@ pub fn create_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), S
 
 pub fn alloc_vmspace_object(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let mut task = task.mutable_state.lock();
+    let MutableState { memory_manager, vmspace_objects, .. } = &mut *task;
 
     let id = frame.a1;
     let address = VirtualAddress::new(frame.a2);
     let size = frame.a3;
     let permissions = MemoryPermissions::new(frame.a4);
 
-    let object = match task.vmspace_objects.get_mut(&VmspaceObjectId::new(id)) {
+    let object = match vmspace_objects.get_mut(&VmspaceObjectId::new(id)) {
         Some(map) => map,
         None => return Err(SyscallError::InvalidArgument(0)),
     };
@@ -120,7 +123,7 @@ pub fn alloc_vmspace_object(task: &Task, frame: &mut GeneralRegisters) -> Result
     );
 
     // log::info!("Mapping region at {:#p} for task {}", at.start, task.name);
-    let range = task.memory_manager.apply_shared_region(
+    let range = memory_manager.apply_shared_region(
         None,
         Flags::USER | Flags::VALID | Flags::READ | Flags::WRITE,
         region,
@@ -186,8 +189,7 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
     let kernel_stack = alloc_kernel_stack(2.mib());
     let trap_frame = unsafe { kernel_stack.sub(core::mem::size_of::<TrapFrame>()).cast::<TrapFrame>() };
     unsafe {
-        *trap_frame =
-            TrapFrame { sepc: pc, registers: GeneralRegisters { sp, tp, a0, a1, a2, ..Default::default() } }
+        *trap_frame = TrapFrame { sepc: pc, registers: GeneralRegisters { sp, tp, a0, a1, a2, ..Default::default() } }
     };
 
     let (kernel_channel, user_read) = UserspaceChannel::new();
@@ -196,26 +198,27 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
         name: alloc::string::String::from(task_name).into_boxed_str(),
         context: StableSpinMutex::new(Context {
             ra: return_to_usermode as usize,
-            sp: kernel_stack.addr(),
-            sx: [0; 12], 
+            sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
+            sx: [0; 12],
         }),
         kernel_stack,
         mutable_state: SpinMutex::new(MutableState {
-        memory_manager: object.memory_manager,
-        state: crate::task::TaskState::Running,
-        vmspace_next_id: 0,
-        vmspace_objects: Default::default(),
-        cspace: CapabilitySpace::new(),
-        kernel_channel,
-        claimed_interrupts: BTreeMap::new(),
-        subscribes_to_events: true,
+            memory_manager: object.memory_manager,
+            state: crate::task::TaskState::Running,
+            vmspace_next_id: 0,
+            vmspace_objects: Default::default(),
+            cspace: CapabilitySpace::new(),
+            kernel_channel,
+            claimed_interrupts: BTreeMap::new(),
+            subscribes_to_events: true,
         }),
     };
 
     let (mut channel1, mut channel2) = UserspaceChannel::new();
 
     new_task
-    .mutable_state.get_mut()
+        .mutable_state
+        .get_mut()
         .cspace
         .mint_with_id(
             KERNEL_CHANNEL,
@@ -236,7 +239,8 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
             channel2.sender.other_cptr = cptr;
 
             new_task
-            .mutable_state.get_mut()
+                .mutable_state
+                .get_mut()
                 .cspace
                 .mint_with_id(
                     PARENT_CHANNEL,

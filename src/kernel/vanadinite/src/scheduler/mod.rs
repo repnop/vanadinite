@@ -6,17 +6,19 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod round_robin;
+pub mod waitqueue;
 
 use crate::csr::satp::Satp;
 use crate::mem::paging::SATP_MODE;
 use crate::sync::{SpinMutex, SpinRwLock};
 use crate::task::{Sscratch, TaskState, HART_SSCRATCH};
+use crate::N_CPUS;
 use crate::{
     csr,
     task::{Context, Task},
     utils::{ticks_per_us, SameHartDeadlockDetection},
 };
-use alloc::{boxed::Box, collections::BTreeMap, sync::Arc};
+use alloc::{collections::BTreeMap, sync::Arc};
 use core::cell::RefCell;
 use core::{
     num::NonZeroUsize,
@@ -54,7 +56,7 @@ impl CurrentTask {
         ret
     }
 
-    fn get(&self) -> Arc<Task> {
+    pub fn get(&self) -> Arc<Task> {
         assert!(!self.inner.is_null(), "`CurrentTask::get` called while still empty");
 
         let ret = unsafe { Arc::from_raw(self.inner) };
@@ -104,17 +106,11 @@ impl Scheduler {
         task.mutable_state.get_mut().state = TaskState::Ready;
         let (tid, task) = TASKS.insert(task);
         let mut inner = self.inner.lock();
-        inner.run_queue.insert(tid, (task, TaskMetadata::new()));
+        inner.run_queue.insert(tid, (task.clone(), TaskMetadata::new()));
         inner.policy.task_enqueued(tid, TaskMetadata::new());
 
         if CURRENT_TASK.borrow().inner.is_null() {
             CURRENT_TASK.borrow_mut().set(task);
-
-            let idle = Task::idle();
-            let tid = idle.tid;
-            IDLE_TASK.borrow_mut().set(Arc::new(idle));
-
-            inner.policy.task_enqueued(tid, TaskMetadata::new());
         }
     }
 
@@ -127,42 +123,46 @@ impl Scheduler {
 
         let mut inner = self.inner.lock();
 
-        inner.run_queue.insert(tid, (task, TaskMetadata::new()));
+        inner.run_queue.insert(tid, (task.clone(), TaskMetadata::new()));
         inner.policy.task_enqueued(tid, TaskMetadata::new());
 
         if CURRENT_TASK.borrow().inner.is_null() {
             CURRENT_TASK.borrow_mut().set(task);
-
-            let idle = Task::idle();
-            let tid = idle.tid;
-            IDLE_TASK.borrow_mut().set(Arc::new(idle));
-
-            inner.policy.task_enqueued(tid, TaskMetadata::new());
         }
+    }
+
+    pub fn wake(&self, tid: Tid) {
+        // FIXME: actually use the blocked queue
+        let mut inner = self.inner.lock();
+        inner.run_queue.get_mut(&tid).expect("TID not in runqueue!").1.run_state = TaskState::Ready;
+        inner.policy.update_state(tid, TaskState::Ready);
     }
 
     #[inline(never)]
     pub fn schedule(&self, next_state: TaskState) {
+        log::debug!("Scheduling!");
         let mut inner = self.inner.lock();
+        let SchedulerInner { policy, run_queue, .. } = &mut *inner;
         let current_tid = CURRENT_TASK.borrow().tid;
 
-        let (task, metadata) = inner.run_queue.get_mut(&current_tid).expect("TID not in runqueue");
+        let (task, metadata) = run_queue.get_mut(&current_tid).expect("TID not in runqueue");
+        log::debug!("[OUT] Task {} [{}] metadata: {:?}", task.name, task.tid, metadata);
         assert_eq!(metadata.run_state, TaskState::Running);
         metadata.run_state = next_state;
-        inner.policy.update_state(current_tid, next_state);
+        policy.update_state(current_tid, next_state);
 
-        let (idle_tid, (idle_task, idle_metadata)) =
-            (IDLE_TASK.borrow().tid, (IDLE_TASK.borrow().get(), TaskMetadata::new()));
+        let (switch_out, out_lock) = unsafe { task.context.lock_into_parts() };
+        let tid = policy.next().expect("TODO: better idle task situation");
+        let (to_task, metadata) = run_queue.get_mut(&tid).expect("TID not in runqueue");
 
-        let (tid, (to_task, metadata)) = match inner.policy.next() {
-            Some(tid) => (tid, inner.run_queue.get_mut(&tid).expect("TID not in runqueue")),
-            None => (idle_tid, &mut (idle_task, idle_metadata)),
-        };
+        log::debug!("[IN] Task {} [{}] metadata: {:?}", to_task.name, to_task.tid, metadata);
+
+        log::debug!("Scheduling {} next", to_task.name);
 
         if tid != current_tid {
             assert_eq!(metadata.run_state, TaskState::Ready);
             metadata.run_state = TaskState::Running;
-            inner.policy.update_state(tid, TaskState::Running);
+            policy.update_state(tid, TaskState::Running);
 
             // Safety: we promise to be nice
             let (switch_in, in_lock) = unsafe { to_task.context.lock_into_parts() };
@@ -184,13 +184,13 @@ impl Scheduler {
             // set properly on every switch
             crate::csr::sscratch::write(core::ptr::addr_of!(HART_SSCRATCH) as usize);
 
-            let current_task = CURRENT_TASK.borrow_mut().replace(to_task.clone());
-            let (switch_out, out_lock) = unsafe { task.context.lock_into_parts() };
+            let _ = CURRENT_TASK.borrow_mut().replace(to_task.clone());
 
             drop(inner);
 
             unsafe { context_switch(switch_out, switch_in, out_lock, in_lock, satp) };
         } else {
+            unsafe { (*out_lock).store(0, Ordering::Release) };
             assert_eq!(next_state, TaskState::Ready);
             metadata.run_state = TaskState::Running;
             inner.policy.update_state(current_tid, TaskState::Running);
@@ -198,11 +198,18 @@ impl Scheduler {
         }
     }
 
+    /// # Safety
+    /// This must only be called once at the start of each hart's lifecycle
     pub unsafe fn begin_scheduling(&self) -> ! {
         let to_task = CURRENT_TASK.borrow();
 
-        assert_eq!(to_task.mutable_state.lock().state, TaskState::Ready);
-        to_task.mutable_state.lock().state = TaskState::Running;
+        let mut inner = self.inner.lock();
+        let (_, metadata) = inner.run_queue.get_mut(&to_task.tid).unwrap();
+        assert_eq!(metadata.run_state, TaskState::Ready);
+        metadata.run_state = TaskState::Running;
+        inner.policy.update_state(to_task.tid, TaskState::Running);
+
+        drop(inner);
 
         // Safety: we promise to be nice
         let (switch_in, in_lock) = unsafe { to_task.context.lock_into_parts() };
@@ -224,6 +231,11 @@ impl Scheduler {
         // set properly on every switch
         crate::csr::sscratch::write(core::ptr::addr_of!(HART_SSCRATCH) as usize);
 
+        log::debug!("Scheduling first process: {}", to_task.name);
+
+        drop(to_task);
+        sbi::timer::set_timer(csr::time::read() + ticks_per_us(10_000, crate::TIMER_FREQ.load(Ordering::Relaxed)))
+            .unwrap();
         unsafe { context_load(switch_in, in_lock, satp) };
 
         unreachable!()
@@ -239,23 +251,6 @@ struct SchedulerInner {
 impl SchedulerInner {
     const fn new() -> Self {
         Self { policy: RoundRobinPolicy::new(), run_queue: BTreeMap::new(), wait_queue: BTreeMap::new() }
-    }
-}
-
-pub struct WakeToken {
-    tid: Tid,
-    work: Box<dyn FnOnce(&mut Task) + Send>,
-}
-
-impl WakeToken {
-    pub fn new(tid: Tid, work: impl FnOnce(&mut Task) + Send + 'static) -> Self {
-        Self { tid, work: Box::new(work) }
-    }
-}
-
-impl core::fmt::Debug for WakeToken {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("WakeToken").field("tid", &self.tid).finish_non_exhaustive()
     }
 }
 
@@ -321,26 +316,12 @@ impl TaskMetadata {
     }
 }
 
-fn sleep() -> ! {
-    sbi::timer::set_timer(csr::time::read() + ticks_per_us(10_000, crate::TIMER_FREQ.load(Ordering::Relaxed))).unwrap();
-    csr::sie::enable();
-    csr::sstatus::enable_interrupts();
-
-    #[rustfmt::skip]
-    unsafe {
-        core::arch::asm!("
-            1: wfi
-               j 1b
-        ", options(noreturn))
-    };
-}
-
 #[naked]
 unsafe extern "C" fn context_switch(
     /* a0 */ _switch_out: *mut Context,
     /* a1 */ _switch_in: *mut Context,
-    /* a2 */ _out_lock: &AtomicU64,
-    /* a3 */ _in_lock: &AtomicU64,
+    /* a2 */ _out_lock: *const AtomicU64,
+    /* a3 */ _in_lock: *const AtomicU64,
     /* a4 */ _in_satp: usize,
 ) {
     #[rustfmt::skip]
@@ -363,8 +344,7 @@ unsafe extern "C" fn context_switch(
         sd s10, 80(a0)
         sd s11, 88(a0)
         
-        mv t0, zero
-        sd t0, 0(a2)
+        sd zero, 0(a2)
         fence
 
         ld ra, 0(a1)
@@ -386,8 +366,7 @@ unsafe extern "C" fn context_switch(
         csrw satp, a4
         sfence.vma
 
-        mv t0, zero
-        sd t0, 0(a3)
+        sd zero, 0(a3)
         fence
 
         ret
@@ -397,7 +376,7 @@ unsafe extern "C" fn context_switch(
 #[naked]
 unsafe extern "C" fn context_load(
     /* a0 */ _switch_in: *mut Context,
-    /* a1 */ _in_lock: &AtomicU64,
+    /* a1 */ _in_lock: *const AtomicU64,
     /* a2 */ _in_satp: usize,
 ) {
     #[rustfmt::skip]
@@ -520,8 +499,6 @@ pub unsafe extern "C" fn return_to_usermode() -> ! {
         // fld f29, 224(a1)
         // fld f30, 232(a1)
         // fld f31, 240(a1)
-
-        ld x10, 72(a0)
 
         sret
     ", options(noreturn));

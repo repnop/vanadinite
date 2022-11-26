@@ -5,10 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use core::{
-    cell::{Cell, SyncUnsafeCell},
-    num::NonZeroUsize,
-};
+use core::{cell::Cell, num::NonZeroUsize};
 
 use crate::{
     capabilities::{Capability, CapabilityResource, CapabilitySpace},
@@ -44,7 +41,7 @@ pub struct Sscratch {
 }
 
 impl Sscratch {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             kernel_stack_top: core::ptr::null_mut(),
             kernel_thread_local: core::ptr::null_mut(),
@@ -173,8 +170,16 @@ impl Task {
         let kernel_stack = alloc_kernel_stack(2.mib());
         let trap_frame = unsafe { kernel_stack.sub(core::mem::size_of::<TrapFrame>()).cast::<TrapFrame>() };
         unsafe {
-            *trap_frame =
-                TrapFrame { sepc: 0xF00D_0000, registers: GeneralRegisters { sp: sp.as_usize(), ..Default::default() } }
+            *trap_frame = TrapFrame {
+                sepc: 0xF00D_0000,
+                registers: GeneralRegisters {
+                    sp: sp.as_usize(),
+                    a0,
+                    a1,
+                    a2: fdt_loc.start.as_usize(),
+                    ..Default::default()
+                },
+            }
         };
 
         Self {
@@ -182,7 +187,7 @@ impl Task {
             name: Box::from("init"),
             context: StableSpinMutex::new(Context {
                 ra: crate::scheduler::return_to_usermode as usize,
-                sp: kernel_stack.addr(),
+                sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
                 sx: [0; 12],
             }),
             kernel_stack,
@@ -211,7 +216,7 @@ impl Task {
                 contiguous: false,
                 flags: Flags::USER | Flags::READ | Flags::WRITE | Flags::EXECUTE | Flags::VALID,
                 fill: FillOption::Data(&[
-                    0x73, 0x00, 0x50, 0x10, // wfi
+                    0x0f, 0x00, 0x00, 0x01, // wfi
                     0x6f, 0xf0, 0xdf, 0xff, // j -4
                 ]),
                 kind: AddressRegionKind::Text,
@@ -235,7 +240,7 @@ impl Task {
             name: Box::from("<idle>"),
             context: StableSpinMutex::new(Context {
                 ra: crate::scheduler::return_to_usermode as usize,
-                sp: kernel_stack.addr(),
+                sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
                 sx: [0; 12],
             }),
             kernel_stack,

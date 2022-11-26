@@ -9,7 +9,7 @@
 macro_rules! dbg {
     ($e:expr) => {{
         let value = $e;
-        crate::println!(concat!("[", file!(), ":", line!(), "] ", stringify!($e), " = {:?}"), value);
+        $crate::println!(concat!("[", file!(), ":", line!(), "] ", stringify!($e), " = {:?}"), value);
         value
     }};
 }

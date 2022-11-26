@@ -14,7 +14,7 @@ use crate::{
         user::RawUserSlice,
     },
     platform::FDT,
-    scheduler::{Scheduler, SCHEDULER, TASKS},
+    scheduler::TASKS,
     syscall::channel::ChannelMessage,
     task::Task,
     trap::GeneralRegisters,
@@ -25,7 +25,7 @@ use core::sync::atomic::Ordering;
 use librust::{capabilities::CapabilityRights, error::SyscallError, syscalls::channel::KernelMessage};
 
 pub fn claim_device(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
-    let task_state = task.mutable_state.get_mut();
+    let mut task_state = task.mutable_state.lock();
     let start = VirtualAddress::new(regs.a1);
     let len = regs.a2;
     let user_slice = RawUserSlice::readable(start, len);
@@ -110,18 +110,14 @@ pub fn claim_device(task: &Task, regs: &mut GeneralRegisters) -> Result<(), Sysc
 
                             task_state.claimed_interrupts.insert(id, HART_ID.get());
                             // FIXME: not sure if this is entirely correct..
-                            let mut send_lock = task_state.kernel_channel.sender.inner.write();
-                            send_lock.push_back(ChannelMessage {
-                                data: Into::into(KernelMessage::InterruptOccurred(id)),
-                                caps: Vec::new(),
-                            });
-
-                            let token = task_state.kernel_channel.sender.wake.lock().take();
-                            if let Some(token) = token {
-                                drop(send_lock);
-                                drop(task_state);
-                                // FIXME: unblock task
-                            }
+                            task_state
+                                .kernel_channel
+                                .sender
+                                .send(ChannelMessage {
+                                    data: Into::into(KernelMessage::InterruptOccurred(id)),
+                                    caps: Vec::new(),
+                                })
+                                .expect("handle kernel channel send failure");
 
                             Ok(())
                         });
@@ -139,7 +135,7 @@ pub fn claim_device(task: &Task, regs: &mut GeneralRegisters) -> Result<(), Sysc
 
 pub fn complete_interrupt(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let interrupt_id = regs.a1;
-    match task.mutable_state.get_mut().claimed_interrupts.remove(&interrupt_id) {
+    match task.mutable_state.lock().claimed_interrupts.remove(&interrupt_id) {
         None => Err(SyscallError::InvalidArgument(0)),
         Some(hart) => {
             log::debug!("Task {} completing interrupt {}", task.name, interrupt_id);

@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::sync::SpinMutex;
+use crate::utils::SameHartDeadlockDetection;
 use crate::{
     mem::{
         paging::PageSize,
@@ -17,7 +18,7 @@ use crate::{
 use core::ptr::NonNull;
 
 pub struct FreeListAllocator {
-    inner: SpinMutex<FreeList>,
+    inner: SpinMutex<FreeList, SameHartDeadlockDetection>,
 }
 
 impl FreeListAllocator {
