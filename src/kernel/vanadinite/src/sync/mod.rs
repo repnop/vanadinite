@@ -35,30 +35,34 @@ impl<T> AtomicConstPtr<T> {
 }
 
 pub trait DeadlockDetection {
-    fn would_deadlock(metadata: usize) -> bool;
-    fn gather_metadata() -> usize;
+    fn would_deadlock(&self) -> bool;
+    fn gather_metadata(&self);
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct NoCheck;
 
+impl const Default for NoCheck {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl DeadlockDetection for NoCheck {
-    fn would_deadlock(_: usize) -> bool {
+    fn would_deadlock(&self) -> bool {
         false
     }
 
-    fn gather_metadata() -> usize {
-        0
-    }
+    fn gather_metadata(&self) {}
 }
 
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Immediate;
 
 impl DeadlockDetection for Immediate {
-    fn would_deadlock(_: usize) -> bool {
+    fn would_deadlock(&self) -> bool {
         true
     }
 
-    fn gather_metadata() -> usize {
-        0
-    }
+    fn gather_metadata(&self) {}
 }

@@ -16,7 +16,7 @@ use crate::{
         user::RawUserSlice,
     },
     scheduler::{return_to_usermode, SCHEDULER},
-    sync::{mutex::StableSpinMutex, SpinMutex},
+    sync::SpinMutex,
     syscall::channel::UserspaceChannel,
     task::{Context, MutableState, Task},
     trap::{GeneralRegisters, TrapFrame},
@@ -196,7 +196,7 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
     let mut new_task = Task {
         tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),
         name: alloc::string::String::from(task_name).into_boxed_str(),
-        context: StableSpinMutex::new(Context {
+        context: SpinMutex::new(Context {
             ra: return_to_usermode as usize,
             sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
             sx: [0; 12],

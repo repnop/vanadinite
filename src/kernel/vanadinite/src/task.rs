@@ -15,7 +15,7 @@ use crate::{
         paging::{flags::Flags, PageSize, VirtualAddress},
     },
     platform::FDT,
-    sync::{mutex::StableSpinMutex, SpinMutex},
+    sync::SpinMutex,
     syscall::{channel::UserspaceChannel, vmspace::VmspaceObject},
     trap::{GeneralRegisters, TrapFrame},
     utils::{round_up_to_next, SameHartDeadlockDetection, Units},
@@ -77,7 +77,7 @@ pub struct Task {
     pub tid: Tid,
     pub name: Box<str>,
     pub kernel_stack: *mut u8,
-    pub context: StableSpinMutex<Context>,
+    pub context: SpinMutex<Context>,
     pub mutable_state: SpinMutex<MutableState, SameHartDeadlockDetection>,
 }
 
@@ -185,7 +185,7 @@ impl Task {
         Self {
             tid: Tid::new(NonZeroUsize::new(1).unwrap()),
             name: Box::from("init"),
-            context: StableSpinMutex::new(Context {
+            context: SpinMutex::new(Context {
                 ra: crate::scheduler::return_to_usermode as usize,
                 sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
                 sx: [0; 12],
@@ -238,7 +238,7 @@ impl Task {
         Self {
             tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),
             name: Box::from("<idle>"),
-            context: StableSpinMutex::new(Context {
+            context: SpinMutex::new(Context {
                 ra: crate::scheduler::return_to_usermode as usize,
                 sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
                 sx: [0; 12],

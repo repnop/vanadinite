@@ -26,7 +26,7 @@ pub enum Outcome {
 }
 
 pub fn handle(frame: &mut TrapFrame) -> Outcome {
-    let task_lock = CURRENT_TASK.borrow().get();
+    let task_lock = CURRENT_TASK.get();
     let task = &*task_lock;
 
     let mut regs = &mut frame.registers;

@@ -63,7 +63,7 @@ pub unsafe extern "C" fn early_paging(hart_id: usize, fdt: *const u8) -> ! {
         .expect("wtf");
 
     let start = memory_region.starting_address as usize;
-    let size = memory_region.size.unwrap() as usize;
+    let size = memory_region.size.unwrap();
 
     let kernel_end_phys = kernel_end as *mut u8;
 

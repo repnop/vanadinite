@@ -289,7 +289,7 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, scause: usize, stval: usize
             match sepc.is_kernel_region() {
                 // We should always have marked memory regions up front from the initial mapping
                 true => {
-                    let active = CURRENT_TASK.borrow();
+                    let active = CURRENT_TASK.get();
 
                     match active.mutable_state.try_lock() {
                         Some(active) => log::error!(
@@ -301,7 +301,7 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, scause: usize, stval: usize
                     panic!("[KERNEL BUG] {:?} @ pc={:#p}: stval={:#p} regs={:x?}", trap_kind, sepc, stval, regs);
                 }
                 false => {
-                    let active_task_lock = CURRENT_TASK.borrow();
+                    let active_task_lock = CURRENT_TASK.get();
                     let mut active_task = active_task_lock.mutable_state.lock();
                     let memory_manager = &mut active_task.memory_manager;
 
@@ -371,8 +371,11 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, scause: usize, stval: usize
         trap => panic!("Ignoring trap: {:?}, sepc: {:#x}, stval: {:#x}", trap, regs.sepc, stval),
     }
 
-    let task = CURRENT_TASK.borrow();
-    log::debug!("Scheduling {:?}, pc: {:#x}", task.name, regs.sepc);
+    if log::log_enabled!(log::Level::Debug) {
+        let task = CURRENT_TASK.get();
+        log::debug!("Scheduling {:?}, pc: {:#x}", task.name, regs.sepc);
+    }
+
     sbi::timer::set_timer(csr::time::read() + ticks_per_us(10_000, crate::TIMER_FREQ.load(Ordering::Relaxed))).unwrap();
 }
 

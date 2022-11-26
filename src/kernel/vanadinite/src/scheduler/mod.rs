@@ -12,14 +12,14 @@ use crate::csr::satp::Satp;
 use crate::mem::paging::SATP_MODE;
 use crate::sync::{SpinMutex, SpinRwLock};
 use crate::task::{Sscratch, TaskState, HART_SSCRATCH};
-use crate::N_CPUS;
 use crate::{
     csr,
     task::{Context, Task},
     utils::{ticks_per_us, SameHartDeadlockDetection},
 };
 use alloc::{collections::BTreeMap, sync::Arc};
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
+use core::sync::atomic::AtomicBool;
 use core::{
     num::NonZeroUsize,
     sync::atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -32,38 +32,40 @@ pub static SCHEDULER: Scheduler = Scheduler::new();
 pub static TASKS: TaskList = TaskList::new();
 
 #[thread_local]
-pub static CURRENT_TASK: RefCell<CurrentTask> = RefCell::new(CurrentTask::empty());
-
-#[thread_local]
-static IDLE_TASK: RefCell<CurrentTask> = RefCell::new(CurrentTask::empty());
+pub static CURRENT_TASK: CurrentTask = CurrentTask::empty();
 
 pub struct CurrentTask {
-    inner: *const Task,
+    inner: Cell<*const Task>,
 }
 
 impl CurrentTask {
     const fn empty() -> Self {
-        Self { inner: core::ptr::null() }
+        Self { inner: Cell::new(core::ptr::null()) }
     }
 
     #[track_caller]
-    fn replace(&mut self, new: Arc<Task>) -> Arc<Task> {
-        assert!(!self.inner.is_null(), "`CurrentTask::replace` called while still empty");
+    fn replace(&self, new: Arc<Task>) -> Arc<Task> {
+        assert!(!self.inner.get().is_null(), "`CurrentTask::replace` called while still empty");
 
-        let ret = unsafe { Arc::from_raw(self.inner) };
-        self.inner = Arc::into_raw(new);
+        let ret = unsafe { Arc::from_raw(self.inner.get()) };
+        self.inner.set(Arc::into_raw(new));
 
         ret
     }
 
-    pub fn get(&self) -> Arc<Task> {
-        assert!(!self.inner.is_null(), "`CurrentTask::get` called while still empty");
+    pub fn tid(&self) -> Tid {
+        assert!(!self.inner.get().is_null(), "`CurrentTask::tid` called while still empty");
+        unsafe { (*self.inner.get()).tid }
+    }
 
-        let ret = unsafe { Arc::from_raw(self.inner) };
+    pub fn get(&self) -> Arc<Task> {
+        assert!(!self.inner.get().is_null(), "`CurrentTask::get` called while still empty");
+
+        let ret = unsafe { Arc::from_raw(self.inner.get()) };
 
         // Safety: this makes it so that we can do the above `from_raw` while
         // still holding onto the pointer
-        unsafe { Arc::increment_strong_count(self.inner) };
+        unsafe { Arc::increment_strong_count(self.inner.get()) };
 
         ret
     }
@@ -72,23 +74,10 @@ impl CurrentTask {
     /// for the hart. Calling this when there is already a contained task will
     /// panic.
     #[track_caller]
-    fn set(&mut self, task: Arc<Task>) {
-        assert!(self.inner.is_null());
+    fn set(&self, task: Arc<Task>) {
+        assert!(self.inner.get().is_null());
 
-        self.inner = Arc::into_raw(task);
-    }
-}
-
-impl core::ops::Deref for CurrentTask {
-    type Target = Task;
-
-    #[track_caller]
-    fn deref(&self) -> &Self::Target {
-        assert!(!self.inner.is_null(), "`CurrentTask::set` never called!");
-
-        // Safety: `self.inner` always points to a valid `T` as `Arc::into_raw`
-        // essentially "leaks" a strong count until we `Arc::from_raw`
-        unsafe { &*self.inner }
+        self.inner.set(Arc::into_raw(task));
     }
 }
 
@@ -109,8 +98,8 @@ impl Scheduler {
         inner.run_queue.insert(tid, (task.clone(), TaskMetadata::new()));
         inner.policy.task_enqueued(tid, TaskMetadata::new());
 
-        if CURRENT_TASK.borrow().inner.is_null() {
-            CURRENT_TASK.borrow_mut().set(task);
+        if CURRENT_TASK.inner.get().is_null() {
+            CURRENT_TASK.set(task);
         }
     }
 
@@ -126,8 +115,8 @@ impl Scheduler {
         inner.run_queue.insert(tid, (task.clone(), TaskMetadata::new()));
         inner.policy.task_enqueued(tid, TaskMetadata::new());
 
-        if CURRENT_TASK.borrow().inner.is_null() {
-            CURRENT_TASK.borrow_mut().set(task);
+        if CURRENT_TASK.inner.get().is_null() {
+            CURRENT_TASK.set(task);
         }
     }
 
@@ -143,7 +132,7 @@ impl Scheduler {
         log::debug!("Scheduling!");
         let mut inner = self.inner.lock();
         let SchedulerInner { policy, run_queue, .. } = &mut *inner;
-        let current_tid = CURRENT_TASK.borrow().tid;
+        let current_tid = CURRENT_TASK.tid();
 
         let (task, metadata) = run_queue.get_mut(&current_tid).expect("TID not in runqueue");
         log::debug!("[OUT] Task {} [{}] metadata: {:?}", task.name, task.tid, metadata);
@@ -151,7 +140,7 @@ impl Scheduler {
         metadata.run_state = next_state;
         policy.update_state(current_tid, next_state);
 
-        let (switch_out, out_lock) = unsafe { task.context.lock_into_parts() };
+        let (switch_out, out_lock) = unsafe { task.context.raw_locked_parts() };
         let tid = policy.next().expect("TODO: better idle task situation");
         let (to_task, metadata) = run_queue.get_mut(&tid).expect("TID not in runqueue");
 
@@ -165,7 +154,7 @@ impl Scheduler {
             policy.update_state(tid, TaskState::Running);
 
             // Safety: we promise to be nice
-            let (switch_in, in_lock) = unsafe { to_task.context.lock_into_parts() };
+            let (switch_in, in_lock) = unsafe { to_task.context.raw_locked_parts() };
             let satp = Satp {
                 root_page_table: to_task.mutable_state.lock().memory_manager.table_phys_address(),
                 asid: tid.value() as u16,
@@ -184,13 +173,13 @@ impl Scheduler {
             // set properly on every switch
             crate::csr::sscratch::write(core::ptr::addr_of!(HART_SSCRATCH) as usize);
 
-            let _ = CURRENT_TASK.borrow_mut().replace(to_task.clone());
+            let _ = CURRENT_TASK.replace(to_task.clone());
 
             drop(inner);
 
             unsafe { context_switch(switch_out, switch_in, out_lock, in_lock, satp) };
         } else {
-            unsafe { (*out_lock).store(0, Ordering::Release) };
+            unsafe { (*out_lock).store(false, Ordering::Release) };
             assert_eq!(next_state, TaskState::Ready);
             metadata.run_state = TaskState::Running;
             inner.policy.update_state(current_tid, TaskState::Running);
@@ -201,7 +190,7 @@ impl Scheduler {
     /// # Safety
     /// This must only be called once at the start of each hart's lifecycle
     pub unsafe fn begin_scheduling(&self) -> ! {
-        let to_task = CURRENT_TASK.borrow();
+        let to_task = CURRENT_TASK.get();
 
         let mut inner = self.inner.lock();
         let (_, metadata) = inner.run_queue.get_mut(&to_task.tid).unwrap();
@@ -212,7 +201,7 @@ impl Scheduler {
         drop(inner);
 
         // Safety: we promise to be nice
-        let (switch_in, in_lock) = unsafe { to_task.context.lock_into_parts() };
+        let (switch_in, in_lock) = unsafe { to_task.context.raw_locked_parts() };
         let satp = Satp {
             root_page_table: to_task.mutable_state.lock().memory_manager.table_phys_address(),
             asid: to_task.tid.value() as u16,
@@ -320,8 +309,8 @@ impl TaskMetadata {
 unsafe extern "C" fn context_switch(
     /* a0 */ _switch_out: *mut Context,
     /* a1 */ _switch_in: *mut Context,
-    /* a2 */ _out_lock: *const AtomicU64,
-    /* a3 */ _in_lock: *const AtomicU64,
+    /* a2 */ _out_lock: *const AtomicBool,
+    /* a3 */ _in_lock: *const AtomicBool,
     /* a4 */ _in_satp: usize,
 ) {
     #[rustfmt::skip]
@@ -376,7 +365,7 @@ unsafe extern "C" fn context_switch(
 #[naked]
 unsafe extern "C" fn context_load(
     /* a0 */ _switch_in: *mut Context,
-    /* a1 */ _in_lock: *const AtomicU64,
+    /* a1 */ _in_lock: *const AtomicBool,
     /* a2 */ _in_satp: usize,
 ) {
     #[rustfmt::skip]

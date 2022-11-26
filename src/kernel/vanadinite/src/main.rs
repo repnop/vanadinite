@@ -12,6 +12,7 @@
     allocator_api,
     arbitrary_self_types,
     asm_const,
+    const_trait_impl,
     custom_test_frameworks,
     extern_types,
     fn_align,

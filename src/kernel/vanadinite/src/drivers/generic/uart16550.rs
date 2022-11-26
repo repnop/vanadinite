@@ -88,14 +88,14 @@ impl Uart16550 {
 
 impl core::fmt::Write for Uart16550 {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        (&*self).write_str(s);
+        (*self).write_str(s);
         Ok(())
     }
 }
 
 impl crate::io::ConsoleDevice for Uart16550 {
     fn init(&mut self) {
-        (&*self).init();
+        (*self).init();
     }
 
     fn read(&self) -> u8 {
@@ -103,7 +103,7 @@ impl crate::io::ConsoleDevice for Uart16550 {
     }
 
     fn write(&mut self, n: u8) {
-        (&*self).write(n)
+        (*self).write(n)
     }
 }
 

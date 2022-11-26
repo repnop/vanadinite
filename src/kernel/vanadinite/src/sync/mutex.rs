@@ -10,58 +10,22 @@ use crate::TIMER_FREQ;
 use super::{DeadlockDetection, NoCheck};
 use core::{
     cell::UnsafeCell,
-    marker::PhantomData,
-    sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, Ordering},
 };
-
-#[repr(C)]
-pub struct StableSpinMutex<T: Send> {
-    lock: AtomicU64,
-    data: UnsafeCell<T>,
-}
-
-impl<T: Send> StableSpinMutex<T> {
-    pub fn new(value: T) -> Self {
-        Self { lock: AtomicU64::new(0), data: UnsafeCell::new(value) }
-    }
-
-    pub unsafe fn lock_into_parts(&self) -> (*mut T, *const AtomicU64) {
-        self.acquire_lock();
-
-        (self.data.get(), &self.lock)
-    }
-
-    fn acquire_lock(&self) {
-        while self.lock.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed).is_err() {
-            crate::asm::pause();
-        }
-    }
-
-    unsafe fn unlock(&self) {
-        self.lock.store(0, Ordering::Release);
-    }
-}
-
-unsafe impl<T: Send> Send for StableSpinMutex<T> {}
-unsafe impl<T: Send> Sync for StableSpinMutex<T> {}
 
 pub struct SpinMutex<T: Send, D: DeadlockDetection = NoCheck> {
     lock: AtomicBool,
     data: UnsafeCell<T>,
-    deadlock_detection: PhantomData<D>,
-    deadlock_metadata: AtomicUsize,
+    deadlock_detection: D,
+}
+
+impl<T: Send, D: DeadlockDetection + ~const Default> SpinMutex<T, D> {
+    pub const fn new(data: T) -> Self {
+        Self { lock: AtomicBool::new(false), data: UnsafeCell::new(data), deadlock_detection: D::default() }
+    }
 }
 
 impl<T: Send, D: DeadlockDetection> SpinMutex<T, D> {
-    pub const fn new(data: T) -> Self {
-        Self {
-            lock: AtomicBool::new(false),
-            data: UnsafeCell::new(data),
-            deadlock_detection: PhantomData,
-            deadlock_metadata: AtomicUsize::new(0),
-        }
-    }
-
     pub fn with_lock<U>(&self, f: impl FnOnce(&mut T) -> U) -> U {
         self.acquire_lock();
         let ret = f(unsafe { &mut *self.data.get() });
@@ -79,7 +43,7 @@ impl<T: Send, D: DeadlockDetection> SpinMutex<T, D> {
     pub fn try_lock(&self) -> Option<SpinMutexGuard<'_, T, D>> {
         match self.lock.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed) {
             Ok(_) => {
-                self.deadlock_metadata.store(D::gather_metadata(), Ordering::Release);
+                self.deadlock_detection.gather_metadata();
                 Some(SpinMutexGuard { lock: self })
             }
             Err(_) => None,
@@ -92,6 +56,16 @@ impl<T: Send, D: DeadlockDetection> SpinMutex<T, D> {
         unsafe { &mut *self.data.get() }
     }
 
+    /// Acquire the lock and return pointers to the data and lock atomic.
+    ///
+    /// # Safety
+    /// This function requires that the returned pointer is not access after the
+    /// [`AtomicBool`] is set to `false`.
+    pub unsafe fn raw_locked_parts(&self) -> (*mut T, *const AtomicBool) {
+        self.acquire_lock();
+        (self.data.get(), &self.lock)
+    }
+
     #[track_caller]
     fn acquire_lock(&self) {
         let freq = TIMER_FREQ.load(Ordering::Relaxed);
@@ -100,7 +74,7 @@ impl<T: Send, D: DeadlockDetection> SpinMutex<T, D> {
         let end_time = start_time + max_wait_time;
 
         while self.lock.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
-            if D::would_deadlock(self.deadlock_metadata.load(Ordering::Acquire)) {
+            if self.deadlock_detection.would_deadlock() {
                 panic!("Deadlock detected");
             } else if crate::csr::time::read() >= end_time {
                 panic!("Likely deadlock detected -- reached maximum wait time");
@@ -109,7 +83,7 @@ impl<T: Send, D: DeadlockDetection> SpinMutex<T, D> {
             core::hint::spin_loop();
         }
 
-        self.deadlock_metadata.store(D::gather_metadata(), Ordering::Release);
+        self.deadlock_detection.gather_metadata();
     }
 
     fn unlock(&self) {

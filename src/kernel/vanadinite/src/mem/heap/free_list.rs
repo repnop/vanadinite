@@ -87,13 +87,13 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
                     None => this.head = Some((*node).next.expect("valid next")),
                 }
 
-                break (&*node).data();
+                break (*node).data();
             }
 
             if (*node).size >= size && enough_for_split {
                 log::trace!("FreeListAllocator::alloc: reusing node and splitting");
 
-                let new_node = (&mut *node).split(size);
+                let new_node = (*node).split(size);
 
                 log::trace!(
                     "FreeListAllocator::alloc: created new node, current node={:?}, new node={:?}",
@@ -109,7 +109,7 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
                     }
                 }
 
-                break (&*node).data();
+                break (*node).data();
             }
 
             match (*node).next {

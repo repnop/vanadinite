@@ -23,7 +23,7 @@ impl WaitQueue {
 
     #[track_caller]
     pub fn wait(&self) {
-        self.queue.lock().push_back(CURRENT_TASK.borrow().tid);
+        self.queue.lock().push_back(CURRENT_TASK.tid());
         SCHEDULER.schedule(TaskState::Blocked);
     }
 
