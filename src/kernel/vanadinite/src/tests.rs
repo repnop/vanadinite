@@ -15,11 +15,10 @@ use crate::{
     interrupts,
     mem::{self, paging::PhysicalAddress, phys2virt},
     platform::{self, ExitStatus},
-    task, trap,
+    trap,
     utils::Units,
     HART_ID, N_CPUS, TIMER_FREQ,
 };
-use alloc::boxed::Box;
 use core::sync::atomic::Ordering;
 use fdt::Fdt;
 
@@ -90,18 +89,6 @@ pub extern "C" fn ktest(hart_id: usize, fdt: *const u8) -> ! {
         log::debug!("Registering PLIC @ {:#p}", ic_virt);
         interrupts::register_plic(plic);
     }
-
-    let ptr = Box::leak(Box::new(task::ThreadControlBlock {
-        kernel_stack: mem::alloc_kernel_stack(8.kib()),
-        kernel_thread_local: cpu_local::tp(),
-        kernel_global_ptr: crate::asm::gp(),
-        saved_sp: 0,
-        saved_tp: 0,
-        saved_gp: 0,
-        kernel_stack_size: 8.kib(),
-    }));
-
-    csr::sscratch::write(ptr as *mut _ as usize);
 
     #[cfg(test)]
     crate::test_main();

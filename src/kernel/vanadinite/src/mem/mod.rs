@@ -14,6 +14,9 @@ use {
     phys::{PhysicalMemoryAllocator, PHYSICAL_MEMORY_ALLOCATOR},
 };
 
+// pub static KERNEL_MEMORY_MANAGER: SpinMutex<manager::UserspaceMemoryManager> =
+//     SpinMutex::new(manager::UserspaceMemoryManager::new());
+
 pub mod heap;
 pub mod manager;
 pub mod phys;

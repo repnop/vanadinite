@@ -5,30 +5,27 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{DeadlockDetection, NoCheck};
+use crate::TIMER_FREQ;
+
+use super::{DeadlockDetection, NoCheck};
 use core::{
     cell::UnsafeCell,
-    marker::PhantomData,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 pub struct SpinMutex<T: Send, D: DeadlockDetection = NoCheck> {
     lock: AtomicBool,
     data: UnsafeCell<T>,
-    deadlock_detection: PhantomData<D>,
-    deadlock_metadata: AtomicUsize,
+    deadlock_detection: D,
+}
+
+impl<T: Send, D: DeadlockDetection + ~const Default> SpinMutex<T, D> {
+    pub const fn new(data: T) -> Self {
+        Self { lock: AtomicBool::new(false), data: UnsafeCell::new(data), deadlock_detection: D::default() }
+    }
 }
 
 impl<T: Send, D: DeadlockDetection> SpinMutex<T, D> {
-    pub const fn new(data: T) -> Self {
-        Self {
-            lock: AtomicBool::new(false),
-            data: UnsafeCell::new(data),
-            deadlock_detection: PhantomData,
-            deadlock_metadata: AtomicUsize::new(0),
-        }
-    }
-
     pub fn with_lock<U>(&self, f: impl FnOnce(&mut T) -> U) -> U {
         self.acquire_lock();
         let ret = f(unsafe { &mut *self.data.get() });
@@ -46,29 +43,51 @@ impl<T: Send, D: DeadlockDetection> SpinMutex<T, D> {
     pub fn try_lock(&self) -> Option<SpinMutexGuard<'_, T, D>> {
         match self.lock.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed) {
             Ok(_) => {
-                self.deadlock_metadata.store(D::gather_metadata(), Ordering::Release);
+                self.deadlock_detection.gather_metadata();
                 Some(SpinMutexGuard { lock: self })
             }
             Err(_) => None,
         }
     }
 
+    pub fn get_mut(&mut self) -> &mut T {
+        // Safety: `&mut self` enforces that there's no shared references
+        // lingering, so its safe to immediate get the underlying data
+        unsafe { &mut *self.data.get() }
+    }
+
+    /// Acquire the lock and return pointers to the data and lock atomic.
+    ///
+    /// # Safety
+    /// This function requires that the returned pointer is not access after the
+    /// [`AtomicBool`] is set to `false`.
+    pub unsafe fn raw_locked_parts(&self) -> (*mut T, *const AtomicBool) {
+        self.acquire_lock();
+        (self.data.get(), &self.lock)
+    }
+
     #[track_caller]
     fn acquire_lock(&self) {
-        let mut spin_check_count = 100;
+        let freq = TIMER_FREQ.load(Ordering::Relaxed);
+        let max_wait_time = crate::utils::ticks_per_us(1 * 1000 * 1000, freq);
+        let start_time = crate::csr::time::read();
+        let end_time = start_time + max_wait_time;
 
         while self.lock.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
-            if spin_check_count != 0 && D::would_deadlock(self.deadlock_metadata.load(Ordering::Acquire)) {
+            if self.deadlock_detection.would_deadlock() {
                 panic!("Deadlock detected");
+            } else if crate::csr::time::read() >= end_time {
+                panic!("Likely deadlock detected -- reached maximum wait time");
             }
 
-            spin_check_count -= 1;
+            core::hint::spin_loop();
         }
 
-        self.deadlock_metadata.store(D::gather_metadata(), Ordering::Release);
+        self.deadlock_detection.gather_metadata();
     }
 
     fn unlock(&self) {
+        self.deadlock_detection.unlocked();
         self.lock.store(false, Ordering::Release);
     }
 }

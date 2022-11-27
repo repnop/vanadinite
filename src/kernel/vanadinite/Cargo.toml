@@ -9,12 +9,11 @@ fdt = "0.1.3"
 librust = { path = "../../shared/librust" }
 log = "0.4.14"
 sbi = "0.2.0"
-sync = { path = "../../shared/sync" }
 vanadinite_macros = { path = "../vanadinite_macros" }
 volatile = { path = "../../shared/volatile" }
 
 [build-dependencies]
-init = { path = "../../userspace/init", artifact = "bin", target = "riscv64gc-unknown-none-elf" }
+init = { path = "../../userspace/init", artifact = "bin", target = "riscv64imac-unknown-none-elf" }
 
 [features]
 default = ["platform.virt"]

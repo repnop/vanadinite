@@ -78,6 +78,23 @@ pub struct AddressMap<A: AddressSpace> {
 }
 
 impl<A: AddressSpace> AddressMap<A> {
+    pub const fn empty() -> Self {
+        Self { map: BTreeMap::new(), address_space: core::marker::PhantomData }
+    }
+
+    pub fn init_empty(&mut self) {
+        let complete_range = A::address_range();
+        self.map.insert(
+            complete_range.end,
+            AddressRegion {
+                region: None,
+                span: complete_range,
+                kind: AddressRegionKind::Unoccupied,
+                permissions: Flags::NONE,
+            },
+        );
+    }
+
     /// Create a new [`AddressMap`]
     pub fn new() -> Self {
         let complete_range = A::address_range();

@@ -55,7 +55,7 @@ impl SifiveUart {
 
 impl ConsoleDevice for SifiveUart {
     fn init(&mut self) {
-        (&*self).init();
+        (*self).init();
     }
 
     fn read(&self) -> u8 {
@@ -63,7 +63,7 @@ impl ConsoleDevice for SifiveUart {
     }
 
     fn write(&mut self, n: u8) {
-        (&*self).write(n);
+        (*self).write(n);
     }
 }
 

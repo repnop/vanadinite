@@ -5,18 +5,20 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use core::num::NonZeroUsize;
+use core::{cell::Cell, num::NonZeroUsize};
 
 use crate::{
     capabilities::{Capability, CapabilityResource, CapabilitySpace},
     mem::{
-        manager::{AddressRegionKind, FillOption, MemoryManager, RegionDescription},
+        alloc_kernel_stack,
+        manager::{AddressRegionKind, FillOption, RegionDescription, UserspaceMemoryManager},
         paging::{flags::Flags, PageSize, VirtualAddress},
     },
     platform::FDT,
+    sync::SpinMutex,
     syscall::{channel::UserspaceChannel, vmspace::VmspaceObject},
-    trap::{FloatingPointRegisters, GeneralRegisters},
-    utils::{round_up_to_next, Units},
+    trap::{GeneralRegisters, TrapFrame},
+    utils::{round_up_to_next, SameHartDeadlockDetection, Units},
 };
 use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 use fdt::Fdt;
@@ -26,58 +28,42 @@ use librust::{
     task::Tid,
 };
 
+#[thread_local]
+pub static HART_SSCRATCH: Cell<Sscratch> = Cell::new(Sscratch::new());
+
 #[derive(Debug)]
 #[repr(C)]
-pub struct ThreadControlBlock {
-    pub kernel_stack: *mut u8,
+pub struct Sscratch {
+    pub kernel_stack_top: *mut u8,
     pub kernel_thread_local: *mut u8,
     pub kernel_global_ptr: *mut u8,
-    pub saved_sp: usize,
-    pub saved_tp: usize,
-    pub saved_gp: usize,
-    pub kernel_stack_size: usize,
+    pub scratch_sp: usize,
 }
 
-impl ThreadControlBlock {
-    pub fn new() -> Self {
+impl Sscratch {
+    pub const fn new() -> Self {
         Self {
-            kernel_stack: core::ptr::null_mut(),
+            kernel_stack_top: core::ptr::null_mut(),
             kernel_thread_local: core::ptr::null_mut(),
             kernel_global_ptr: core::ptr::null_mut(),
-            saved_sp: 0,
-            saved_tp: 0,
-            saved_gp: 0,
-            kernel_stack_size: 0,
+            scratch_sp: 0,
         }
-    }
-
-    /// # Safety
-    /// This assumes that the pointer to the [`ThreadControlBlock`] has been set
-    /// in the `sstatus` register
-    pub unsafe fn the() -> *mut Self {
-        let ret;
-        core::arch::asm!("csrr {}, sstatus", out(reg) ret);
-        ret
     }
 }
 
-unsafe impl Send for ThreadControlBlock {}
-unsafe impl Sync for ThreadControlBlock {}
+unsafe impl Send for Sscratch {}
+unsafe impl Sync for Sscratch {}
 
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct Context {
-    pub gp_regs: GeneralRegisters,
-    pub fp_regs: FloatingPointRegisters,
-    pub pc: usize,
+    pub ra: usize,
+    pub sp: usize,
+    pub sx: [usize; 12],
 }
 
-pub struct Task {
-    pub tid: Tid,
-    pub name: Box<str>,
-    pub context: Context,
-    pub memory_manager: MemoryManager,
-    pub state: TaskState,
+pub struct MutableState {
+    pub memory_manager: UserspaceMemoryManager,
     pub vmspace_objects: BTreeMap<VmspaceObjectId, VmspaceObject>,
     pub vmspace_next_id: usize,
     pub cspace: CapabilitySpace,
@@ -86,9 +72,17 @@ pub struct Task {
     pub subscribes_to_events: bool,
 }
 
+pub struct Task {
+    pub tid: Tid,
+    pub name: Box<str>,
+    pub kernel_stack: *mut u8,
+    pub context: SpinMutex<Context>,
+    pub mutable_state: SpinMutex<MutableState, SameHartDeadlockDetection>,
+}
+
 impl Task {
     pub fn load_init<'a>(bin: &[u8], args: impl Iterator<Item = &'a str> + Clone) -> Self {
-        let mut memory_manager = MemoryManager::new();
+        let mut memory_manager = UserspaceMemoryManager::new();
         let mut cspace = CapabilitySpace::new();
 
         memory_manager.alloc_region(
@@ -164,18 +158,72 @@ impl Task {
             }
         };
 
-        let context = Context {
-            pc: 0xF00D_0000,
-            gp_regs: GeneralRegisters {
-                sp: sp.as_usize(),
-                tp: 0,
-                a0,
-                a1,
-                a2: fdt_loc.start.as_usize(),
-                ..Default::default()
-            },
-            fp_regs: FloatingPointRegisters::default(),
+        let (kernel_channel, user_read) = UserspaceChannel::new();
+        cspace
+            .mint_with_id(
+                KERNEL_CHANNEL,
+                Capability { resource: CapabilityResource::Channel(user_read), rights: CapabilityRights::READ },
+            )
+            .expect("[BUG] kernel channel cap already created?");
+
+        let kernel_stack = alloc_kernel_stack(2.mib());
+        let trap_frame = unsafe { kernel_stack.sub(core::mem::size_of::<TrapFrame>()).cast::<TrapFrame>() };
+        unsafe {
+            *trap_frame = TrapFrame {
+                sepc: 0xF00D_0000,
+                registers: GeneralRegisters {
+                    sp: sp.as_usize(),
+                    a0,
+                    a1,
+                    a2: fdt_loc.start.as_usize(),
+                    ..Default::default()
+                },
+            }
         };
+
+        Self {
+            tid: Tid::new(NonZeroUsize::new(1).unwrap()),
+            name: Box::from("init"),
+            context: SpinMutex::new(Context {
+                ra: crate::scheduler::return_to_usermode as usize,
+                sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
+                sx: [0; 12],
+            }),
+            kernel_stack,
+            mutable_state: SpinMutex::new(MutableState {
+                memory_manager,
+                vmspace_objects: BTreeMap::new(),
+                vmspace_next_id: 0,
+                cspace,
+                kernel_channel,
+                claimed_interrupts: BTreeMap::new(),
+                subscribes_to_events: false,
+            }),
+        }
+    }
+
+    /// Creates a task which will idle and wait for interrupts in userspace
+    pub fn idle() -> Self {
+        let mut memory_manager = UserspaceMemoryManager::new();
+        let mut cspace = CapabilitySpace::new();
+        memory_manager.alloc_region(
+            Some(VirtualAddress::new(0xF00D_0000)),
+            RegionDescription {
+                len: 4.kib(),
+                size: PageSize::Kilopage,
+                contiguous: false,
+                flags: Flags::USER | Flags::READ | Flags::WRITE | Flags::EXECUTE | Flags::VALID,
+                fill: FillOption::Data(&[
+                    0x0f, 0x00, 0x00, 0x01, // wfi
+                    0x6f, 0xf0, 0xdf, 0xff, // j -4
+                ]),
+                kind: AddressRegionKind::Text,
+            },
+        );
+
+        let kernel_stack = alloc_kernel_stack(2.mib());
+        let trap_frame = unsafe { kernel_stack.sub(core::mem::size_of::<TrapFrame>()).cast::<TrapFrame>() };
+        unsafe { *trap_frame = TrapFrame { sepc: 0xF00D_0000, registers: GeneralRegisters { ..Default::default() } } };
 
         let (kernel_channel, user_read) = UserspaceChannel::new();
         cspace
@@ -186,25 +234,35 @@ impl Task {
             .expect("[BUG] kernel channel cap already created?");
 
         Self {
-            tid: Tid::new(NonZeroUsize::new(1).unwrap()),
-            name: Box::from("init"),
-            context,
-            memory_manager,
-            state: TaskState::Running,
-            vmspace_objects: BTreeMap::new(),
-            vmspace_next_id: 0,
-            cspace,
-            kernel_channel,
-            claimed_interrupts: BTreeMap::new(),
-            subscribes_to_events: false,
+            tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),
+            name: Box::from("<idle>"),
+            context: SpinMutex::new(Context {
+                ra: crate::scheduler::return_to_usermode as usize,
+                sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
+                sx: [0; 12],
+            }),
+            kernel_stack,
+            mutable_state: SpinMutex::new(MutableState {
+                memory_manager,
+                vmspace_objects: BTreeMap::new(),
+                vmspace_next_id: 0,
+                cspace,
+                kernel_channel,
+                claimed_interrupts: BTreeMap::new(),
+                subscribes_to_events: false,
+            }),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+unsafe impl Send for Task {}
+unsafe impl Sync for Task {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskState {
     Blocked,
     Dead,
+    Ready,
     Running,
 }
 

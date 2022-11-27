@@ -114,8 +114,8 @@ pub fn run(shell: &Shell, options: RunOptions) -> Result<()> {
     };
 
     let kernel_path = match options.vanadinite_options.debug_build {
-        true => "src/kernel/target/riscv64gc-unknown-none-elf/debug/vanadinite",
-        false => "src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite",
+        true => "src/kernel/target/riscv64imac-unknown-none-elf/debug/vanadinite",
+        false => "src/kernel/target/riscv64imac-unknown-none-elf/release/vanadinite",
     };
     let sbi_firmware = match (options.sbi, options.with) {
         (SbiImpl::OpenSbi, Simulator::Qemu) => "build/opensbi-riscv64-generic-fw_jump.elf",
@@ -214,7 +214,7 @@ pub fn test(shell: &Shell, mut options: RunOptions) -> Result<()> {
             -m {ram}M
             -append {kernel_args}
             -bios build/opensbi-riscv64-generic-fw_jump.bin 
-            -kernel src/kernel/target/riscv64gc-unknown-none-elf/debug/vanadinite
+            -kernel src/kernel/target/riscv64imac-unknown-none-elf/debug/vanadinite
             {debug_log...}
     ").run()?;
 

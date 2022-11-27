@@ -5,11 +5,13 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use core::sync::atomic::{AtomicUsize, Ordering};
+
 #[macro_export]
 macro_rules! dbg {
     ($e:expr) => {{
         let value = $e;
-        crate::println!(concat!("[", file!(), ":", line!(), "] ", stringify!($e), " = {:?}"), value);
+        $crate::println!(concat!("[", file!(), ":", line!(), "] ", stringify!($e), " = {:?}"), value);
         value
     }};
 }
@@ -34,26 +36,6 @@ impl LinkerSymbol {
 
 unsafe impl Sync for LinkerSymbol {}
 unsafe impl Send for LinkerSymbol {}
-
-#[repr(transparent)]
-pub struct StaticMut<T>(core::cell::UnsafeCell<T>);
-
-impl<T> StaticMut<T> {
-    pub const fn new(t: T) -> Self {
-        Self(core::cell::UnsafeCell::new(t))
-    }
-
-    /// # Safety
-    ///
-    /// You must ensure that no data races nor aliasing occurs when using the
-    /// resulting pointer
-    pub const fn get(&self) -> *mut T {
-        self.0.get()
-    }
-}
-
-unsafe impl<T> Sync for StaticMut<T> {}
-unsafe impl<T> Send for StaticMut<T> {}
 
 pub fn micros(ticks: u64, hz: u64) -> u64 {
     // ticks / hz -> second
@@ -125,14 +107,27 @@ macro_rules! impl_units {
 
 impl_units!(u16, u32, u64, u128, i16, i32, i64, i128, usize, isize);
 
-pub struct SameHartDeadlockDetection;
+#[derive(Debug)]
+pub struct SameHartDeadlockDetection {
+    hart_id: AtomicUsize,
+}
 
-impl sync::DeadlockDetection for SameHartDeadlockDetection {
-    fn would_deadlock(metadata: usize) -> bool {
-        crate::HART_ID.get() == metadata
+impl const Default for SameHartDeadlockDetection {
+    fn default() -> Self {
+        Self { hart_id: AtomicUsize::new(usize::MAX) }
+    }
+}
+
+impl crate::sync::DeadlockDetection for SameHartDeadlockDetection {
+    fn would_deadlock(&self) -> bool {
+        self.hart_id.load(Ordering::Acquire) == crate::HART_ID.get()
     }
 
-    fn gather_metadata() -> usize {
-        crate::HART_ID.get()
+    fn gather_metadata(&self) {
+        self.hart_id.store(crate::HART_ID.get(), Ordering::Release);
+    }
+
+    fn unlocked(&self) {
+        self.hart_id.store(usize::MAX, Ordering::Release);
     }
 }

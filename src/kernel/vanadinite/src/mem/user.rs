@@ -8,7 +8,7 @@
 use crate::csr::sstatus::TemporaryUserMemoryAccess;
 
 use super::{
-    manager::{InvalidRegion, MemoryManager},
+    manager::{InvalidRegion, UserspaceMemoryManager},
     paging::{flags::Flags, VirtualAddress},
 };
 use core::marker::PhantomData;
@@ -39,7 +39,10 @@ impl<Mode: UserPtrMode, T> RawUserPtr<Mode, T> {
     /// into the current address space
     ///
     /// Validates the [`RawUserPtr`] against the specified type and access mode
-    pub unsafe fn validate(self, manager: &MemoryManager) -> Result<ValidatedUserPtr<Mode, T>, InvalidUserPtr> {
+    pub unsafe fn validate(
+        self,
+        manager: &UserspaceMemoryManager,
+    ) -> Result<ValidatedUserPtr<Mode, T>, InvalidUserPtr> {
         if self.addr.as_usize() % core::mem::align_of::<T>() != 0 {
             return Err(InvalidUserPtr::Unaligned);
         }
@@ -177,7 +180,7 @@ impl<Mode: UserPtrMode, T> RawUserSlice<Mode, T> {
     /// Validates the [`RawUserSlice`] against the specified type and access mode
     pub unsafe fn validate(
         self,
-        manager: &MemoryManager,
+        manager: &UserspaceMemoryManager,
     ) -> Result<ValidatedUserSlice<Mode, T>, (VirtualAddress, InvalidUserPtr)> {
         if self.addr.as_usize() % core::mem::align_of::<T>() != 0 {
             return Err((self.addr, InvalidUserPtr::Unaligned));
@@ -235,6 +238,10 @@ pub struct ValidatedUserSlice<Mode: UserPtrMode, T> {
 impl<Mode: UserPtrMode, T> ValidatedUserSlice<Mode, T> {
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 }
 

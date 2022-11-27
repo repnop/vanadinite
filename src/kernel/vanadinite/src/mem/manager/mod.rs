@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 mod address_map;
+pub mod kernel;
 
 use crate::{
     mem::{
@@ -42,12 +43,12 @@ pub struct RegionDescription<'a> {
 }
 
 #[derive(Debug)]
-pub struct MemoryManager {
+pub struct UserspaceMemoryManager {
     table: PageTable,
     address_map: AddressMap<Userspace>,
 }
 
-impl MemoryManager {
+impl UserspaceMemoryManager {
     pub fn new() -> Self {
         let mut this = Self { table: PageTable::new(), address_map: AddressMap::new() };
 

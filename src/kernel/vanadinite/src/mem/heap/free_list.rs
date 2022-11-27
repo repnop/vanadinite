@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::sync::SpinMutex;
+use crate::utils::SameHartDeadlockDetection;
 use crate::{
     mem::{
         paging::PageSize,
@@ -14,10 +16,9 @@ use crate::{
     utils::{round_up_to_next, Units},
 };
 use core::ptr::NonNull;
-use sync::SpinMutex;
 
 pub struct FreeListAllocator {
-    inner: SpinMutex<FreeList>,
+    inner: SpinMutex<FreeList, SameHartDeadlockDetection>,
 }
 
 impl FreeListAllocator {
@@ -86,13 +87,13 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
                     None => this.head = Some((*node).next.expect("valid next")),
                 }
 
-                break (&*node).data();
+                break (*node).data();
             }
 
             if (*node).size >= size && enough_for_split {
                 log::trace!("FreeListAllocator::alloc: reusing node and splitting");
 
-                let new_node = (&mut *node).split(size);
+                let new_node = (*node).split(size);
 
                 log::trace!(
                     "FreeListAllocator::alloc: created new node, current node={:?}, new node={:?}",
@@ -108,7 +109,7 @@ unsafe impl alloc::alloc::GlobalAlloc for FreeListAllocator {
                     }
                 }
 
-                break (&*node).data();
+                break (*node).data();
             }
 
             match (*node).next {

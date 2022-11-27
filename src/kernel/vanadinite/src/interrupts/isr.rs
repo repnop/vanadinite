@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::drivers::generic::plic::{InterruptClaim, Plic};
-use sync::SpinRwLock;
+use crate::sync::SpinRwLock;
 
 const ISR_LIMIT: usize = 128;
 

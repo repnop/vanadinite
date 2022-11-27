@@ -76,3 +76,9 @@ impl Uart16550 {
         }
     }
 }
+
+impl core::fmt::Write for &'_ Uart16550 {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        Ok(Uart16550::write_str(self, s))
+    }
+}
