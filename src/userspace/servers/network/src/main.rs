@@ -63,7 +63,8 @@ pub enum Event {
     ControlMessage(ControlMessage),
 }
 
-async fn real_main() {
+#[present::main]
+async fn main() {
     let mut virtio_devices =
         virtiomgr::VirtIoMgrClient::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr)
             .request(DeviceType::NetworkCard as u32);
@@ -362,5 +363,3 @@ async fn real_main() {
         }
     }
 }
-
-present::main!({ real_main().await });

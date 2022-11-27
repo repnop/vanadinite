@@ -7,11 +7,53 @@
 
 pub(crate) mod reactor;
 
-use core::{future::Future, pin::Pin};
-use std::{task::{Poll, Context}, collections::BTreeMap, sync::SyncRefCell};
-use sync::Lazy;
-use crate::{join::JoinHandle, sync::oneshot, waker::{ArcWaker, Waker}};
 use self::reactor::Reactor;
+use crate::{
+    join::JoinHandle,
+    sync::oneshot,
+    waker::{ArcWaker, Waker},
+};
+use core::{cell::SyncUnsafeCell, future::Future, pin::Pin};
+use std::{
+    collections::BTreeMap,
+    sync::SyncRefCell,
+    task::{Context, Poll},
+};
+
+// Horrible hack until we get `const fn new()` for `VecDeque`
+pub(crate) struct LazyVecDeque<T> {
+    inner: SyncUnsafeCell<Option<VecDeque<T>>>,
+}
+
+impl<T> LazyVecDeque<T> {
+    const fn new() -> Self {
+        Self { inner: SyncUnsafeCell::new(None) }
+    }
+}
+
+impl<T> core::ops::Deref for LazyVecDeque<T> {
+    type Target = VecDeque<T>;
+
+    fn deref(&self) -> &Self::Target {
+        let inner = unsafe { &mut *self.inner.get() };
+        if inner.is_none() {
+            *inner = Some(VecDeque::new());
+        }
+
+        inner.as_ref().unwrap()
+    }
+}
+
+impl<T> core::ops::DerefMut for LazyVecDeque<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        let inner = unsafe { &mut *self.inner.get() };
+        if inner.is_none() {
+            *inner = Some(VecDeque::new());
+        }
+
+        inner.as_mut().unwrap()
+    }
+}
 
 pub struct Task {
     task_id: u64,
@@ -19,8 +61,11 @@ pub struct Task {
     waker: ArcWaker,
 }
 
-pub(crate) static GLOBAL_EXECUTOR: SyncRefCell<Lazy<PresentExecutor>> =
-    SyncRefCell::new(Lazy::new(|| PresentExecutor { next_task_id: 0, ready_tasks: VecDeque::new(), waiting_tasks: BTreeMap::new() }));
+pub(crate) static GLOBAL_EXECUTOR: SyncRefCell<PresentExecutor> = SyncRefCell::new(PresentExecutor {
+    next_task_id: 0,
+    ready_tasks: LazyVecDeque::new(),
+    waiting_tasks: BTreeMap::new(),
+});
 
 pub struct Present {}
 
@@ -92,32 +137,30 @@ impl Present {
 pub fn spawn<F>(f: F) -> JoinHandle<F::Output>
 where
     F: Future + Send + Sync + 'static,
-    F::Output: Send + 'static
+    F::Output: Send + 'static,
 {
     let (tx, rx) = oneshot::oneshot();
-    GLOBAL_EXECUTOR.borrow_mut().push_new(async move {
-        tx.send(f.await)
-    });
+    GLOBAL_EXECUTOR.borrow_mut().push_new(async move { tx.send(f.await) });
 
     JoinHandle::new(rx)
 }
 
 pub struct PresentExecutor {
     next_task_id: u64,
-    ready_tasks: VecDeque<Task>,
+    ready_tasks: LazyVecDeque<Task>,
     waiting_tasks: BTreeMap<u64, Task>,
 }
 
 impl PresentExecutor {
-    pub(crate) fn push_new<F: Future<Output=()> + Send + Sync + 'static>(&mut self, f: F) -> u64 {
+    pub(crate) fn push_new<F: Future<Output = ()> + Send + Sync + 'static>(&mut self, f: F) -> u64 {
         unsafe { self.push_unchecked(f) }
     }
 
-    pub(crate) unsafe fn push_unchecked<F: Future<Output=()>>(&mut self, f: F) -> u64 {
+    pub(crate) unsafe fn push_unchecked<F: Future<Output = ()>>(&mut self, f: F) -> u64 {
         let task_id = self.next_task_id;
         self.ready_tasks.push_back(Task {
             task_id,
-            future: core::mem::transmute(Box::pin(f) as Pin<Box<dyn Future<Output=()>>>),
+            future: core::mem::transmute(Box::pin(f) as Pin<Box<dyn Future<Output = ()>>>),
             waker: ArcWaker::new(Waker { task_id }),
         });
         self.next_task_id += 1;

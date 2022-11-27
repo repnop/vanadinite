@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 librust = { path = "../../../shared/librust" }
 json = { path = "../json" }
+present_macros = { path = "../present_macros" }
 std = { path = "../std" }
-sync = { path = "../../../shared/sync" }
