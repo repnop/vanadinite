@@ -204,7 +204,6 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
         kernel_stack,
         mutable_state: SpinMutex::new(MutableState {
             memory_manager: object.memory_manager,
-            state: crate::task::TaskState::Running,
             vmspace_next_id: 0,
             vmspace_objects: Default::default(),
             cspace: CapabilitySpace::new(),

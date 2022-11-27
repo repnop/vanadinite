@@ -7,7 +7,7 @@
     obtain one at https://mozilla.org/MPL/2.0/.
 */
 
-OUTPUT_ARCH(riscv64gc)
+OUTPUT_ARCH(riscv64imac)
 
 ENTRY(_boot);
 

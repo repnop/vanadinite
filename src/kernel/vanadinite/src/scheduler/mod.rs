@@ -10,19 +10,21 @@ pub mod waitqueue;
 
 use crate::csr::satp::Satp;
 use crate::mem::paging::SATP_MODE;
-use crate::sync::{SpinMutex, SpinRwLock};
+use crate::sync::{Lazy, SpinMutex, SpinRwLock};
 use crate::task::{Sscratch, TaskState, HART_SSCRATCH};
+use crate::N_CPUS;
 use crate::{
     csr,
     task::{Context, Task},
     utils::{ticks_per_us, SameHartDeadlockDetection},
 };
+use alloc::vec::Vec;
 use alloc::{collections::BTreeMap, sync::Arc};
-use core::cell::{Cell, RefCell};
+use core::cell::Cell;
 use core::sync::atomic::AtomicBool;
 use core::{
     num::NonZeroUsize,
-    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicUsize, Ordering},
 };
 use librust::task::Tid;
 
@@ -47,6 +49,7 @@ impl CurrentTask {
     fn replace(&self, new: Arc<Task>) -> Arc<Task> {
         assert!(!self.inner.get().is_null(), "`CurrentTask::replace` called while still empty");
 
+        // Safety: `self.inner.get()` is always a valid pointer to an `Arc<Task>`
         let ret = unsafe { Arc::from_raw(self.inner.get()) };
         self.inner.set(Arc::into_raw(new));
 
@@ -55,12 +58,15 @@ impl CurrentTask {
 
     pub fn tid(&self) -> Tid {
         assert!(!self.inner.get().is_null(), "`CurrentTask::tid` called while still empty");
+
+        // Safety: `self.inner.get()` is always a valid pointer to an `Arc<Task>`
         unsafe { (*self.inner.get()).tid }
     }
 
     pub fn get(&self) -> Arc<Task> {
         assert!(!self.inner.get().is_null(), "`CurrentTask::get` called while still empty");
 
+        // Safety: `self.inner.get()` is always a valid pointer to an `Arc<Task>`
         let ret = unsafe { Arc::from_raw(self.inner.get()) };
 
         // Safety: this makes it so that we can do the above `from_raw` while
@@ -82,78 +88,94 @@ impl CurrentTask {
 }
 
 pub struct Scheduler {
-    inner: SpinMutex<SchedulerInner, SameHartDeadlockDetection>,
-    total_task_count: AtomicU64,
+    inner: Lazy<Vec<SpinMutex<SchedulerInner, SameHartDeadlockDetection>>>,
+    wait_queue: SpinMutex<BTreeMap<Tid, (Arc<Task>, TaskMetadata)>, SameHartDeadlockDetection>,
 }
 
 impl Scheduler {
     pub const fn new() -> Self {
-        Self { inner: SpinMutex::new(SchedulerInner::new()), total_task_count: AtomicU64::new(0) }
+        Self {
+            inner: Lazy::new(|| {
+                (0..N_CPUS.load(Ordering::Relaxed)).map(|_| SpinMutex::new(SchedulerInner::new())).collect()
+            }),
+            wait_queue: SpinMutex::new(BTreeMap::new()),
+        }
     }
 
-    pub fn enqueue(&self, mut task: Task) {
-        task.mutable_state.get_mut().state = TaskState::Ready;
+    pub fn enqueue(&self, task: Task) {
         let (tid, task) = TASKS.insert(task);
-        let mut inner = self.inner.lock();
-        inner.run_queue.insert(tid, (task.clone(), TaskMetadata::new()));
+        let mut inner = self.queue_for_hart().lock();
+        inner.run_queue.insert(tid, (task, TaskMetadata::new()));
         inner.policy.task_enqueued(tid, TaskMetadata::new());
-
-        if CURRENT_TASK.inner.get().is_null() {
-            CURRENT_TASK.set(task);
-        }
     }
 
     pub fn enqueue_with(&self, f: impl FnOnce(Tid) -> Task) {
-        let (tid, task) = TASKS.insert_with(|tid| {
-            let mut task = f(tid);
-            task.mutable_state.get_mut().state = TaskState::Ready;
-            task
-        });
+        let (tid, task) = TASKS.insert_with(f);
 
-        let mut inner = self.inner.lock();
+        let mut inner = self.queue_for_hart().lock();
 
-        inner.run_queue.insert(tid, (task.clone(), TaskMetadata::new()));
+        inner.run_queue.insert(tid, (task, TaskMetadata::new()));
         inner.policy.task_enqueued(tid, TaskMetadata::new());
-
-        if CURRENT_TASK.inner.get().is_null() {
-            CURRENT_TASK.set(task);
-        }
     }
 
     pub fn wake(&self, tid: Tid) {
         // FIXME: actually use the blocked queue
-        let mut inner = self.inner.lock();
-        inner.run_queue.get_mut(&tid).expect("TID not in runqueue!").1.run_state = TaskState::Ready;
-        inner.policy.update_state(tid, TaskState::Ready);
+        let mut inner = self.queue_for_hart().lock();
+        let (task, mut metadata) = self.wait_queue.lock().remove(&tid).expect("TID not in waitqueue!");
+        metadata.run_state = TaskState::Ready;
+
+        for (i, queue) in self.inner.iter().enumerate() {
+            let Some(mut queue) = queue.try_lock() else { continue };
+            if queue.run_queue.len() < inner.run_queue.len() {
+                log::debug!("Placed now-ready task {} into hart {}'s runqueue", task.name, i);
+                queue.run_queue.insert(task.tid, (task, metadata));
+                queue.policy.task_enqueued(tid, metadata);
+                return;
+            }
+        }
+
+        log::debug!("Placed now-ready task {} into our hart's ({}) runqueue", task.name, crate::HART_ID.get());
+        inner.run_queue.insert(task.tid, (task, metadata));
+        inner.policy.task_enqueued(tid, metadata);
     }
 
     #[inline(never)]
     pub fn schedule(&self, next_state: TaskState) {
-        log::debug!("Scheduling!");
-        let mut inner = self.inner.lock();
+        log::trace!("Scheduling!");
+        let mut inner = self.queue_for_hart().lock();
         let SchedulerInner { policy, run_queue, .. } = &mut *inner;
         let current_tid = CURRENT_TASK.tid();
 
         let (task, metadata) = run_queue.get_mut(&current_tid).expect("TID not in runqueue");
-        log::debug!("[OUT] Task {} [{}] metadata: {:?}", task.name, task.tid, metadata);
-        assert_eq!(metadata.run_state, TaskState::Running);
-        metadata.run_state = next_state;
-        policy.update_state(current_tid, next_state);
-
         let (switch_out, out_lock) = unsafe { task.context.raw_locked_parts() };
-        let tid = policy.next().expect("TODO: better idle task situation");
+
+        log::trace!("[OUT] Task {} [{}] metadata: {:?}", task.name, task.tid, metadata);
+        assert_eq!(metadata.run_state, TaskState::Running);
+        metadata.run_time += csr::time::read() - metadata.last_scheduled_at;
+
+        match next_state {
+            TaskState::Blocked => {
+                let (task, metadata) = run_queue.remove(&current_tid).unwrap();
+                self.wait_queue.lock().insert(current_tid, (task, metadata));
+            }
+            _ => {
+                metadata.run_state = next_state;
+                policy.update_state(current_tid, next_state);
+            }
+        }
+
+        let tid = policy.next();
         let (to_task, metadata) = run_queue.get_mut(&tid).expect("TID not in runqueue");
 
-        log::debug!("[IN] Task {} [{}] metadata: {:?}", to_task.name, to_task.tid, metadata);
-
-        log::debug!("Scheduling {} next", to_task.name);
+        log::trace!("[IN] Task {} [{}] metadata: {:?}", to_task.name, to_task.tid, metadata);
 
         if tid != current_tid {
             assert_eq!(metadata.run_state, TaskState::Ready);
             metadata.run_state = TaskState::Running;
+            metadata.last_scheduled_at = csr::time::read();
             policy.update_state(tid, TaskState::Running);
 
-            // Safety: we promise to be nice
+            // Safety: `context_switch` unlocks the mutex
             let (switch_in, in_lock) = unsafe { to_task.context.raw_locked_parts() };
             let satp = Satp {
                 root_page_table: to_task.mutable_state.lock().memory_manager.table_phys_address(),
@@ -169,14 +191,10 @@ impl Scheduler {
                 scratch_sp: 0,
             });
 
-            // This probably isn't necessary? but just for now make sure its
-            // set properly on every switch
-            crate::csr::sscratch::write(core::ptr::addr_of!(HART_SSCRATCH) as usize);
-
-            let _ = CURRENT_TASK.replace(to_task.clone());
-
+            drop(CURRENT_TASK.replace(Arc::clone(to_task)));
             drop(inner);
 
+            // Safety: `context_switch` unlocks the mutex
             unsafe { context_switch(switch_out, switch_in, out_lock, in_lock, satp) };
         } else {
             unsafe { (*out_lock).store(false, Ordering::Release) };
@@ -187,13 +205,26 @@ impl Scheduler {
         }
     }
 
+    /// Begin scheduling on this hart. Requires hart locals to be set up. Automatically spawns an idle task.
+    ///
     /// # Safety
     /// This must only be called once at the start of each hart's lifecycle
     pub unsafe fn begin_scheduling(&self) -> ! {
-        let to_task = CURRENT_TASK.get();
+        let mut idle_tid = Tid::new(NonZeroUsize::new(usize::MAX).unwrap());
+        self.enqueue_with(|tid| {
+            idle_tid = tid;
+            Task::idle()
+        });
 
-        let mut inner = self.inner.lock();
-        let (_, metadata) = inner.run_queue.get_mut(&to_task.tid).unwrap();
+        let mut inner = self.queue_for_hart().lock();
+        inner.policy.idle_task(idle_tid);
+
+        let next = inner.policy.next();
+        let (to_task, metadata) = inner.run_queue.get_mut(&next).unwrap();
+
+        let to_task = Arc::clone(to_task);
+        CURRENT_TASK.set(Arc::clone(&to_task));
+
         assert_eq!(metadata.run_state, TaskState::Ready);
         metadata.run_state = TaskState::Running;
         inner.policy.update_state(to_task.tid, TaskState::Running);
@@ -216,8 +247,6 @@ impl Scheduler {
             scratch_sp: 0,
         });
 
-        // This probably isn't necessary? but just for now make sure its
-        // set properly on every switch
         crate::csr::sscratch::write(core::ptr::addr_of!(HART_SSCRATCH) as usize);
 
         log::debug!("Scheduling first process: {}", to_task.name);
@@ -229,17 +258,20 @@ impl Scheduler {
 
         unreachable!()
     }
+
+    fn queue_for_hart(&self) -> &SpinMutex<SchedulerInner, SameHartDeadlockDetection> {
+        &self.inner[crate::HART_ID.get()]
+    }
 }
 
 struct SchedulerInner {
     policy: round_robin::RoundRobinPolicy,
     run_queue: BTreeMap<Tid, (Arc<Task>, TaskMetadata)>,
-    wait_queue: BTreeMap<Tid, (Arc<Task>, TaskMetadata)>,
 }
 
 impl SchedulerInner {
-    const fn new() -> Self {
-        Self { policy: RoundRobinPolicy::new(), run_queue: BTreeMap::new(), wait_queue: BTreeMap::new() }
+    fn new() -> Self {
+        Self { policy: RoundRobinPolicy::new(), run_queue: BTreeMap::new() }
     }
 }
 
@@ -283,12 +315,14 @@ impl TaskList {
 }
 
 pub trait SchedulerPolicy {
-    fn next(&mut self) -> Option<Tid>;
+    fn next(&mut self) -> Tid;
     fn task_enqueued(&mut self, tid: Tid, metadata: TaskMetadata);
     fn task_dequeued(&mut self, tid: Tid);
     fn task_priority_changed(&mut self, tid: Tid, priority: u16);
     fn task_preempted(&mut self, tid: Tid);
     fn update_state(&mut self, tid: Tid, state: TaskState);
+
+    fn idle_task(&mut self, tid: Tid);
 }
 
 #[derive(Debug, Clone, Copy)]

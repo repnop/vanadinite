@@ -161,7 +161,7 @@ pub fn build(shell: &Shell, target: BuildTarget, quiet: bool) -> Result<()> {
                 cargo {subcmd}
                     {cargo_quiet...}
                     -p vanadinite
-                    --target riscv64gc-unknown-none-elf
+                    --target riscv64imac-unknown-none-elf
                     --no-default-features
                     --features {features}
                     {test...}
@@ -180,7 +180,7 @@ pub fn build(shell: &Shell, target: BuildTarget, quiet: bool) -> Result<()> {
                 cargo build
                     {cargo_quiet...}
                     --release
-                    --target riscv64gc-unknown-none-elf
+                    --target riscv64imac-unknown-none-elf
                     --no-default-features
                     --features {features}
             ");
@@ -189,16 +189,16 @@ pub fn build(shell: &Shell, target: BuildTarget, quiet: bool) -> Result<()> {
             cmd.set_ignore_stderr(quiet);
             cmd.run()?;
 
-            let mut cmd = cmd!(shell, "rust-objcopy -O binary target/riscv64gc-unknown-none-elf/release/vanadium target/riscv64gc-unknown-none-elf/release/vanadium.bin --set-start 0x80000000");
+            let mut cmd = cmd!(shell, "rust-objcopy -O binary target/riscv64imac-unknown-none-elf/release/vanadium target/riscv64imac-unknown-none-elf/release/vanadium.bin --set-start 0x80000000");
             cmd.set_quiet(quiet);
             cmd.set_ignore_stdout(quiet);
             cmd.set_ignore_stderr(quiet);
             cmd.run()?;
 
-            shell.copy_file("target/riscv64gc-unknown-none-elf/release/vanadium.bin", "../../build/vanadium.bin")?;
+            shell.copy_file("target/riscv64imac-unknown-none-elf/release/vanadium.bin", "../../build/vanadium.bin")?;
         }
         BuildTarget::OpenSBI(_) => {
-            let mut cmd = cmd!(shell, "rust-objcopy -O binary src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite.bin --set-start 0x80200000");
+            let mut cmd = cmd!(shell, "rust-objcopy -O binary src/kernel/target/riscv64imac-unknown-none-elf/release/vanadinite src/kernel/target/riscv64imac-unknown-none-elf/release/vanadinite.bin --set-start 0x80200000");
             cmd.set_quiet(quiet);
             cmd.set_ignore_stdout(quiet);
             cmd.set_ignore_stderr(quiet);
@@ -218,7 +218,7 @@ pub fn build(shell: &Shell, target: BuildTarget, quiet: bool) -> Result<()> {
 
             let _dir = shell.push_dir("./submodules/opensbi");
 
-            let mut cmd = cmd!(shell, "make PLATFORM=generic LLVM=1 FW_PAYLOAD_PATH=../../src/kernel/target/riscv64gc-unknown-none-elf/release/vanadinite.bin");
+            let mut cmd = cmd!(shell, "make PLATFORM=generic LLVM=1 FW_PAYLOAD_PATH=../../src/kernel/target/riscv64imac-unknown-none-elf/release/vanadinite.bin");
             cmd.set_quiet(quiet);
             cmd.set_ignore_stdout(quiet);
             cmd.set_ignore_stderr(quiet);

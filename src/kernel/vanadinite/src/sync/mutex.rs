@@ -87,6 +87,7 @@ impl<T: Send, D: DeadlockDetection> SpinMutex<T, D> {
     }
 
     fn unlock(&self) {
+        self.deadlock_detection.unlocked();
         self.lock.store(false, Ordering::Release);
     }
 }

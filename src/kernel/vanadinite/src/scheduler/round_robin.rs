@@ -5,25 +5,28 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use core::num::NonZeroUsize;
+
 use super::SchedulerPolicy;
-use crate::{sync::Lazy, task::TaskState};
+use crate::task::TaskState;
 use alloc::collections::VecDeque;
 use librust::task::Tid;
 
 pub struct RoundRobinPolicy {
-    tids: Lazy<VecDeque<(Tid, TaskState)>>,
+    tids: VecDeque<(Tid, TaskState)>,
+    idle_tid: Tid,
 }
 
 impl RoundRobinPolicy {
-    pub const fn new() -> Self {
-        Self { tids: Lazy::new(VecDeque::new) }
+    pub fn new() -> Self {
+        Self { tids: VecDeque::new(), idle_tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()) }
     }
 }
 
 impl SchedulerPolicy for RoundRobinPolicy {
-    fn next(&mut self) -> Option<Tid> {
+    fn next(&mut self) -> Tid {
         match self.tids.is_empty() {
-            true => None,
+            true => self.idle_tid,
             false => {
                 for _ in 0..self.tids.len() {
                     self.tids.rotate_left(1);
@@ -32,10 +35,10 @@ impl SchedulerPolicy for RoundRobinPolicy {
                         continue;
                     }
 
-                    return Some(self.tids.front().unwrap().0);
+                    return self.tids.front().unwrap().0;
                 }
 
-                None
+                self.idle_tid
             }
         }
     }
@@ -56,5 +59,9 @@ impl SchedulerPolicy for RoundRobinPolicy {
 
     fn update_state(&mut self, tid: Tid, state: TaskState) {
         self.tids.iter_mut().find(|t| t.0 == tid).unwrap().1 = state;
+    }
+
+    fn idle_task(&mut self, tid: Tid) {
+        self.idle_tid = tid;
     }
 }

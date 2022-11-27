@@ -126,4 +126,8 @@ impl crate::sync::DeadlockDetection for SameHartDeadlockDetection {
     fn gather_metadata(&self) {
         self.hart_id.store(crate::HART_ID.get(), Ordering::Release);
     }
+
+    fn unlocked(&self) {
+        self.hart_id.store(usize::MAX, Ordering::Release);
+    }
 }

@@ -64,7 +64,6 @@ pub struct Context {
 
 pub struct MutableState {
     pub memory_manager: UserspaceMemoryManager,
-    pub state: TaskState,
     pub vmspace_objects: BTreeMap<VmspaceObjectId, VmspaceObject>,
     pub vmspace_next_id: usize,
     pub cspace: CapabilitySpace,
@@ -193,7 +192,6 @@ impl Task {
             kernel_stack,
             mutable_state: SpinMutex::new(MutableState {
                 memory_manager,
-                state: TaskState::Ready,
                 vmspace_objects: BTreeMap::new(),
                 vmspace_next_id: 0,
                 cspace,
@@ -246,7 +244,6 @@ impl Task {
             kernel_stack,
             mutable_state: SpinMutex::new(MutableState {
                 memory_manager,
-                state: TaskState::Ready,
                 vmspace_objects: BTreeMap::new(),
                 vmspace_next_id: 0,
                 cspace,

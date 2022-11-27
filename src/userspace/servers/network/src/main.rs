@@ -16,7 +16,7 @@ mod drivers;
 use crate::{arp::ARP_CACHE, drivers::NetworkDriver};
 use alchemy::PackedStruct;
 use dhcp::{options::DhcpMessageType, DhcpMessageParser, DhcpOption};
-use librust::{capabilities::{CapabilityPtr}};
+use librust::capabilities::CapabilityPtr;
 use netstack::{
     arp::{ArpHeader, ArpOperation, ArpPacket, HardwareType},
     ethernet::EthernetHeader,
@@ -25,10 +25,11 @@ use netstack::{
     MacAddress,
 };
 use present::{
-    sync::{mpsc::Sender, oneshot::OneshotTx}, futures::stream::{StreamExt, IntoStream},
+    futures::stream::{IntoStream, StreamExt},
+    sync::{mpsc::Sender, oneshot::OneshotTx},
 };
+use std::collections::BTreeMap;
 use virtio::DeviceType;
-use std::{collections::BTreeMap};
 
 #[derive(Debug)]
 pub enum ControlMessage {
@@ -56,18 +57,16 @@ pub enum PortType {
 pub enum Event {
     Interrupt(usize),
     NewChannel(CapabilityPtr),
-    PacketToSend {
-        port: u16,
-        socket: IpV4Socket,
-        data: Vec<u8>,
-    },
+    PacketToSend { port: u16, socket: IpV4Socket, data: Vec<u8> },
     ArpRequest(Vec<u8>),
     DhcpResponse(Vec<u8>),
     ControlMessage(ControlMessage),
 }
 
 async fn real_main() {
-    let mut virtio_devices = virtiomgr::VirtIoMgrClient::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr).request(DeviceType::NetworkCard as u32);
+    let mut virtio_devices =
+        virtiomgr::VirtIoMgrClient::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr)
+            .request(DeviceType::NetworkCard as u32);
     let device = match virtio_devices.is_empty() {
         true => return,
         false => virtio_devices.remove(0),
@@ -177,16 +176,29 @@ async fn real_main() {
                 Data(Vec<u8>),
             }
 
-            let stream = IntoStream::into_stream(arp_lookup_rx).map(ArpEvent::Lookup).merge(IntoStream::into_stream(arp_packet_task_rx).map(ArpEvent::Data));
+            let stream = IntoStream::into_stream(arp_lookup_rx)
+                .map(ArpEvent::Lookup)
+                .merge(IntoStream::into_stream(arp_packet_task_rx).map(ArpEvent::Data));
             present::pin!(stream);
 
             while let Some(event) = stream.next().await {
                 match event {
                     ArpEvent::Lookup((ip, sender)) => {
-                        let mut lookup_packet = vec![0; core::mem::size_of::<ArpPacket::<netstack::arp::Ethernet, netstack::arp::IpV4>>()];
+                        let mut lookup_packet =
+                            vec![0; core::mem::size_of::<ArpPacket::<netstack::arp::Ethernet, netstack::arp::IpV4>>()];
 
-                        let mut arp_packet = ArpPacket::<netstack::arp::Ethernet, netstack::arp::IpV4>::try_from_mut_byte_slice(&mut lookup_packet[..]).unwrap();
-                        arp_packet.header = netstack::arp::ArpHeader { hardware_type: HardwareType::ETHERNET, protocol_type: netstack::arp::ProtocolType::IPV4, hardware_address_len: 6, protocol_address_len: 4, operation: ArpOperation::REQUEST };
+                        let mut arp_packet =
+                            ArpPacket::<netstack::arp::Ethernet, netstack::arp::IpV4>::try_from_mut_byte_slice(
+                                &mut lookup_packet[..],
+                            )
+                            .unwrap();
+                        arp_packet.header = netstack::arp::ArpHeader {
+                            hardware_type: HardwareType::ETHERNET,
+                            protocol_type: netstack::arp::ProtocolType::IPV4,
+                            hardware_address_len: 6,
+                            protocol_address_len: 4,
+                            operation: ArpOperation::REQUEST,
+                        };
                         arp_packet.sender_hardware_address = this_mac.bytes();
                         arp_packet.target_hardware_address = [0x00; 6];
                         arp_packet.sender_protocol_address = our_ip.to_bytes();
@@ -196,8 +208,16 @@ async fn real_main() {
                         resolving_map.insert(ip, sender);
                     }
                     ArpEvent::Data(packet_data) => {
-                        if let Ok(arp_response @ ArpPacket { header: ArpHeader { operation: ArpOperation::REPLY, .. }, .. }) = ArpPacket::<netstack::arp::Ethernet, netstack::arp::IpV4>::try_from_byte_slice(&packet_data[..]) {
-                            if let Some(sender) = resolving_map.remove(&IpV4Address::from(arp_response.sender_protocol_address)) {
+                        if let Ok(
+                            arp_response @ ArpPacket {
+                                header: ArpHeader { operation: ArpOperation::REPLY, .. }, ..
+                            },
+                        ) = ArpPacket::<netstack::arp::Ethernet, netstack::arp::IpV4>::try_from_byte_slice(
+                            &packet_data[..],
+                        ) {
+                            if let Some(sender) =
+                                resolving_map.remove(&IpV4Address::from(arp_response.sender_protocol_address))
+                            {
                                 sender.send(MacAddress::new(arp_response.sender_hardware_address));
                             }
                         }
@@ -210,7 +230,18 @@ async fn real_main() {
     });
 
     let channel_listener = present::ipc::NewChannelListener::new();
-    let stream = interrupt.map(Event::Interrupt).merge(IntoStream::into_stream(channel_listener).map(Event::NewChannel)).merge(IntoStream::into_stream(packet_recv).map(|(port, socket, data)| Event::PacketToSend { port, socket, data })).merge(IntoStream::into_stream(arp_packet_nic_rx).map(Event::ArpRequest)).merge(IntoStream::into_stream(dhcp_packet_nic_rx).map(Event::DhcpResponse)).merge(IntoStream::into_stream(control_rx).map(Event::ControlMessage));
+    let stream = interrupt
+        .map(Event::Interrupt)
+        .merge(IntoStream::into_stream(channel_listener).map(Event::NewChannel))
+        .merge(IntoStream::into_stream(packet_recv).map(|(port, socket, data)| Event::PacketToSend {
+            port,
+            socket,
+            data,
+        }))
+        .merge(IntoStream::into_stream(arp_packet_nic_rx).map(Event::ArpRequest))
+        .merge(IntoStream::into_stream(dhcp_packet_nic_rx).map(Event::DhcpResponse))
+        .merge(IntoStream::into_stream(control_rx).map(Event::ControlMessage));
+
     present::pin!(stream);
     while let Some(event) = stream.next().await {
         match event {
@@ -231,13 +262,15 @@ async fn real_main() {
                                     if let Some((PortType::Udp, sender)) = ports.get(&port) {
                                         sender.send(ClientMessage::Received {
                                             from: IpV4Socket::new(ipv4_header.source_ip, udp_header.source_port.get()),
-                                            data: payload[..udp_header.len.get() as usize - core::mem::size_of::<UdpHeader>()].to_vec(),
+                                            data: payload
+                                                [..udp_header.len.get() as usize - core::mem::size_of::<UdpHeader>()]
+                                                .to_vec(),
                                         });
                                     }
                                 }
                                 protocol => {
                                     println!("got an IPv4 protocol we don't deal with yet: {:?}", protocol);
-                                },
+                                }
                             }
                         }
                         frame_type => {
@@ -257,17 +290,23 @@ async fn real_main() {
                         if let Some((port_type, _)) = ports.get(&outgoing_port) {
                             match port_type {
                                 PortType::Udp => {
-                                    net_device.tx_udp4(IpV4Socket::new(interface_ips[0], outgoing_port), (mac, dst_socket), &|buffer| {
-                                        if pkt_data.len() > buffer.len() {
-                                            // TODO: fragment
-                                            return None;
-                                        }
+                                    net_device
+                                        .tx_udp4(
+                                            IpV4Socket::new(interface_ips[0], outgoing_port),
+                                            (mac, dst_socket),
+                                            &|buffer| {
+                                                if pkt_data.len() > buffer.len() {
+                                                    // TODO: fragment
+                                                    return None;
+                                                }
 
-                                        buffer[..pkt_data.len()].copy_from_slice(&pkt_data);
-                                        Some(pkt_data.len())
-                                    }).unwrap();
+                                                buffer[..pkt_data.len()].copy_from_slice(&pkt_data);
+                                                Some(pkt_data.len())
+                                            },
+                                        )
+                                        .unwrap();
                                 }
-                                PortType::Raw => todo!()
+                                PortType::Raw => todo!(),
                             }
                         }
                     } else {
@@ -280,53 +319,46 @@ async fn real_main() {
                 }
             }
             Event::ArpRequest(arp_request) => {
-                net_device.tx_raw(&move |bytes| {
-                    let (eth_header, payload, _) = EthernetHeader::split_slice_mut(bytes).ok()?;
-                    eth_header.destination_mac = MacAddress::BROADCAST;
-                    eth_header.source_mac = this_mac;
-                    eth_header.frame_type = EthernetHeader::ARP_FRAME;
-                    payload.get_mut(..arp_request.len())?.copy_from_slice(&arp_request[..]);
+                net_device
+                    .tx_raw(&move |bytes| {
+                        let (eth_header, payload, _) = EthernetHeader::split_slice_mut(bytes).ok()?;
+                        eth_header.destination_mac = MacAddress::BROADCAST;
+                        eth_header.source_mac = this_mac;
+                        eth_header.frame_type = EthernetHeader::ARP_FRAME;
+                        payload.get_mut(..arp_request.len())?.copy_from_slice(&arp_request[..]);
 
-                    Some(core::mem::size_of::<EthernetHeader>() + arp_request.len())
-                }).unwrap();
+                        Some(core::mem::size_of::<EthernetHeader>() + arp_request.len())
+                    })
+                    .unwrap();
             }
             Event::DhcpResponse(dhcp_response) => {
-                net_device.tx_udp4(
-                    IpV4Socket::new(
-                        IpV4Address::new(0, 0, 0, 0),
-                        68
-                    ),
-                    (
-                        MacAddress::BROADCAST,
-                        IpV4Socket::new(
-                            IpV4Address::new(255, 255, 255, 255),
-                            67
-                        )
-                    ),
-                    &move |buffer| {
-                        buffer.get_mut(..dhcp_response.len())?.copy_from_slice(&dhcp_response);
-                        Some(dhcp_response.len())
-                    }
-                ).unwrap();
+                net_device
+                    .tx_udp4(
+                        IpV4Socket::new(IpV4Address::new(0, 0, 0, 0), 68),
+                        (MacAddress::BROADCAST, IpV4Socket::new(IpV4Address::new(255, 255, 255, 255), 67)),
+                        &move |buffer| {
+                            buffer.get_mut(..dhcp_response.len())?.copy_from_slice(&dhcp_response);
+                            Some(dhcp_response.len())
+                        },
+                    )
+                    .unwrap();
             }
-            Event::ControlMessage(control_message) => {
-                match control_message {
-                    ControlMessage::ClientDisconnect { port } => drop(ports.remove(&port)),
-                    ControlMessage::NewInterfaceIp(ip) => {
-                        interface_ips.push(ip);
-                        println!("[network] New IP on network interface: {}", ip);
-                    }
-                    ControlMessage::NewDefaultGateway(ip) => default_gateway = Some(ip),
-                    ControlMessage::NewClient { port, port_type, tx } => {
-                        if ports.get(&port).is_some() {
-                            tx.send(ClientMessage::PortInUse);
-                        } else {
-                            tx.send(ClientMessage::PortBound);
-                            ports.insert(port, (port_type, tx));
-                        }
+            Event::ControlMessage(control_message) => match control_message {
+                ControlMessage::ClientDisconnect { port } => drop(ports.remove(&port)),
+                ControlMessage::NewInterfaceIp(ip) => {
+                    interface_ips.push(ip);
+                    println!("[network] New IP on network interface: {}", ip);
+                }
+                ControlMessage::NewDefaultGateway(ip) => default_gateway = Some(ip),
+                ControlMessage::NewClient { port, port_type, tx } => {
+                    if ports.get(&port).is_some() {
+                        tx.send(ClientMessage::PortInUse);
+                    } else {
+                        tx.send(ClientMessage::PortBound);
+                        ports.insert(port, (port_type, tx));
                     }
                 }
-            }
+            },
         }
     }
 }

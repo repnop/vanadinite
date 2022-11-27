@@ -37,6 +37,7 @@ impl<T> AtomicConstPtr<T> {
 pub trait DeadlockDetection {
     fn would_deadlock(&self) -> bool;
     fn gather_metadata(&self);
+    fn unlocked(&self);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -54,6 +55,7 @@ impl DeadlockDetection for NoCheck {
     }
 
     fn gather_metadata(&self) {}
+    fn unlocked(&self) {}
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -65,4 +67,5 @@ impl DeadlockDetection for Immediate {
     }
 
     fn gather_metadata(&self) {}
+    fn unlocked(&self) {}
 }

@@ -1,5 +1,5 @@
 [build]
-target = "riscv64gc-unknown-none-elf"
+target = "riscv64imac-unknown-none-elf"
 
 [unstable]
 build-std = ["core", "alloc", "compiler_builtins"]

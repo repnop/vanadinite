@@ -357,7 +357,6 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, scause: usize, stval: usize
                                 active_task.memory_manager.address_map_debug(Some(stval))
                             );
                             log::error!("Phys addr (if any): {:?}", active_task.memory_manager.resolve(stval));
-                            active_task.state = TaskState::Dead;
 
                             drop(active_task);
                             drop(active_task_lock);
@@ -386,7 +385,7 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, scause: usize, stval: usize
 #[repr(align(4))]
 pub unsafe extern "C" fn stvec_trap_shim() -> ! {
     #[rustfmt::skip]
-    core::arch::asm!("
+    core::arch::asm!(r#"
         // Interrupts are disabled when we enter a trap
         // Switch `t6` and `sscratch`
         csrrw t6, sscratch, t6
@@ -453,7 +452,107 @@ pub unsafe extern "C" fn stvec_trap_shim() -> ! {
         csrr a1, scause
         csrr a2, stval
 
+        // Check if floating point registers are dirty
+        csrr s0, sstatus
+        srli s0, s0, 13
+        andi s0, s0, 3
+        li s1, 3
+        
+        // Skip FP reg saving if they're clean
+        bne s0, s1, 1f
+
+        addi sp, sp, -264
+
+        .attribute arch, "rv64imafdc"
+        fsd f0, 0(sp)
+        fsd f1, 8(sp)
+        fsd f2, 16(sp)
+        fsd f3, 24(sp)
+        fsd f4, 32(sp)
+        fsd f5, 40(sp)
+        fsd f6, 48(sp)
+        fsd f7, 56(sp)
+        fsd f8, 64(sp)
+        fsd f9, 72(sp)
+        fsd f10, 80(sp)
+        fsd f11, 88(sp)
+        fsd f12, 96(sp)
+        fsd f13, 104(sp)
+        fsd f14, 112(sp)
+        fsd f15, 120(sp)
+        fsd f16, 128(sp)
+        fsd f17, 136(sp)
+        fsd f18, 144(sp)
+        fsd f19, 152(sp)
+        fsd f20, 160(sp)
+        fsd f21, 168(sp)
+        fsd f22, 176(sp)
+        fsd f23, 184(sp)
+        fsd f24, 192(sp)
+        fsd f25, 200(sp)
+        fsd f26, 208(sp)
+        fsd f27, 216(sp)
+        fsd f28, 224(sp)
+        fsd f29, 232(sp)
+        fsd f30, 240(sp)
+        fsd f31, 248(sp)
+        frcsr t1
+        sd t1, 256(sp)
+        .attribute arch, "rv64imac"
+
+        li t1, (0b01 << 13)
+        csrc sstatus, t1
+
+        // FP registers clean
+        1:
+
         call trap_handler
+
+        // Check FP register status again
+        bne s0, s1, 2f
+
+        // Restore if they were dirty
+        .attribute arch, "rv64imafdc"
+        fld f0, 0(sp)
+        fld f1, 8(sp)
+        fld f2, 16(sp)
+        fld f3, 24(sp)
+        fld f4, 32(sp)
+        fld f5, 40(sp)
+        fld f6, 48(sp)
+        fld f7, 56(sp)
+        fld f8, 64(sp)
+        fld f9, 72(sp)
+        fld f10, 80(sp)
+        fld f11, 88(sp)
+        fld f12, 96(sp)
+        fld f13, 104(sp)
+        fld f14, 112(sp)
+        fld f15, 120(sp)
+        fld f16, 128(sp)
+        fld f17, 136(sp)
+        fld f18, 144(sp)
+        fld f19, 152(sp)
+        fld f20, 160(sp)
+        fld f21, 168(sp)
+        fld f22, 176(sp)
+        fld f23, 184(sp)
+        fld f24, 192(sp)
+        fld f25, 200(sp)
+        fld f26, 208(sp)
+        fld f27, 216(sp)
+        fld f28, 224(sp)
+        fld f29, 232(sp)
+        fld f30, 240(sp)
+        fld f31, 248(sp)
+        ld t1, 256(sp)
+        fscsr t1
+        .attribute arch, "rv64imac"
+
+        addi sp, sp, 264
+
+        // FP registers clean
+        2:
 
         // Restore `sepc`
         ld t6, 0(sp)
@@ -503,56 +602,7 @@ pub unsafe extern "C" fn stvec_trap_shim() -> ! {
 
         // gtfo
         sret
-    ",
+    "#,
     TRAP_FRAME_SIZE = const { -(core::mem::size_of::<TrapFrame>() as isize) },
     options(noreturn));
-}
-
-#[rustfmt::skip]
-extern "C" fn save_fp_registers(fp_regs: &mut FloatingPointRegisters) {
-    unsafe {
-        core::arch::asm!("
-                .option push
-                .option arch, +d
-                fsd f0, 0({regs})
-                fsd f1, 8({regs})
-                fsd f2, 16({regs})
-                fsd f3, 24({regs})
-                fsd f4, 32({regs})
-                fsd f5, 40({regs})
-                fsd f6, 48({regs})
-                fsd f7, 56({regs})
-                fsd f8, 64({regs})
-                fsd f9, 72({regs})
-                fsd f10, 80({regs})
-                fsd f11, 88({regs})
-                fsd f12, 96({regs})
-                fsd f13, 104({regs})
-                fsd f14, 112({regs})
-                fsd f15, 120({regs})
-                fsd f16, 128({regs})
-                fsd f17, 136({regs})
-                fsd f18, 144({regs})
-                fsd f19, 152({regs})
-                fsd f20, 160({regs})
-                fsd f21, 168({regs})
-                fsd f22, 176({regs})
-                fsd f23, 184({regs})
-                fsd f24, 192({regs})
-                fsd f25, 200({regs})
-                fsd f26, 208({regs})
-                fsd f27, 216({regs})
-                fsd f28, 224({regs})
-                fsd f29, 232({regs})
-                fsd f30, 240({regs})
-                fsd f31, 248({regs})
-
-                frcsr {0}
-                sd {0}, 256({regs})
-                .option pop
-            ",
-            out(reg) _,
-            regs = in(reg) fp_regs,
-        );
-    }
 }
