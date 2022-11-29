@@ -20,11 +20,9 @@ impl IpV4Socket {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct IpV4Address([u8; 4]);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct IpV4Address([u8; 4]);
 
 impl IpV4Address {
     pub fn new(a: u8, b: u8, c: u8, d: u8) -> Self {
@@ -67,21 +65,19 @@ impl core::str::FromStr for IpV4Address {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(C)]
-    pub struct IpV4Header {
-        pub version_ihl: VersionIhl,
-        pub dscp_ecn: DscpEcn,
-        pub len: Length16,
-        pub identification: Identification,
-        pub flags_fragment_offset: FlagsFragmentOffset,
-        pub ttl: u8,
-        pub protocol: Protocol,
-        pub header_checksum: IpV4HeaderChecksum,
-        pub source_ip: IpV4Address,
-        pub destination_ip: IpV4Address,
-    }
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(C)]
+pub struct IpV4Header {
+    pub version_ihl: VersionIhl,
+    pub dscp_ecn: DscpEcn,
+    pub len: Length16,
+    pub identification: Identification,
+    pub flags_fragment_offset: FlagsFragmentOffset,
+    pub ttl: u8,
+    pub protocol: Protocol,
+    pub header_checksum: IpV4HeaderChecksum,
+    pub source_ip: IpV4Address,
+    pub destination_ip: IpV4Address,
 }
 
 impl IpV4Header {
@@ -125,11 +121,9 @@ impl IpV4Header {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(transparent)]
-    pub struct VersionIhl(u8);
-}
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(transparent)]
+pub struct VersionIhl(u8);
 
 impl VersionIhl {
     pub fn new() -> Self {
@@ -145,11 +139,9 @@ impl Default for VersionIhl {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(transparent)]
-    pub struct DscpEcn(u8);
-}
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(transparent)]
+pub struct DscpEcn(u8);
 
 impl DscpEcn {
     pub fn new() -> Self {
@@ -163,11 +155,9 @@ impl Default for DscpEcn {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(transparent)]
-    pub struct Identification([u8; 2]);
-}
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(transparent)]
+pub struct Identification([u8; 2]);
 
 impl Identification {
     pub fn new() -> Self {
@@ -181,11 +171,9 @@ impl Default for Identification {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(transparent)]
-    pub struct FlagsFragmentOffset([u8; 2]);
-}
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(transparent)]
+pub struct FlagsFragmentOffset([u8; 2]);
 
 impl FlagsFragmentOffset {
     pub fn new(flag: Flag, fragment_offset: u16) -> Self {
@@ -210,11 +198,9 @@ impl core::ops::BitAnd<Flag> for FlagsFragmentOffset {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct Protocol(u8);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct Protocol(u8);
 
 impl Protocol {
     // https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
@@ -225,11 +211,9 @@ impl Protocol {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(transparent)]
-    pub struct IpV4HeaderChecksum([u8; 2]);
-}
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(transparent)]
+pub struct IpV4HeaderChecksum([u8; 2]);
 
 impl IpV4HeaderChecksum {
     pub fn new() -> Self {

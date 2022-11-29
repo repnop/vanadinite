@@ -7,11 +7,11 @@
 
 #![no_std]
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct BigEndianU16(u16);
-}
+use alchemy::PackedStruct;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct BigEndianU16(u16);
 
 impl BigEndianU16 {
     /// Creates a new [`BigEndianU16`] from a native-endian [`u16`]
@@ -30,11 +30,9 @@ impl BigEndianU16 {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct BigEndianU32(u32);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct BigEndianU32(u32);
 
 impl BigEndianU32 {
     /// Creates a new [`BigEndianU32`] from a native-endian [`u32`]
@@ -53,11 +51,9 @@ impl BigEndianU32 {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct BigEndianU64(u64);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct BigEndianU64(u64);
 
 impl BigEndianU64 {
     /// Creates a new [`BigEndianU64`] from a native-endian [`u64`]
@@ -76,11 +72,9 @@ impl BigEndianU64 {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct BigEndianUsize(usize);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct BigEndianUsize(usize);
 
 impl BigEndianUsize {
     /// Creates a new [`BigEndianUsize`] from a native-endian [`usize`]
@@ -99,11 +93,9 @@ impl BigEndianUsize {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct BigEndianI16(i16);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct BigEndianI16(i16);
 
 impl BigEndianI16 {
     /// Creates a new [`BigEndianI16`] from a native-endian [`i16`]
@@ -122,11 +114,9 @@ impl BigEndianI16 {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct BigEndianI32(i32);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct BigEndianI32(i32);
 
 impl BigEndianI32 {
     /// Creates a new [`BigEndianI32`] from a native-endian [`i32`]
@@ -145,11 +135,9 @@ impl BigEndianI32 {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct BigEndianI64(i64);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct BigEndianI64(i64);
 
 impl BigEndianI64 {
     /// Creates a new [`BigEndianI64`] from a native-endian [`i64`]
@@ -168,11 +156,9 @@ impl BigEndianI64 {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct BigEndianIsize(isize);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct BigEndianIsize(isize);
 
 impl BigEndianIsize {
     /// Creates a new [`BigEndianIsize`] from a native-endian [`usize`]
@@ -191,11 +177,9 @@ impl BigEndianIsize {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct LittleEndianU16(u16);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct LittleEndianU16(u16);
 
 impl LittleEndianU16 {
     /// Creates a new [`LittleEndianU16`] from a native-endian [`u16`]
@@ -214,11 +198,9 @@ impl LittleEndianU16 {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct LittleEndianU32(u32);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct LittleEndianU32(u32);
 
 impl LittleEndianU32 {
     /// Creates a new [`LittleEndianU32`] from a native-endian [`u32`]
@@ -237,11 +219,9 @@ impl LittleEndianU32 {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct LittleEndianU64(u64);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct LittleEndianU64(u64);
 
 impl LittleEndianU64 {
     /// Creates a new [`LittleEndianU64`] from a native-endian [`u64`]
@@ -260,11 +240,9 @@ impl LittleEndianU64 {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct LittleEndianUsize(usize);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct LittleEndianUsize(usize);
 
 impl LittleEndianUsize {
     /// Creates a new [`LittleEndianUsize`] from a native-endian [`usize`]
@@ -283,11 +261,9 @@ impl LittleEndianUsize {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct LittleEndianI16(i16);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct LittleEndianI16(i16);
 
 impl LittleEndianI16 {
     /// Creates a new [`LittleEndianI16`] from a native-endian [`i16`]
@@ -306,11 +282,9 @@ impl LittleEndianI16 {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct LittleEndianI32(i32);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct LittleEndianI32(i32);
 
 impl LittleEndianI32 {
     /// Creates a new [`LittleEndianI32`] from a native-endian [`i32`]
@@ -329,11 +303,9 @@ impl LittleEndianI32 {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct LittleEndianI64(i64);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct LittleEndianI64(i64);
 
 impl LittleEndianI64 {
     /// Creates a new [`LittleEndianI64`] from a native-endian [`i64`]
@@ -352,11 +324,9 @@ impl LittleEndianI64 {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct LittleEndianIsize(isize);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct LittleEndianIsize(isize);
 
 impl LittleEndianIsize {
     /// Creates a new [`LittleEndianIsize`] from a native-endian [`usize`]

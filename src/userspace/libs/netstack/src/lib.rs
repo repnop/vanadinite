@@ -9,16 +9,16 @@
 #![allow(incomplete_features)]
 #![feature(generic_arg_infer, generic_const_exprs, split_array, array_chunks)]
 
+use alchemy::PackedStruct;
+
 pub mod arp;
 pub mod ethernet;
 pub mod ipv4;
 pub mod udp;
 
-alchemy::derive! {
-    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct MacAddress([u8; 6]);
-}
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct MacAddress([u8; 6]);
 
 impl MacAddress {
     pub const BROADCAST: Self = Self([0xFF; 6]);
@@ -51,11 +51,9 @@ impl core::fmt::Display for MacAddress {
 #[derive(Debug, Clone, Copy)]
 pub struct BufferTooSmall;
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(transparent)]
-    pub struct Length16([u8; 2]);
-}
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(transparent)]
+pub struct Length16([u8; 2]);
 
 impl Length16 {
     pub fn new(len: u16) -> Self {

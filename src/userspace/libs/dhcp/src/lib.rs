@@ -12,45 +12,39 @@ pub mod options;
 use alchemy::PackedStruct;
 use netstack::ipv4::IpV4Address;
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(C)]
-    pub struct DhcpMessage {
-        pub operation: DhcpOperation,
-        pub hardware_address: HardwareAddress,
-        pub hardware_ops: ZeroField,
-        pub transaction_id: TransactionId,
-        pub secs: Seconds,
-        pub flags: Flags,
-        pub client_ip_address: IpV4Address,
-        pub your_ip_address: IpV4Address,
-        pub next_server_ip_address: IpV4Address,
-        pub relay_agent_ip_address: IpV4Address,
-        pub client_hardware_address: [u8; 16],
-        pub server_name: [u8; 64],
-        pub boot_file_name: [u8; 128],
-        pub magic_cookie: MagicCookie,
-    }
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(C)]
+pub struct DhcpMessage {
+    pub operation: DhcpOperation,
+    pub hardware_address: HardwareAddress,
+    pub hardware_ops: ZeroField,
+    pub transaction_id: TransactionId,
+    pub secs: Seconds,
+    pub flags: Flags,
+    pub client_ip_address: IpV4Address,
+    pub your_ip_address: IpV4Address,
+    pub next_server_ip_address: IpV4Address,
+    pub relay_agent_ip_address: IpV4Address,
+    pub client_hardware_address: [u8; 16],
+    pub server_name: [u8; 64],
+    pub boot_file_name: [u8; 128],
+    pub magic_cookie: MagicCookie,
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct DhcpOperation(u8);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct DhcpOperation(u8);
 
 impl DhcpOperation {
     pub const BOOT_REQUEST: Self = Self(1);
     pub const BOOT_REPLY: Self = Self(2);
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(C)]
-    pub struct HardwareAddress {
-        r#type: u8,
-        len: u8,
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(C)]
+pub struct HardwareAddress {
+    r#type: u8,
+    len: u8,
 }
 
 impl HardwareAddress {
@@ -69,11 +63,9 @@ impl HardwareAddress {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct ZeroField(u8);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct ZeroField(u8);
 
 impl ZeroField {
     pub fn new() -> Self {
@@ -87,11 +79,9 @@ impl Default for ZeroField {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct TransactionId([u8; 4]);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct TransactionId([u8; 4]);
 
 impl TransactionId {
     pub fn new(n: u32) -> Self {
@@ -103,11 +93,9 @@ impl TransactionId {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(transparent)]
-    pub struct Seconds([u8; 2]);
-}
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(transparent)]
+pub struct Seconds([u8; 2]);
 
 impl Seconds {
     pub fn new(n: u16) -> Self {
@@ -119,11 +107,9 @@ impl Seconds {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(transparent)]
-    pub struct Flags([u8; 2]);
-}
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(transparent)]
+pub struct Flags([u8; 2]);
 
 impl Flags {
     pub fn new(n: u16) -> Self {
@@ -135,11 +121,9 @@ impl Flags {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct MagicCookie([u8; 4]);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct MagicCookie([u8; 4]);
 
 impl MagicCookie {
     pub fn new() -> Self {

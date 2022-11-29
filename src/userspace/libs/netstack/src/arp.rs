@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use alchemy::PackedStruct;
+
 pub trait ArpHardwareTransport {
     const HARDWARE_ADDRESS_LEN: usize;
 }
@@ -68,43 +70,35 @@ where
 {
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(C)]
-    pub struct ArpHeader {
-        pub hardware_type: HardwareType,
-        pub protocol_type: ProtocolType,
-        pub hardware_address_len: u8,
-        pub protocol_address_len: u8,
-        pub operation: ArpOperation,
-    }
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(C)]
+pub struct ArpHeader {
+    pub hardware_type: HardwareType,
+    pub protocol_type: ProtocolType,
+    pub hardware_address_len: u8,
+    pub protocol_address_len: u8,
+    pub operation: ArpOperation,
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-    #[repr(transparent)]
-    pub struct HardwareType([u8; 2]);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, PackedStruct)]
+#[repr(transparent)]
+pub struct HardwareType([u8; 2]);
 
 impl HardwareType {
     pub const ETHERNET: Self = Self([0x00, 0x01]);
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-    #[repr(transparent)]
-    pub struct ProtocolType([u8; 2]);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, PackedStruct)]
+#[repr(transparent)]
+pub struct ProtocolType([u8; 2]);
 
 impl ProtocolType {
     pub const IPV4: Self = Self([0x08, 0x00]);
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-    #[repr(transparent)]
-    pub struct ArpOperation([u8; 2]);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, PackedStruct)]
+#[repr(transparent)]
+pub struct ArpOperation([u8; 2]);
 
 impl ArpOperation {
     pub const REQUEST: Self = Self([0x00, 0x01]);

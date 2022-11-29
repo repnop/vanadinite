@@ -8,15 +8,13 @@
 use crate::{ipv4::IpV4Header, BufferTooSmall, Length16};
 use alchemy::PackedStruct;
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(C)]
-    pub struct UdpHeader {
-        pub source_port: Port,
-        pub destination_port: Port,
-        pub len: Length16,
-        pub checksum: UdpChecksum,
-    }
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(C)]
+pub struct UdpHeader {
+    pub source_port: Port,
+    pub destination_port: Port,
+    pub len: Length16,
+    pub checksum: UdpChecksum,
 }
 
 impl UdpHeader {
@@ -43,11 +41,9 @@ impl UdpHeader {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(transparent)]
-    pub struct Port([u8; 2]);
-}
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(transparent)]
+pub struct Port([u8; 2]);
 
 impl Port {
     pub fn new(port: u16) -> Self {
@@ -59,11 +55,9 @@ impl Port {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(transparent)]
-    pub struct UdpChecksum([u8; 2]);
-}
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(transparent)]
+pub struct UdpChecksum([u8; 2]);
 
 impl UdpChecksum {
     pub fn new() -> Self {

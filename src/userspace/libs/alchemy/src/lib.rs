@@ -9,6 +9,8 @@
 #![allow(incomplete_features)]
 #![feature(arbitrary_self_types, generic_const_exprs)]
 
+pub use alchemy_derive::PackedStruct;
+
 #[derive(Debug, Clone, Copy)]
 pub enum TryCastError {
     NotLongEnough,
@@ -206,82 +208,3 @@ unsafe impl PackedStruct for i32 {}
 unsafe impl PackedStruct for i64 {}
 unsafe impl PackedStruct for isize {}
 unsafe impl<T: PackedStruct, const N: usize> PackedStruct for [T; N] {}
-
-#[macro_export]
-macro_rules! derive {
-    ($(#[$($attr:tt)+])* $v:vis struct $name:ident($v2:vis $t:ty);) => {
-        $(#[$($attr)+])*
-        $v struct $name($v2 $t);
-
-        unsafe impl $crate::OnlyValidBitPatterns for $name {}
-        unsafe impl $crate::PackedStruct for $name {}
-
-        #[allow(path_statements)]
-        const _: () = {
-            struct AssertPackedStruct<T: $crate::PackedStruct> { _p: core::marker::PhantomData<T> }
-            const _: AssertPackedStruct<$t> = AssertPackedStruct { _p: core::marker::PhantomData };
-
-            $crate::derive!(@genreprc $($($attr)+)*);
-
-            NOT_REPR_C_OR_REPR_TRANSPARENT;
-        };
-    };
-    ($(#[$($attr:tt)+])* $v:vis struct $name:ident { $($v2:vis $field:ident: $t:ty),+ $(,)? }) => {
-        $(#[$($attr)+])*
-        $v struct $name {
-            $($v2 $field: $t),+
-        }
-
-        unsafe impl $crate::OnlyValidBitPatterns for $name {}
-        unsafe impl $crate::PackedStruct for $name {}
-
-        #[allow(path_statements)]
-        const _: () = {
-            struct AssertPackedStruct<T: $crate::PackedStruct> { _p: core::marker::PhantomData<T> }
-
-            $crate::derive!(@genreprc $($($attr)+)*);
-
-            NOT_REPR_C_OR_REPR_TRANSPARENT;
-
-            let mut total_size = 0;
-            $(
-                let (size, align) = (core::mem::size_of::<$t>(), core::mem::align_of::<$t>());
-                if total_size % align != 0 {
-                    panic!(concat!("struct `", stringify!($name), "` contains internal padding before field `", stringify!($field), "`"));
-                }
-                total_size += size;
-            )+
-
-            if total_size % core::mem::align_of::<$name>() != 0 {
-                panic!(concat!("struct `", stringify!($name), "` contains end padding"));
-            }
-
-            $(const _: AssertPackedStruct<$t> = AssertPackedStruct { _p: core::marker::PhantomData };)+
-        };
-    };
-
-    (@genreprc $(,)?) => {
-        //$name;
-    };
-    (@genreprc repr(C) $($t:tt)*) => {
-        const NOT_REPR_C_OR_REPR_TRANSPARENT: () = ();
-        $crate::derive!(@genreprc $($t)*);
-    };
-    (@genreprc repr(transparent) $($t:tt)*) => {
-        const NOT_REPR_C_OR_REPR_TRANSPARENT: () = ();
-        $crate::derive!(@genreprc $($t)*);
-    };
-    (@genreprc $attr:tt $($t:tt)*) => {
-        $crate::derive!(@genreprc $($t)*);
-    };
-}
-
-derive! {
-    #[repr(C)]
-    #[derive(Debug, Clone, Copy)]
-    struct Foo {
-        qux: u8,
-        bar: u8,
-        baz: u8,
-    }
-}

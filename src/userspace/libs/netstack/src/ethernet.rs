@@ -8,14 +8,12 @@
 use crate::{BufferTooSmall, MacAddress};
 use alchemy::PackedStruct;
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(C)]
-    pub struct EthernetHeader {
-        pub destination_mac: MacAddress,
-        pub source_mac: MacAddress,
-        pub frame_type: [u8; 2],
-    }
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(C)]
+pub struct EthernetHeader {
+    pub destination_mac: MacAddress,
+    pub source_mac: MacAddress,
+    pub frame_type: [u8; 2],
 }
 
 impl EthernetHeader {
@@ -44,11 +42,9 @@ impl EthernetHeader {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy)]
-    #[repr(transparent)]
-    pub struct Fcs([u8; 4]);
-}
+#[derive(Debug, Clone, Copy, PackedStruct)]
+#[repr(transparent)]
+pub struct Fcs([u8; 4]);
 
 impl Fcs {
     pub fn new() -> Self {

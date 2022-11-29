@@ -5,11 +5,11 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct DhcpMessageType(pub u8);
-}
+use alchemy::PackedStruct;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct DhcpMessageType(pub u8);
 
 impl DhcpMessageType {
     pub const DISCOVER: Self = Self(1);
@@ -48,11 +48,9 @@ impl<'a> DomainNameServerList<'a> {
     }
 }
 
-alchemy::derive! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct DhcpServerIdentifier(super::IpV4Address);
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[repr(transparent)]
+pub struct DhcpServerIdentifier(super::IpV4Address);
 
 impl DhcpServerIdentifier {
     pub fn new(ip: super::IpV4Address) -> Self {
