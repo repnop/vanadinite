@@ -9,7 +9,7 @@
 
 use alchemy::PackedStruct;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct BigEndianU16(u16);
 
@@ -33,7 +33,13 @@ impl BigEndianU16 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for BigEndianU16 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct BigEndianU32(u32);
 
@@ -57,7 +63,13 @@ impl BigEndianU32 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for BigEndianU32 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct BigEndianU64(u64);
 
@@ -81,7 +93,13 @@ impl BigEndianU64 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for BigEndianU64 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct BigEndianUsize(usize);
 
@@ -90,6 +108,12 @@ impl BigEndianUsize {
     #[inline(always)]
     pub const fn from_ne(n: usize) -> Self {
         Self(n.to_be())
+    }
+
+    /// Converts a [`BigEndianUsize`] into a native-endian [`usize`]
+    #[inline(always)]
+    pub const fn to_ne(self) -> usize {
+        usize::from_be_bytes(self.0.to_ne_bytes())
     }
 
     /// Converts a [`BigEndianUsize`] into a native-endian [`usize`]
@@ -105,7 +129,13 @@ impl BigEndianUsize {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for BigEndianUsize {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct BigEndianI16(i16);
 
@@ -129,7 +159,13 @@ impl BigEndianI16 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for BigEndianI16 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct BigEndianI32(i32);
 
@@ -153,7 +189,13 @@ impl BigEndianI32 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for BigEndianI32 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct BigEndianI64(i64);
 
@@ -177,7 +219,13 @@ impl BigEndianI64 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for BigEndianI64 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct BigEndianIsize(isize);
 
@@ -201,7 +249,13 @@ impl BigEndianIsize {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for BigEndianIsize {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct LittleEndianU16(u16);
 
@@ -225,7 +279,13 @@ impl LittleEndianU16 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for LittleEndianU16 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct LittleEndianU32(u32);
 
@@ -249,7 +309,13 @@ impl LittleEndianU32 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for LittleEndianU32 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct LittleEndianU64(u64);
 
@@ -273,7 +339,13 @@ impl LittleEndianU64 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for LittleEndianU64 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct LittleEndianUsize(usize);
 
@@ -282,6 +354,12 @@ impl LittleEndianUsize {
     #[inline(always)]
     pub const fn from_ne(n: usize) -> Self {
         Self(n.to_le())
+    }
+
+    /// Converts a [`LittleEndianUsize`] into a native-endian [`usize`]
+    #[inline(always)]
+    pub const fn to_ne(self) -> usize {
+        usize::from_le_bytes(self.0.to_ne_bytes())
     }
 
     /// Converts a [`LittleEndianUsize`] into a native-endian [`usize`]
@@ -297,7 +375,13 @@ impl LittleEndianUsize {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for LittleEndianUsize {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct LittleEndianI16(i16);
 
@@ -321,7 +405,13 @@ impl LittleEndianI16 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for LittleEndianI16 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct LittleEndianI32(i32);
 
@@ -345,7 +435,13 @@ impl LittleEndianI32 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for LittleEndianI32 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct LittleEndianI64(i64);
 
@@ -369,7 +465,13 @@ impl LittleEndianI64 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
+impl core::fmt::Debug for LittleEndianI64 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, PackedStruct)]
 #[repr(transparent)]
 pub struct LittleEndianIsize(isize);
 
@@ -390,6 +492,12 @@ impl LittleEndianIsize {
     #[inline(always)]
     pub const fn to_le_bytes(self) -> [u8; core::mem::size_of::<isize>()] {
         self.0.to_ne_bytes()
+    }
+}
+
+impl core::fmt::Debug for LittleEndianIsize {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::write!(f, "{}", self.to_ne())
     }
 }
 
