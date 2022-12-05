@@ -46,10 +46,24 @@ impl<T> SyncRc<T> {
     }
 }
 
-unsafe impl<T> Send for SyncRc<T> {}
-unsafe impl<T> Sync for SyncRc<T> {}
+impl<T: ?Sized> SyncRc<T> {
+    pub fn from_rc(rc: alloc::rc::Rc<T>) -> Self {
+        Self(rc)
+    }
+}
 
-impl<T> core::ops::Deref for SyncRc<T> {
+impl<T: ?Sized + core::marker::Unsize<U>, U: ?Sized> core::ops::CoerceUnsized<SyncRc<U>> for SyncRc<T> {}
+
+unsafe impl<T: ?Sized> Send for SyncRc<T> {}
+unsafe impl<T: ?Sized> Sync for SyncRc<T> {}
+
+impl<T: ?Sized> From<Box<T>> for SyncRc<T> {
+    fn from(value: Box<T>) -> Self {
+        Self(alloc::rc::Rc::from(value))
+    }
+}
+
+impl<T: ?Sized> core::ops::Deref for SyncRc<T> {
     type Target = alloc::rc::Rc<T>;
 
     fn deref(&self) -> &Self::Target {
@@ -57,13 +71,13 @@ impl<T> core::ops::Deref for SyncRc<T> {
     }
 }
 
-impl<T> core::ops::DerefMut for SyncRc<T> {
+impl<T: ?Sized> core::ops::DerefMut for SyncRc<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<T> Clone for SyncRc<T> {
+impl<T: ?Sized> Clone for SyncRc<T> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }

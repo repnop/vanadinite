@@ -210,6 +210,12 @@ impl core::ops::AddAssign<u8> for Bytes {
     }
 }
 
+impl core::fmt::Display for Bytes {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{} B", self.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Kibibytes(u64);
 
@@ -220,6 +226,12 @@ impl Kibibytes {
 
     pub fn to_bytes(self) -> Bytes {
         self.0.kib()
+    }
+}
+
+impl core::fmt::Display for Kibibytes {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{} KiB", self.0)
     }
 }
 
@@ -236,6 +248,12 @@ impl Mibibytes {
     }
 }
 
+impl core::fmt::Display for Mibibytes {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{} MiB", self.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Gibibytes(u64);
 
@@ -249,6 +267,12 @@ impl Gibibytes {
     }
 }
 
+impl core::fmt::Display for Gibibytes {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{} GiB", self.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Tibibytes(u64);
 
@@ -259,6 +283,12 @@ impl Tibibytes {
 
     pub fn to_bytes(self) -> Bytes {
         self.0.tib()
+    }
+}
+
+impl core::fmt::Display for Tibibytes {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{} TiB", self.0)
     }
 }
 

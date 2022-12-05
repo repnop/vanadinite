@@ -22,6 +22,10 @@ impl<T, U> AlternatingPollOrder<T, U> {
     pub(crate) fn new(t: T, u: U) -> Self {
         Self { t, u, order: true }
     }
+
+    pub(crate) fn split(self) -> (T, U) {
+        (self.t, self.u)
+    }
 }
 
 impl<O, T: Future<Output = O>, U: Future<Output = O>> Future for AlternatingPollOrder<T, U> {

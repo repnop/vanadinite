@@ -49,6 +49,8 @@ impl Guid {
     pub const LEGACY_MBR: Self = guid!("024DEE41-33E7-11D3-9D69-0008C781F39F");
     /// Linux filesystem partition (any supported filesystem)
     pub const LINUX_FILESYSTEM_DATA: Self = guid!("0FC63DAF-8483-4772-8E79-3D69D8477DE4");
+    /// FAT12, FAT16, FAT32. exFAT, or NTFS
+    pub const MICROSOFT_BASIC_DATA: Self = guid!("EBD0A0A2-B9E5-4433-87C0-68B6B72699C7");
 
     /// Create a new [`Guid`] from its component parts
     pub const fn new(a: u32, b: u16, c: u16, d: u8, e: u8, f: [u8; 6]) -> Self {

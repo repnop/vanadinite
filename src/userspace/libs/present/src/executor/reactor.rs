@@ -5,7 +5,6 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::LazyVecDeque;
 use librust::{
     capabilities::CapabilityPtr,
     syscalls::channel::{read_kernel_message, KernelMessage},
@@ -14,7 +13,7 @@ use std::{collections::BTreeMap, sync::SyncRefCell, task::Waker};
 
 pub(crate) static EVENT_REGISTRY: EventRegistry = EventRegistry::new();
 pub(crate) static SEEN_IPC_CHANNELS: SyncRefCell<BTreeMap<CapabilityPtr, ()>> = SyncRefCell::new(BTreeMap::new());
-pub(crate) static NEW_IPC_CHANNELS: SyncRefCell<LazyVecDeque<CapabilityPtr>> = SyncRefCell::new(LazyVecDeque::new());
+pub(crate) static NEW_IPC_CHANNELS: SyncRefCell<Vec<CapabilityPtr>> = SyncRefCell::new(Vec::new());
 
 pub struct EventRegistry {
     waiting_for_event: SyncRefCell<BTreeMap<BlockType, Waker>>,
@@ -93,7 +92,7 @@ impl Reactor {
                     }
                     false => {
                         SEEN_IPC_CHANNELS.borrow_mut().insert(cptr, ());
-                        NEW_IPC_CHANNELS.borrow_mut().push_back(cptr);
+                        NEW_IPC_CHANNELS.borrow_mut().push(cptr);
                         if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::NewIpcChannel) {
                             waker.wake();
                         }

@@ -8,12 +8,14 @@
 #![feature(
     allocator_api,
     alloc_error_handler,
+    coerce_unsized,
     extern_types,
     inline_const,
     lang_items,
     naked_functions,
     prelude_import,
-    thread_local
+    thread_local,
+    unsize
 )]
 #![no_std]
 #![allow(incomplete_features)]

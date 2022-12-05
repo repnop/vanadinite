@@ -180,6 +180,17 @@ pub unsafe trait PackedStruct: OnlyValidBitPatterns {
         }
     }
 
+    fn try_slice_from_bytes(this: &[u8]) -> Result<&[Self], TryCastError> {
+        let address = this.as_ptr() as usize;
+        match address % core::mem::align_of::<Self>() == 0 {
+            true => {
+                let num_us = this.len() * core::mem::size_of::<u8>() / core::mem::size_of::<Self>();
+                Ok(unsafe { core::slice::from_raw_parts(this.as_ptr().cast(), num_us) })
+            }
+            false => Err(TryCastError::Underaligned),
+        }
+    }
+
     fn bytes_of_slice(this: &[Self]) -> &[u8] {
         unsafe { core::slice::from_raw_parts(this.as_ptr().cast(), this.len() * core::mem::size_of::<Self>()) }
     }

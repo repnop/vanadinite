@@ -10,8 +10,9 @@ mod helpers;
 mod map;
 mod merge;
 mod next;
+mod then;
 
-use core::pin::Pin;
+use core::{future::Future, pin::Pin};
 use std::task::{Context, Poll};
 
 pub use from_iter::{from_iter, FromIter};
@@ -61,6 +62,50 @@ pub trait StreamExt: Stream {
     {
         merge::Merge { helper: helpers::AlternatingPollOrder::new(self, other) }
     }
+
+    fn then<U, F, Fut>(self, f: F) -> then::Then<Self, F, Fut>
+    where
+        Self: Sized,
+        F: FnMut(Self::Item) -> Fut,
+        Fut: Future<Output = U>,
+    {
+        then::Then { stream: self, f, current_future: None }
+    }
 }
 
 impl<S: Stream> StreamExt for S {}
+impl<S: Stream + Unpin + ?Sized> Stream for Box<S> {
+    type Item = S::Item;
+
+    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut **self).poll_next(context)
+    }
+}
+
+pub struct Empty<T>(core::marker::PhantomData<T>);
+
+impl<T> Stream for Empty<T> {
+    type Item = T;
+
+    fn poll_next(self: Pin<&mut Self>, _: &mut Context) -> Poll<Option<Self::Item>> {
+        Poll::Ready(None)
+    }
+}
+
+pub fn empty<T>() -> Empty<T> {
+    Empty(core::marker::PhantomData)
+}
+
+pub struct Pending<T>(core::marker::PhantomData<T>);
+
+impl<T> Stream for Pending<T> {
+    type Item = T;
+
+    fn poll_next(self: Pin<&mut Self>, _: &mut Context) -> Poll<Option<Self::Item>> {
+        Poll::Pending
+    }
+}
+
+pub fn pending<T>() -> Pending<T> {
+    Pending(core::marker::PhantomData)
+}

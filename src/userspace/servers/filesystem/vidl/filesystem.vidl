@@ -1,12 +1,37 @@
+use core::{U8, Unit, USize};
+use sync::SharedBuffer;
+
+@orderable
+@trivial
 struct FileHandle {
-    handle: usize,
+    id: USize,
 }
 
+struct File {
+    handle: FileHandle,
+    buffer: SharedBuffer,
+}
+
+@comparable
+@trivial
 enum Error {
-    UnknownPath,
+    FileNotFound,
+    InvalidHandle,
+    InvalidPath,
+    IoError,
+    OperationNotSupported,
+}
+
+@comparable
+@trivial
+enum OpenOptions {
+    Append,
+    Overwrite,
+    ReadOnly,
 }
 
 service Filesystem {
-    fn open(path: String) -> Result<FileHandle, Error>;
-    fn read(handle: FileHandle) -> [core::U8];
+    fn open(path: String, options: OpenOptions) -> Result<File, Error>;
+    fn close(handle: FileHandle) -> Result<Unit, Error>;
+    fn read(handle: FileHandle) -> Result<USize, Error>;
 }

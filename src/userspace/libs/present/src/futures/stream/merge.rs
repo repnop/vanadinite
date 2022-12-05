@@ -16,6 +16,12 @@ pub struct Merge<S1: Stream, S2: Stream<Item = S1::Item>> {
     pub(super) helper: AlternatingPollOrder<S1, S2>,
 }
 
+impl<S1: Stream, S2: Stream<Item = S1::Item>> Merge<S1, S2> {
+    pub fn unmerge(self) -> (S1, S2) {
+        self.helper.split()
+    }
+}
+
 impl<S1: Stream, S2: Stream<Item = S1::Item>> Stream for Merge<S1, S2> {
     type Item = S1::Item;
 

@@ -17,6 +17,12 @@ pub struct Map<S: Stream, U, F: Fn(S::Item) -> U> {
     pub(super) map: F,
 }
 
+impl<S: Stream, U, F: Fn(S::Item) -> U> Map<S, U, F> {
+    pub fn into_stream(self) -> S {
+        self.stream
+    }
+}
+
 impl<S: Stream, U, F: Fn(S::Item) -> U> Stream for Map<S, U, F> {
     type Item = U;
 

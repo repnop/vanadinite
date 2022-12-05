@@ -81,6 +81,12 @@ impl SharedBuffer {
 unsafe impl Send for SharedBuffer {}
 unsafe impl Sync for SharedBuffer {}
 
+impl core::fmt::Debug for SharedBuffer {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SharedBuffer").finish_non_exhaustive()
+    }
+}
+
 impl materialize::Serializable for SharedBuffer {
     type Primitive<'a> = materialize::primitives::Capability;
 }

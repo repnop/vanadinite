@@ -13,47 +13,12 @@ use crate::{
     sync::oneshot,
     waker::{ArcWaker, Waker},
 };
-use core::{cell::SyncUnsafeCell, future::Future, pin::Pin};
+use core::{future::Future, pin::Pin};
 use std::{
     collections::BTreeMap,
     sync::SyncRefCell,
     task::{Context, Poll},
 };
-
-// Horrible hack until we get `const fn new()` for `VecDeque`
-pub(crate) struct LazyVecDeque<T> {
-    inner: SyncUnsafeCell<Option<VecDeque<T>>>,
-}
-
-impl<T> LazyVecDeque<T> {
-    const fn new() -> Self {
-        Self { inner: SyncUnsafeCell::new(None) }
-    }
-}
-
-impl<T> core::ops::Deref for LazyVecDeque<T> {
-    type Target = VecDeque<T>;
-
-    fn deref(&self) -> &Self::Target {
-        let inner = unsafe { &mut *self.inner.get() };
-        if inner.is_none() {
-            *inner = Some(VecDeque::new());
-        }
-
-        inner.as_ref().unwrap()
-    }
-}
-
-impl<T> core::ops::DerefMut for LazyVecDeque<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        let inner = unsafe { &mut *self.inner.get() };
-        if inner.is_none() {
-            *inner = Some(VecDeque::new());
-        }
-
-        inner.as_mut().unwrap()
-    }
-}
 
 pub struct Task {
     task_id: u64,
@@ -61,11 +26,8 @@ pub struct Task {
     waker: ArcWaker,
 }
 
-pub(crate) static GLOBAL_EXECUTOR: SyncRefCell<PresentExecutor> = SyncRefCell::new(PresentExecutor {
-    next_task_id: 0,
-    ready_tasks: LazyVecDeque::new(),
-    waiting_tasks: BTreeMap::new(),
-});
+pub(crate) static GLOBAL_EXECUTOR: SyncRefCell<PresentExecutor> =
+    SyncRefCell::new(PresentExecutor { next_task_id: 0, ready_tasks: Vec::new(), waiting_tasks: BTreeMap::new() });
 
 pub struct Present {}
 
@@ -87,7 +49,7 @@ impl Present {
                 continue;
             }
 
-            let mut next = executor.ready_tasks.pop_front().unwrap();
+            let mut next = executor.ready_tasks.remove(0);
             drop(executor);
 
             if next.future.as_mut().poll(&mut Context::from_waker(&next.waker.clone().into())).is_pending() {
@@ -147,7 +109,7 @@ where
 
 pub struct PresentExecutor {
     next_task_id: u64,
-    ready_tasks: LazyVecDeque<Task>,
+    ready_tasks: Vec<Task>,
     waiting_tasks: BTreeMap<u64, Task>,
 }
 
@@ -158,7 +120,7 @@ impl PresentExecutor {
 
     pub(crate) unsafe fn push_unchecked<F: Future<Output = ()>>(&mut self, f: F) -> u64 {
         let task_id = self.next_task_id;
-        self.ready_tasks.push_back(Task {
+        self.ready_tasks.push(Task {
             task_id,
             future: core::mem::transmute(Box::pin(f) as Pin<Box<dyn Future<Output = ()>>>),
             waker: ArcWaker::new(Waker { task_id }),
@@ -168,7 +130,10 @@ impl PresentExecutor {
     }
 
     pub(crate) fn pop(&mut self) -> Option<Task> {
-        self.ready_tasks.pop_front()
+        match self.ready_tasks.is_empty() {
+            false => Some(self.ready_tasks.remove(0)),
+            true => None,
+        }
     }
 
     pub(crate) fn push_blocked(&mut self, task: Task) {
@@ -179,7 +144,7 @@ impl PresentExecutor {
 
     pub(crate) fn awaken(&mut self, id: u64) {
         if let Some(task) = self.waiting_tasks.remove(&id) {
-            self.ready_tasks.push_back(task);
+            self.ready_tasks.push(task);
         }
     }
 }

@@ -18,9 +18,10 @@ static INIT_ORDER: &[Service] = &[
     Service { name: "stdio", caps: &["devicemgr"] },
     Service { name: "virtiomgr", caps: &["devicemgr", "stdio"] },
     Service { name: "filesystem", caps: &["virtiomgr", "stdio"] },
-    Service { name: "network", caps: &["virtiomgr", "stdio"] },
-    Service { name: "servicemgr", caps: &["devicemgr", "stdio"] },
-    Service { name: "echonet", caps: &["network", "stdio"] },
+    // Service { name: "network", caps: &["virtiomgr", "stdio"] },
+    // Service { name: "servicemgr", caps: &["devicemgr", "stdio"] },
+    // Service { name: "echonet", caps: &["network", "stdio"] },
+    Service { name: "fstest", caps: &["filesystem", "stdio"] },
 ];
 
 struct Service {

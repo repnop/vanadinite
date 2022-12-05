@@ -5,55 +5,109 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use alchemy::PackedStruct;
+#![feature(async_fn_in_trait)]
+#![allow(incomplete_features)]
+
+mod client;
+
 use filesystem::{
-    block_devices::{BlockDevice, SectorIndex},
-    partitions::{gpt::GptHeader, mbr::MasterBootRecord},
+    block_devices::{BlockDevice, DeviceError},
+    filesystems::Filesystem,
 };
 use librust::syscalls::io::query_mmio_cap;
-use present::{futures::stream::StreamExt, interrupt::Interrupt};
+use present::{
+    futures::stream::{Stream, StreamExt},
+    interrupt::Interrupt,
+    ipc::NewChannelListener,
+};
+use std::sync::SyncRc;
+use vidl::CapabilityPtr;
 
+enum InitEvent {
+    Event(Event),
+    Filesystem(Result<Vec<SyncRc<dyn Filesystem>>, DeviceError>),
+}
+
+#[derive(Debug)]
 enum Event {
-    Interrupt(usize),
+    Interrupt { interrupt: usize, block_device_index: usize },
+    NewChannel(CapabilityPtr),
 }
 
 #[present::main]
 async fn main() {
-    // let mut block_devices = Vec::new();
     let virtiomgr = virtiomgr::VirtIoMgrClient::new(std::env::lookup_capability("virtiomgr").unwrap().capability.cptr);
-    let mut devices = virtiomgr.request(virtio::DeviceType::BlockDevice as u32);
+    let devices = virtiomgr.request(virtio::DeviceType::BlockDevice as u32);
     if devices.is_empty() {
         return;
     }
 
-    let device = devices.remove(0);
-    let interrupt_id = device.interrupts[0];
-    let (mmio, _) = query_mmio_cap(device.capability.cptr, &mut []).unwrap();
-    let virtio_device = filesystem::block_devices::virtio::VirtIoBlockDevice::new(unsafe {
-        &*mmio.address().cast::<virtio::devices::block::VirtIoBlockDevice>()
-    })
-    .unwrap();
+    let mut block_devices = Vec::new();
+    let mut interrupts = Box::new(present::futures::stream::pending()) as Box<dyn Stream<Item = Event> + Unpin>;
+    let mut join_handles = Vec::new();
 
-    let mut mbr_response = Some(virtio_device.read(SectorIndex::new(0)));
-    let mut gpt_response = Some(virtio_device.read(SectorIndex::new(1)));
+    for device in devices {
+        let (mmio, _) = query_mmio_cap(device.capability.cptr, &mut []).unwrap();
+        let virtio_device = filesystem::block_devices::virtio::VirtIoBlockDevice::new(unsafe {
+            &*mmio.address().cast::<virtio::devices::block::VirtIoBlockDevice>()
+        })
+        .unwrap();
 
-    let stream = Interrupt::new(interrupt_id).map(Event::Interrupt);
-    present::pin!(stream);
+        let virtio_device = SyncRc::from_rc(std::rc::Rc::new(virtio_device) as std::rc::Rc<dyn BlockDevice>);
+        let block_device_index = block_devices.len();
 
-    while let Some(event) = stream.next().await {
+        for interrupt in device.interrupts {
+            interrupts = Box::new(interrupts.merge(
+                Interrupt::new(interrupt).map(move |interrupt| Event::Interrupt { interrupt, block_device_index }),
+            ));
+        }
+
+        block_devices.push(SyncRc::clone(&virtio_device));
+        join_handles.push(present::spawn(filesystem::probe::filesystem_probe(virtio_device)));
+    }
+
+    let join_handle_count = join_handles.len();
+    let mut collected_handles = 0;
+    let mut filesystems = Vec::new();
+    let mut init_stream = Box::pin(interrupts.map(InitEvent::Event).merge(
+        present::futures::stream::from_iter(join_handles).then(|h| Box::pin(h.join())).map(InitEvent::Filesystem),
+    ));
+
+    while let Some(event) = init_stream.next().await {
         match event {
-            Event::Interrupt(id) => {
-                virtio_device.handle_interrupt();
-                librust::syscalls::io::complete_interrupt(id).unwrap();
-
-                if let Some(res) = mbr_response.take() {
-                    let res = res.await.unwrap();
-                    let mbr = MasterBootRecord::try_from_byte_slice(&res).unwrap();
-                    println!("{mbr:#?}");
-                    let res = gpt_response.take().unwrap().await.unwrap();
-                    let mbr = GptHeader::try_from_byte_slice(&res).unwrap();
-                    println!("{mbr:#?}");
+            InitEvent::Event(Event::Interrupt { interrupt, block_device_index }) => {
+                block_devices[block_device_index].handle_interrupt();
+                librust::syscalls::io::complete_interrupt(interrupt).unwrap();
+            }
+            InitEvent::Filesystem(res) => {
+                collected_handles += 1;
+                match res {
+                    Ok(fs) => filesystems.extend(fs),
+                    Err(e) => println!("Error collecting filesystems for device: {e:?}"),
                 }
+
+                if collected_handles == join_handle_count {
+                    break;
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    let filesystems: SyncRc<[SyncRc<dyn Filesystem>]> = SyncRc::from(filesystems.into_boxed_slice());
+
+    let (interrupts, _) = core::pin::Pin::into_inner(init_stream).unmerge();
+    let mut event_stream = interrupts.into_stream().merge(NewChannelListener::new().map(Event::NewChannel));
+    present::pin!(event_stream);
+
+    while let Some(event) = event_stream.next().await {
+        match event {
+            Event::Interrupt { interrupt, block_device_index } => {
+                block_devices[block_device_index].handle_interrupt();
+                librust::syscalls::io::complete_interrupt(interrupt).unwrap();
+            }
+            Event::NewChannel(cptr) => {
+                present::spawn(client::serve_client(cptr, SyncRc::clone(&filesystems)));
             }
         }
     }

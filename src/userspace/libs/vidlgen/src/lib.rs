@@ -669,6 +669,7 @@ pub enum {}"#,
             match &**attribute {
                 "trivial" => traits.push_str("Clone, Copy, "),
                 "comparable" => traits.push_str("PartialEq, Eq, "),
+                "orderable" => traits.push_str("PartialEq, Eq, PartialOrd, Ord, "),
                 _ => {}
             }
         }

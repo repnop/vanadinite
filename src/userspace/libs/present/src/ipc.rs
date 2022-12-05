@@ -5,12 +5,21 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use librust::{units::Bytes, syscalls::{mem::{AllocationOptions, MemoryPermissions}, channel::{ReadResult, ChannelMessage, ChannelReadFlags, self, KERNEL_CHANNEL}}, capabilities::{Capability, CapabilityRights, CapabilityPtr, CapabilityWithDescription, CapabilityDescription}, error::SyscallError};
-use crate::{executor::reactor::{BlockType, EVENT_REGISTRY, NEW_IPC_CHANNELS}, futures::stream::{Stream, IntoStream}};
-use core::{future::Future, pin::Pin};
-use std::{
-    task::{Context, Poll},
+use crate::{
+    executor::reactor::{BlockType, EVENT_REGISTRY, NEW_IPC_CHANNELS},
+    futures::stream::{IntoStream, Stream},
 };
+use core::{future::Future, pin::Pin};
+use librust::{
+    capabilities::{Capability, CapabilityDescription, CapabilityPtr, CapabilityRights, CapabilityWithDescription},
+    error::SyscallError,
+    syscalls::{
+        channel::{self, ChannelMessage, ChannelReadFlags, ReadResult, KERNEL_CHANNEL},
+        mem::{AllocationOptions, MemoryPermissions},
+    },
+    units::Bytes,
+};
+use std::task::{Context, Poll};
 
 // TODO: fix all this garbage
 
@@ -26,9 +35,10 @@ impl NewChannelListener {
 impl Future for NewChannelListener {
     type Output = CapabilityPtr;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match NEW_IPC_CHANNELS.borrow_mut().pop_front() {
-            Some(cptr) => Poll::Ready(cptr),
-            None => {
+        let mut channels = NEW_IPC_CHANNELS.borrow_mut();
+        match channels.is_empty() {
+            false => Poll::Ready(channels.remove(0)),
+            true => {
                 EVENT_REGISTRY.register(BlockType::NewIpcChannel, cx.waker().clone());
                 Poll::Pending
             }
@@ -40,9 +50,10 @@ impl Stream for NewChannelListener {
     type Item = CapabilityPtr;
 
     fn poll_next(self: Pin<&mut Self>, context: &mut Context) -> Poll<Option<Self::Item>> {
-        match NEW_IPC_CHANNELS.borrow_mut().pop_front() {
-            Some(cptr) => Poll::Ready(Some(cptr)),
-            None => {
+        let mut channels = NEW_IPC_CHANNELS.borrow_mut();
+        match channels.is_empty() {
+            false => Poll::Ready(Some(channels.remove(0))),
+            true => {
                 EVENT_REGISTRY.register(BlockType::NewIpcChannel, context.waker().clone());
                 Poll::Pending
             }
@@ -154,7 +165,7 @@ impl Stream for IpcMessageStream {
                 }
 
                 Poll::Ready(Some(Ok((message, caps))))
-            },
+            }
             Err(SyscallError::WouldBlock) => {
                 EVENT_REGISTRY.register(BlockType::IpcChannelMessage(this.channel.0), context.waker().clone());
                 Poll::Pending
