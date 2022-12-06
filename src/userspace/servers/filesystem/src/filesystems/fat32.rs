@@ -262,12 +262,12 @@ impl Filesystem for Fat32 {
 
             let mut vlfn_parts = String::new();
 
-            println!("Searching for file: {}", &**path);
+            // println!("Searching for file: {}", &**path);
 
             'components: for component in directories {
                 // Cluster numbering starts at 2
                 let cluster_start_sector = first_cluster_sector + ((cluster_start - 2) * sectors_per_cluster);
-                println!("Reading cluster {cluster_start} in search of directory {component}");
+                // println!("Reading cluster {cluster_start} in search of directory {component}");
                 for i in 0..sectors_per_cluster {
                     let cluster_data_block = device.read(cluster_start_sector + i).await?;
                     let directory_entries = DirectoryData::try_slice_from_bytes(&cluster_data_block).unwrap();
@@ -315,7 +315,7 @@ impl Filesystem for Fat32 {
                 }
             }
 
-            println!("Found parent directory");
+            // println!("Found parent directory");
 
             let mut file_size = 0;
             // Loop over the directory the file should be contained within
@@ -365,15 +365,15 @@ impl Filesystem for Fat32 {
                 }
             }
 
-            println!(
-                "File found! cluster={cluster_start} size={} ({})",
-                units::data::Bytes::new(file_size).to_whole_kib(),
-                units::data::Bytes::new(file_size)
-            );
+            // println!(
+            //     "File found! cluster={cluster_start} size={} ({})",
+            //     units::data::Bytes::new(file_size).to_whole_kib(),
+            //     units::data::Bytes::new(file_size)
+            // );
 
             let cluster_start_sector = first_cluster_sector + ((cluster_start - 2) * sectors_per_cluster);
             let contents = device.read(cluster_start_sector).await?;
-            println!("File starting contents: {}", core::str::from_utf8(&contents).unwrap().trim_end_matches('\u{0}'));
+            // println!("File starting contents: {}", core::str::from_utf8(&contents).unwrap().trim_end_matches('\u{0}'));
 
             let mut me = this.inner_mut();
             let next_file_id = me.open_files.last_key_value().map(|(k, _)| FileId(k.0 + 1)).unwrap_or(FileId(0));
@@ -417,22 +417,24 @@ impl Filesystem for Fat32 {
         Box::pin(async move {
             let cluster_byte_size = sectors_per_cluster * /* FIXME: don't assume sector byte size */ 512;
             if open_file_info.total_read % cluster_byte_size == 0 && open_file_info.total_read != 0 {
-                let (fat_sector, byte_offset) =
-                    (fat_start + (open_file_info.current_cluster * 4) / 512, open_file_info.current_cluster % 128);
+                // println!("\n\n\n\n\n{cluster_byte_size} - {open_file_info:?}\n\n\n\n\n\n");
+                let fat_sector = fat_start + (open_file_info.current_cluster * 4) / 512;
                 let data = device.read(fat_sector).await?;
-                let next_cluster = u32::try_slice_from_bytes(&data).unwrap()[byte_offset as usize];
+                let next_cluster =
+                    u32::try_slice_from_bytes(&data).unwrap()[(open_file_info.current_cluster % 128) as usize];
 
                 if next_cluster == 0xFFFFFFFF {
                     this.inner_mut().open_files.get_mut(&file).unwrap().current_cluster = 0xFFFFFFFF;
                     return Ok(None);
                 }
 
+                // println!("{} -> {next_cluster}", open_file_info.current_cluster);
+
                 open_file_info.current_cluster = u64::from(next_cluster);
             }
 
-            let next_data_sector = first_cluster_sector
-                + ((open_file_info.current_cluster - 2) * sectors_per_cluster)
-                + (open_file_info.total_read / /* FIXME: don't assume sector byte size */ 512);
+            let next_data_sector = first_cluster_sector + ((open_file_info.current_cluster - 2) * sectors_per_cluster);
+            // + (open_file_info.total_read / /* FIXME: don't assume sector byte size */ 512);
 
             let data = device.read(next_data_sector).await?;
 

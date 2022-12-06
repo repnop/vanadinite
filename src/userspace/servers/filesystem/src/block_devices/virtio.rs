@@ -11,19 +11,21 @@ use super::{BlockDevice, DataBlock, DeviceError, SectorIndex};
 use librust::mem::{DmaElement, DmaRegion, PhysicalAddress};
 use present::sync::oneshot::{self, OneshotTx};
 use std::collections::BTreeMap;
-use std::sync::SyncRefCell;
+use std::sync::{SyncRc, SyncRefCell};
 use virtio::devices::block::{Command, CommandKind, CommandStatus};
 use virtio::{
     splitqueue::{DescriptorFlags, SplitVirtqueue, SplitqueueIndex, VirtqueueDescriptor},
     StatusFlag, VirtIoDeviceError,
 };
 
+#[derive(Debug)]
 struct QueuedCommand {
     command_index: usize,
     data_index: usize,
     kind: QueuedCommandKind,
 }
 
+#[derive(Debug)]
 enum QueuedCommandKind {
     // FIXME: use a newtype or not need the command index at all
     Read(OneshotTx<Result<DataBlock, DeviceError>>),
@@ -48,60 +50,75 @@ struct VirtIoBlockDeviceInner {
 }
 
 pub struct VirtIoBlockDevice {
-    inner: SyncRefCell<VirtIoBlockDeviceInner>,
+    inner: SyncRc<SyncRefCell<VirtIoBlockDeviceInner>>,
+    data_drop: SyncRc<dyn Fn(usize, *mut [u8])>,
 }
 
 impl VirtIoBlockDevice {
     pub fn new(device: &'static virtio::devices::block::VirtIoBlockDevice) -> Result<Self, VirtIoDeviceError> {
-        Ok(Self {
-            inner: SyncRefCell::new({
-                let queue = SplitVirtqueue::new(64).unwrap();
-                let command_buffer = CommandBuffer::new(512);
-                let data_buffer = DataBuffer::new(512);
+        let inner = SyncRc::new(SyncRefCell::new({
+            let queue = SplitVirtqueue::new(64).unwrap();
+            let command_buffer = CommandBuffer::new(512);
+            let data_buffer = DataBuffer::new(512);
 
-                device.header.status.reset();
+            device.header.status.reset();
 
-                device.header.status.set_flag(StatusFlag::Acknowledge);
-                device.header.status.set_flag(StatusFlag::Driver);
+            device.header.status.set_flag(StatusFlag::Acknowledge);
+            device.header.status.set_flag(StatusFlag::Driver);
 
-                // TODO: maybe use feature bits at some point
-                let _ = device.header.features();
+            // TODO: maybe use feature bits at some point
+            let _ = device.header.features();
 
-                device.header.driver_features_select.write(0);
-                device.header.device_features_select.write(0);
+            device.header.driver_features_select.write(0);
+            device.header.device_features_select.write(0);
 
-                device.header.driver_features.write(0);
+            device.header.driver_features.write(0);
 
-                device.header.status.set_flag(StatusFlag::FeaturesOk);
+            device.header.status.set_flag(StatusFlag::FeaturesOk);
 
-                if !device.header.status.is_set(StatusFlag::FeaturesOk) {
-                    return Err(VirtIoDeviceError::FeaturesNotRecognized);
-                }
+            if !device.header.status.is_set(StatusFlag::FeaturesOk) {
+                return Err(VirtIoDeviceError::FeaturesNotRecognized);
+            }
 
-                device.header.queue_select.write(0);
-                device.header.queue_size.write(queue.queue_size());
-                device.header.queue_descriptor.set(queue.descriptors.physical_address());
-                device.header.queue_available.set(queue.available.physical_address());
-                device.header.queue_used.set(queue.used.physical_address());
+            device.header.queue_select.write(0);
+            device.header.queue_size.write(queue.queue_size());
+            device.header.queue_descriptor.set(queue.descriptors.physical_address());
+            device.header.queue_available.set(queue.available.physical_address());
+            device.header.queue_used.set(queue.used.physical_address());
 
-                device.header.queue_ready.ready();
+            device.header.queue_ready.ready();
 
-                device.header.status.set_flag(StatusFlag::DriverOk);
+            device.header.status.set_flag(StatusFlag::DriverOk);
 
-                if device.header.status.failed() {
-                    return Err(VirtIoDeviceError::DeviceError);
-                }
+            if device.header.status.failed() {
+                return Err(VirtIoDeviceError::DeviceError);
+            }
 
-                VirtIoBlockDeviceInner {
-                    device,
-                    queue,
-                    command_buffer,
-                    data_buffer,
-                    queued_commands: BTreeMap::new(),
-                    waiting_requests: VecDeque::new(),
-                }
-            }),
-        })
+            VirtIoBlockDeviceInner {
+                device,
+                queue,
+                command_buffer,
+                data_buffer,
+                queued_commands: BTreeMap::new(),
+                waiting_requests: VecDeque::new(),
+            }
+        }));
+
+        let inner_clone = SyncRc::clone(&inner);
+        let (tx, rx) = present::sync::mpsc::unbounded();
+
+        present::spawn(async move {
+            let me = inner_clone;
+
+            loop {
+                let data_block = rx.recv().await;
+                me.borrow_mut().data_buffer.dealloc(data_block);
+            }
+        });
+
+        let data_drop = SyncRc::new(move |private, _| tx.send(private));
+
+        Ok(Self { inner, data_drop })
     }
 }
 
@@ -124,7 +141,9 @@ impl BlockDevice for VirtIoBlockDevice {
             librust::mem::fence(librust::mem::FenceMode::Full);
             device.header.interrupt_ack.acknowledge_buffer_used();
 
-            let QueuedCommand { command_index, data_index, kind } = queued_commands.remove(&desc1).unwrap();
+            // println!("Reclaming desc1={desc1:?} desc2={desc2:?} desc3={desc3:?}");
+
+            let Some(QueuedCommand { command_index, data_index, kind }) = queued_commands.remove(&desc1) else { break };
 
             let command = command_buffer.get(command_index).unwrap();
             let data_block = data_buffer.get(data_index).unwrap();
@@ -139,7 +158,7 @@ impl BlockDevice for VirtIoBlockDevice {
             match kind {
                 QueuedCommandKind::Flush => {}
                 QueuedCommandKind::Read(tx) => match command_status {
-                    Ok(_) => tx.send(unsafe { Ok(DataBlock::new(data_index, data_block.get(), |_, _| {})) }),
+                    Ok(_) => tx.send(unsafe { Ok(DataBlock::new(data_index, data_block.get(), &self.data_drop)) }),
                     Err(_) => tx.send(Err(DeviceError::ReadError)),
                 },
                 QueuedCommandKind::Write(tx) => {
@@ -169,7 +188,7 @@ impl BlockDevice for VirtIoBlockDevice {
         let mut this = self.inner.borrow_mut();
         match this.data_buffer.alloc() {
             Some((index, data_block)) => {
-                Box::pin(core::future::ready(unsafe { DataBlock::new(index, data_block.get(), |_, _| {}) }))
+                Box::pin(core::future::ready(unsafe { DataBlock::new(index, data_block.get(), &self.data_drop) }))
             }
             None => {
                 let (tx, rx) = oneshot::oneshot();
@@ -260,6 +279,8 @@ impl BlockDevice for VirtIoBlockDevice {
 
         let (tx, rx) = oneshot::oneshot();
 
+        // println!("Submitting item to queue with desc1={desc1:?} desc2={desc2:?} desc3={desc3:?} command_index={command_index} data_index={data_index}");
+
         queue.available.push(desc1);
         queued_commands.insert(desc1, QueuedCommand { command_index, data_index, kind: QueuedCommandKind::Read(tx) });
 
@@ -297,7 +318,7 @@ impl BlockDevice for VirtIoBlockDevice {
             queue.free_descriptor(desc3);
 
             let (tx, rx) = oneshot::oneshot();
-            waiting_requests.push_back(WaitingCommands::Write(sector, unsafe { DataBlock::new(data_index, ptr, |_, _| {})}, tx));
+            waiting_requests.push_back(WaitingCommands::Write(sector, unsafe { DataBlock::new(data_index, ptr, &self.data_drop)}, tx));
 
             return Box::pin(async move {
                 rx.recv().await

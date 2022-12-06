@@ -10,9 +10,10 @@ fn main() {
     let client = filesystem::vidl::FilesystemClient::new(filesystem);
 
     let mut buffer = [0u8; 128];
-    let mut file = client.open("/testdir/testdir2/dirfile.txt", filesystem::vidl::OpenOptions::ReadOnly).unwrap();
+    let mut file = client.open("/fat.txt", filesystem::vidl::OpenOptions::ReadOnly).unwrap();
 
-    let len = file.read(&mut buffer[..]).unwrap();
-
-    println!("[fstest] fileread = {:?}", &buffer[..len]);
+    loop {
+        let len @ 1.. = file.read(&mut buffer[..]).unwrap() else { break };
+        print!("{}", core::str::from_utf8(&buffer[..len]).unwrap());
+    }
 }

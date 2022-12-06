@@ -8,6 +8,8 @@
 /// VirtIO block device driver
 pub mod virtio;
 
+use std::sync::SyncRc;
+
 use crate::BoxedFuture;
 use units::data::Bytes;
 
@@ -79,7 +81,7 @@ impl core::ops::AddAssign<SectorIndex> for SectorIndex {
 pub struct DataBlock {
     private: usize,
     ptr: *mut [u8],
-    drop: fn(usize, *mut [u8]),
+    drop: SyncRc<dyn Fn(usize, *mut [u8])>,
 }
 
 impl DataBlock {
@@ -91,8 +93,8 @@ impl DataBlock {
     /// `ptr` must point to a valid, initialized slice of bytes aligned to at
     /// least 8 bytes that is both readable and writable, and will not cause
     /// reference aliasing when used by the consumer of the [`DataBlock`]
-    pub unsafe fn new(private: usize, ptr: *mut [u8], drop: fn(usize, *mut [u8])) -> Self {
-        Self { private, ptr, drop }
+    pub unsafe fn new(private: usize, ptr: *mut [u8], drop: &SyncRc<dyn Fn(usize, *mut [u8])>) -> Self {
+        Self { private, ptr, drop: SyncRc::clone(drop) }
     }
 
     /// Leak the underlying pointer, returning it and not running the drop

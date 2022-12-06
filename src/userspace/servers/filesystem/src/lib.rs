@@ -97,7 +97,7 @@ pub mod vidl {
             let remaining = self.cursor.remaining();
             let read = if buffer.len() <= remaining {
                 let buf_len = buffer.len();
-                buffer[..remaining].copy_from_slice(&self.file.buffer.read()[self.cursor.consume(buf_len)]);
+                buffer[..].copy_from_slice(&self.file.buffer.read()[self.cursor.consume(buf_len)]);
                 buffer.len()
             } else {
                 if remaining != 0 {

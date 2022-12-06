@@ -20,7 +20,7 @@ use std::{rc::Rc, sync::SyncRc};
 /// Probe the given block device for any filesystem partitions, returning a
 /// `Vec` of known filesystems
 pub async fn filesystem_probe(device: SyncRc<dyn BlockDevice>) -> Result<Vec<SyncRc<dyn Filesystem>>, DeviceError> {
-    println!("Probing for filesystems!");
+    // println!("Probing for filesystems!");
     let mbr_data = device.read(SectorIndex::new(0)).await?;
     let mbr = MasterBootRecord::try_from_byte_slice(&mbr_data).unwrap();
 
@@ -48,47 +48,47 @@ pub async fn filesystem_probe(device: SyncRc<dyn BlockDevice>) -> Result<Vec<Syn
 
         let entries = GptPartitionEntry::try_slice_from_bytes(&data).unwrap();
         for entry in entries {
-            if entry.type_guid != Guid::UNUSED {
-                println!(
-                    "[{}] Inspecting partition: {}",
-                    entry.unique_guid,
-                    entry
-                        .name
-                        .as_str()
-                        .map(|s| match s.len() {
-                            0 => "<unnamed>",
-                            _ => s,
-                        })
-                        .unwrap_or("<partition name not UTF-8>")
-                );
-            }
+            // if entry.type_guid != Guid::UNUSED {
+            //     println!(
+            //         "[{}] Inspecting partition: {}",
+            //         entry.unique_guid,
+            //         entry
+            //             .name
+            //             .as_str()
+            //             .map(|s| match s.len() {
+            //                 0 => "<unnamed>",
+            //                 _ => s,
+            //             })
+            //             .unwrap_or("<partition name not UTF-8>")
+            //     );
+            // }
 
             match entry.type_guid {
                 Guid::UNUSED => continue,
                 Guid::MICROSOFT_BASIC_DATA => {
-                    println!("[{}] Type: Microsoft Basic Data -- probing for BPB", entry.unique_guid);
+                    // println!("[{}] Type: Microsoft Basic Data -- probing for BPB", entry.unique_guid);
                     let maybe_bpb_data = device.read(SectorIndex::new(entry.start_lba.to_ne())).await?;
                     let maybe_bpb = BiosParameterBlock::try_from_byte_slice(&maybe_bpb_data).unwrap();
 
                     if !maybe_bpb.signature_word.verify() {
-                        println!("[{}] BPB signature invalid -- skipping...", entry.unique_guid);
+                        // println!("[{}] BPB signature invalid -- skipping...", entry.unique_guid);
                         continue;
                     }
 
                     match (maybe_bpb.fat16_total_sectors.get(), maybe_bpb.fat32_total_sectors.get()) {
                         (0, 1..) => {}
                         (_, 0) => {
-                            println!("[{}] FAT12/16 detected -- unsupported, skipping...", entry.unique_guid);
+                            // println!("[{}] FAT12/16 detected -- unsupported, skipping...", entry.unique_guid);
                             continue;
                         }
                         (_, _) => {
-                            println!("[{}] Invalid BPB configuration -- skipping...", entry.unique_guid);
+                            // println!("[{}] Invalid BPB configuration -- skipping...", entry.unique_guid);
                             continue;
                         }
                     }
 
                     if maybe_bpb.bytes_per_sector.get() == 0 {
-                        println!("[{}] exFAT detected -- unsupported, skipping...", entry.unique_guid);
+                        // println!("[{}] exFAT detected -- unsupported, skipping...", entry.unique_guid);
                         continue;
                     }
 
@@ -112,17 +112,19 @@ pub async fn filesystem_probe(device: SyncRc<dyn BlockDevice>) -> Result<Vec<Syn
 
                     match n_data_sectors {
                         1..=4084 => {
-                            println!("[{}] FAT12 detected -- unsupported, skipping...", entry.unique_guid);
+                            // println!("[{}] FAT12 detected -- unsupported, skipping...", entry.unique_guid);
                             continue;
                         }
                         4085..=65524 => {
-                            println!("[{}] FAT16 detected -- unsupported, skipping...", entry.unique_guid);
+                            // println!("[{}] FAT16 detected -- unsupported, skipping...", entry.unique_guid);
                             continue;
                         }
-                        _ => println!("[{}] FAT32 confirmed!", entry.unique_guid),
+                        _ => {
+                            // println!("[{}] FAT32 confirmed!", entry.unique_guid)
+                        }
                     }
 
-                    println!("[{}] FAT32 detected -- creating filesystem driver", entry.unique_guid);
+                    // println!("[{}] FAT32 detected -- creating filesystem driver", entry.unique_guid);
 
                     let mut fat32 = Fat32::new(
                         SyncRc::clone(&device),
@@ -136,8 +138,12 @@ pub async fn filesystem_probe(device: SyncRc<dyn BlockDevice>) -> Result<Vec<Syn
                     fat32.set_root(crate::filesystems::path::Path::new("/"));
                     filesystems.push(SyncRc::from_rc(Rc::new(fat32) as Rc<dyn Filesystem>));
                 }
-                Guid::LINUX_FILESYSTEM_DATA => println!("[{}] TODO: check for ext2/3/4", entry.unique_guid),
-                ty => println!("[{}] Skipping unknown type GUID: {}", entry.unique_guid, ty),
+                Guid::LINUX_FILESYSTEM_DATA => {
+                    // println!("[{}] TODO: check for ext2/3/4", entry.unique_guid)
+                }
+                ty => {
+                    // println!("[{}] Skipping unknown type GUID: {}", entry.unique_guid, ty)
+                }
             }
         }
     }
