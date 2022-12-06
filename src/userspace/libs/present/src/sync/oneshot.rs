@@ -7,9 +7,12 @@
 
 // TODO: more efficient way to pass things?
 
+use crate::executor::reactor::{BlockType, EVENT_REGISTRY};
 use core::{future::Future, pin::Pin};
-use std::{sync::{ SyncRc, SyncRefCell}, task::{Context, Poll}};
-use crate::executor::reactor::{EVENT_REGISTRY, BlockType};
+use std::{
+    sync::{SyncRc, SyncRefCell},
+    task::{Context, Poll},
+};
 
 pub struct OneshotTx<T: Send + 'static> {
     inner: SyncRc<SyncRefCell<Option<T>>>,
@@ -25,6 +28,12 @@ impl<T: Send + 'static> OneshotTx<T> {
     }
 }
 
+impl<T: Send + 'static> core::fmt::Debug for OneshotTx<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("OneshotTx").finish_non_exhaustive()
+    }
+}
+
 pub struct OneshotRx<T: Send + 'static> {
     inner: SyncRc<SyncRefCell<Option<T>>>,
     id: u64,
@@ -33,6 +42,12 @@ pub struct OneshotRx<T: Send + 'static> {
 impl<T: Send + 'static> OneshotRx<T> {
     pub async fn recv(self) -> T {
         OneshotRxRecv(self).await
+    }
+}
+
+impl<T: Send + 'static> core::fmt::Debug for OneshotRx<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("OneshotRx").finish_non_exhaustive()
     }
 }
 
