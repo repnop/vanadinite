@@ -433,8 +433,13 @@ impl Filesystem for Fat32 {
                 open_file_info.current_cluster = u64::from(next_cluster);
             }
 
-            let next_data_sector = first_cluster_sector + ((open_file_info.current_cluster - 2) * sectors_per_cluster);
-            // + (open_file_info.total_read / /* FIXME: don't assume sector byte size */ 512);
+            let sector_offset = match sectors_per_cluster > 1 {
+                true => open_file_info.total_read / /* FIXME: don't assume sector byte size */ 512,
+                false => 0,
+            };
+
+            let next_data_sector =
+                first_cluster_sector + ((open_file_info.current_cluster - 2) * sectors_per_cluster) + sector_offset;
 
             let data = device.read(next_data_sector).await?;
 
