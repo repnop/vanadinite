@@ -149,8 +149,8 @@ impl AvailableQueue {
     }
 
     pub fn push(&mut self, index: SplitqueueIndex<VirtqueueDescriptor>) {
-        let ring_index = self.queue.index;
-        let next_ring_index = (ring_index + 1) % self.queue.ring.len() as u16;
+        let queue_index = self.queue.index;
+        let ring_index = self.queue.index % self.queue.ring.len() as u16;
         // This is likely overkill, but better to be safe than sorry!
         unsafe {
             core::ptr::write_volatile(&mut self.queue.ring[ring_index as usize], index.0);
@@ -162,7 +162,7 @@ impl AvailableQueue {
             // > update, to ensure the device sees the most up-to-date copy.
             librust::mem::fence(librust::mem::FenceMode::Write);
 
-            core::ptr::write_volatile(&mut self.queue.index, next_ring_index);
+            core::ptr::write_volatile(&mut self.queue.index, queue_index.wrapping_add(1));
         }
     }
 }
@@ -190,8 +190,10 @@ impl UsedQueue {
             // No new used elements
             true => None,
             false => {
-                let used = unsafe { core::ptr::read_volatile(&self.queue.ring[self.last_seen as usize]) };
-                self.last_seen = (self.last_seen + 1) % (self.queue.ring.len() as u16);
+                let used = unsafe {
+                    core::ptr::read_volatile(&self.queue.ring[self.last_seen as usize % self.queue.ring.len()])
+                };
+                self.last_seen = self.last_seen.wrapping_add(1);
 
                 Some(used)
             }
