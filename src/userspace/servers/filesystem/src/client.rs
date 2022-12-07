@@ -40,7 +40,9 @@ impl filesystem::vidl::raw::AsyncFilesystemProvider for ClientProvider {
                     FilesystemError::DirectoryNotFound => Ok(Err(Error::FileNotFound)),
                     FilesystemError::FileNotFound => Ok(Err(Error::FileNotFound)),
                     FilesystemError::InvalidPath => Ok(Err(Error::InvalidPath)),
-                    FilesystemError::InvalidRoot | FilesystemError::InvalidFileId => Err(()),
+                    FilesystemError::InvalidRoot | FilesystemError::InvalidFileId | FilesystemError::InternalError => {
+                        Err(())
+                    }
                     FilesystemError::OperationNotSupported => Ok(Err(Error::OperationNotSupported)),
                 }
             }
@@ -71,7 +73,9 @@ impl filesystem::vidl::raw::AsyncFilesystemProvider for ClientProvider {
                 FilesystemError::DirectoryNotFound => Ok(Err(Error::FileNotFound)),
                 FilesystemError::FileNotFound => Ok(Err(Error::FileNotFound)),
                 FilesystemError::InvalidPath => Ok(Err(Error::InvalidPath)),
-                FilesystemError::InvalidRoot | FilesystemError::InvalidFileId => Err(()),
+                FilesystemError::InvalidRoot | FilesystemError::InvalidFileId | FilesystemError::InternalError => {
+                    Err(())
+                }
                 FilesystemError::OperationNotSupported => Ok(Err(Error::OperationNotSupported)),
             },
         }
@@ -92,7 +96,9 @@ impl filesystem::vidl::raw::AsyncFilesystemProvider for ClientProvider {
                     FilesystemError::DirectoryNotFound => Ok(Err(Error::FileNotFound)),
                     FilesystemError::FileNotFound => Ok(Err(Error::FileNotFound)),
                     FilesystemError::InvalidPath => Ok(Err(Error::InvalidPath)),
-                    FilesystemError::InvalidRoot | FilesystemError::InvalidFileId => Err(()),
+                    FilesystemError::InvalidRoot | FilesystemError::InvalidFileId | FilesystemError::InternalError => {
+                        Err(())
+                    }
                     FilesystemError::OperationNotSupported => Ok(Err(Error::OperationNotSupported)),
                 }
             }

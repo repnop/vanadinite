@@ -36,6 +36,7 @@ pub mod filesystems;
 /// Partitioning discovery
 pub mod partitions;
 pub mod probe;
+pub mod waitlist;
 
 /// VIDL interface
 pub mod vidl {

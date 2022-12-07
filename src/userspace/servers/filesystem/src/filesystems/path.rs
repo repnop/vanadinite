@@ -26,7 +26,7 @@ impl Path {
     }
 
     pub fn file_name(&self) -> Option<&str> {
-        Some(self.0.rsplit_once('/')?.1)
+        Some(self.0.trim_end_matches('/').rsplit_once('/')?.1)
     }
 
     pub fn file_extension(&self) -> Option<&str> {
@@ -49,7 +49,7 @@ impl Path {
     }
 
     pub fn compontents(&self) -> impl Iterator<Item = &'_ str> + '_ {
-        self.0.split('/')
+        self.0.trim_end_matches('/').split('/')
     }
 }
 

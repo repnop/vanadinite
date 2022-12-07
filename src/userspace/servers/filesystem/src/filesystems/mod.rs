@@ -24,6 +24,7 @@ pub enum FilesystemError {
     DeviceError(DeviceError),
     DirectoryNotFound,
     FileNotFound,
+    InternalError,
     InvalidFileId,
     InvalidPath,
     InvalidRoot,

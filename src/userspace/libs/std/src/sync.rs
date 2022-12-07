@@ -64,16 +64,10 @@ impl<T: ?Sized> From<Box<T>> for SyncRc<T> {
 }
 
 impl<T: ?Sized> core::ops::Deref for SyncRc<T> {
-    type Target = alloc::rc::Rc<T>;
+    type Target = T;
 
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl<T: ?Sized> core::ops::DerefMut for SyncRc<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
