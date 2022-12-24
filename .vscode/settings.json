@@ -4,6 +4,7 @@
         "src/vanadium/Cargo.toml",
         "src/kernel/Cargo.toml",
         "src/userspace/Cargo.toml",
+        "src/shared/Cargo.toml",
         "xtask/Cargo.toml",
         "src/userspace/init/Cargo.toml",
     ]
