@@ -107,7 +107,7 @@ impl<A: Allocator, T> DoublyLinkedList<A, T> {
             None => {
                 let Some(value) = iterator.next() else { return Ok(()) };
                 self.push_back(value)?;
-                self.head.unwrap()
+                self.tail.unwrap()
             }
         };
 
@@ -116,6 +116,8 @@ impl<A: Allocator, T> DoublyLinkedList<A, T> {
             last_node = new_node;
             self.len += 1;
         }
+
+        self.tail = Some(last_node);
 
         Ok(())
     }
@@ -245,7 +247,7 @@ impl<A: Allocator, T> DoublyLinkedList<A, T> {
         CursorMut { list: self, current, index: 0 }
     }
 
-    pub fn cursor_mut_back(&mut self) -> CursorMut<'_, A, T> {
+    pub fn cursor_back_mut(&mut self) -> CursorMut<'_, A, T> {
         let current = self.tail;
         let index = self.len.saturating_sub(1);
         CursorMut { list: self, current, index }
@@ -293,23 +295,22 @@ impl<A: Allocator + AllocatorCanMerge, T> DoublyLinkedList<A, T> {
     /// information as to why.
     pub fn append(&mut self, other: &mut Self) {
         if self.head.is_none() {
-            self.len = other.len;
-            other.len = 0;
-            self.head = other.head.take();
-            self.tail = other.tail.take();
+            core::mem::swap(self, other);
             return;
         }
 
         // No items to append if `other` is an empty list
         let Some(other_head) = other.head.take() else { return };
-        other.tail.take();
+        let Some(other_tail) = other.tail.take() else { unreachable!() };
 
         self.len += other.len;
         other.len = 0;
 
-        let last_node = self.tail.unwrap();
-        let last_node_ptr = last_node.as_ptr();
-        unsafe { addr_of_mut!((*last_node_ptr).next).write(Some(other_head)) };
+        let tail = self.tail.unwrap();
+        let tail_ptr = tail.as_ptr();
+        unsafe { addr_of_mut!((*tail_ptr).next).write(Some(other_head)) };
+
+        self.tail = Some(other_tail);
     }
 }
 
@@ -586,6 +587,51 @@ impl<'a, A: Allocator, T> CursorMut<'a, A, T> {
     }
 }
 
+impl<'a, A: Allocator + Clone, T> CursorMut<'a, A, T> {
+    /// Split the [`DoublyLinkedList`] at the current element, returning a new
+    /// [`DoublyLinkedList`] containing the current element and any elements
+    /// following it. If the current [`DoublyLinkedList`] is empty, or the
+    /// cursor has advanced to the end of the list, this method returns an empty
+    /// [`DoublyLinkedList`].
+    pub fn split(&mut self) -> DoublyLinkedList<A, T> {
+        if self.index == 0 {
+            let mut new_list = DoublyLinkedList::new(self.list.allocator.clone());
+            core::mem::swap(self.list, &mut new_list);
+            self.current = None;
+            return new_list;
+        }
+
+        match self.current {
+            Some(current) => {
+                let current_ptr = current.as_ptr();
+                let previous = unsafe { addr_of_mut!((*current_ptr).prev).read() };
+
+                if let Some(previous) = previous {
+                    let previous_ptr = previous.as_ptr();
+                    unsafe { addr_of_mut!((*previous_ptr).next).write(None) };
+                }
+
+                unsafe { addr_of_mut!((*current_ptr).prev).write(None) };
+
+                let new_list_len = self.list.len - self.index;
+                let new_list_tail = self.list.tail;
+
+                self.list.tail = previous;
+                self.list.len -= new_list_len;
+                self.current = None;
+
+                DoublyLinkedList {
+                    head: Some(current),
+                    tail: new_list_tail,
+                    len: new_list_len,
+                    allocator: self.list.allocator.clone(),
+                }
+            }
+            None => DoublyLinkedList::new(self.list.allocator.clone()),
+        }
+    }
+}
+
 pub struct Drain<'a, A: Allocator, T>(CursorMut<'a, A, T>, Range<usize>);
 
 impl<'a, A: Allocator, T> Iterator for Drain<'a, A, T> {
@@ -824,7 +870,7 @@ mod test {
         ll.push_back(String::from("aaa1")).unwrap();
         ll.push_back(String::from("bbb2")).unwrap();
 
-        let mut cursor = ll.cursor_mut_back();
+        let mut cursor = ll.cursor_back_mut();
         assert_eq!(cursor.current_mut().unwrap(), "bbb2");
         assert_eq!(cursor.previous_mut().unwrap(), "aaa1");
         assert!(cursor.next_mut().is_none());
@@ -839,9 +885,140 @@ mod test {
 
         let mut ll = DoublyLinkedList::new(Global);
         ll.push_front(String::from("aaa1")).unwrap();
-        let mut cursor = ll.cursor_mut_back();
+        let mut cursor = ll.cursor_back_mut();
         cursor.advance_forward();
         cursor.insert(String::from("bbb2")).unwrap();
         assert_eq!(ll.back().unwrap(), "bbb2");
+    }
+
+    #[test]
+    fn drain() {
+        let mut ll = DoublyLinkedList::new(Global);
+        ll.extend_from((0..10).map(|i| std::format!("{i}")).collect::<std::vec::Vec<_>>());
+
+        let drain1 = ll.drain(0..5).unwrap();
+        for (i, n) in (0..5).zip(drain1) {
+            assert_eq!(std::format!("{i}"), n);
+        }
+
+        let drain2 = ll.drain(2..3).unwrap();
+        for (i, n) in (7..8).zip(drain2) {
+            assert_eq!(std::format!("{i}"), n);
+        }
+
+        let drain3 = ll.drain(..).unwrap();
+        for (i, n) in [5, 6, 8, 9].into_iter().zip(drain3) {
+            assert_eq!(std::format!("{i}"), n);
+        }
+
+        assert!(ll.drain(100..).is_err());
+        assert!(ll.drain(..100).is_err());
+        assert!(ll.drain(100..=200).is_err());
+    }
+
+    #[test]
+    fn iter() {
+        let mut ll = DoublyLinkedList::new(Global);
+        ll.extend_from((0..10).map(|i| std::format!("{i}")));
+
+        for (i, n) in (0..10).zip(&ll) {
+            assert_eq!(&std::format!("{i}"), n);
+        }
+
+        for (i, n) in (0..10).zip(&mut ll) {
+            assert_eq!(&std::format!("{i}"), n);
+        }
+    }
+
+    #[test]
+    fn append() {
+        let mut ll1 = DoublyLinkedList::new(Global);
+        ll1.extend_from((0..5).map(|i| std::format!("{i}")));
+
+        let mut ll2 = DoublyLinkedList::new(Global);
+        ll2.extend_from((5..10).map(|i| std::format!("{i}")));
+
+        ll1.append(&mut ll2);
+
+        assert_eq!(ll2.len(), 0);
+        assert_eq!(ll1.len(), 10);
+
+        for (i, n) in (0..10).zip(&ll1) {
+            assert_eq!(&std::format!("{i}"), n);
+        }
+
+        let mut ll1 = DoublyLinkedList::new(Global);
+        ll1.extend_from((0..5).map(|i| std::format!("{i}")));
+
+        let mut ll2 = DoublyLinkedList::new(Global);
+        ll2.append(&mut ll1);
+
+        assert_eq!(ll2.len(), 5);
+        assert_eq!(ll1.len(), 0);
+
+        for (i, n) in (0..5).zip(&ll2) {
+            assert_eq!(&std::format!("{i}"), n);
+        }
+    }
+
+    #[test]
+    fn clone() {
+        let mut ll1 = DoublyLinkedList::new(Global);
+        ll1.extend_from((0..5).map(|i| std::format!("{i}")));
+        assert_eq!(ll1, ll1.clone());
+    }
+
+    #[test]
+    fn split() {
+        let mut list = DoublyLinkedList::new(Global);
+        let iter = (0..10).map(|i| std::format!("{i}"));
+
+        list.extend_from(iter.clone()).unwrap();
+
+        let mut cursor = list.cursor_mut();
+
+        // // 0 -> 1
+        // cursor.advance();
+        // // 1 -> 2
+        // cursor.advance();
+        // // 2 -> 3
+        // cursor.advance();
+        // // 3 -> 4
+        // cursor.advance();
+        // // 4 -> 5
+        // cursor.advance();
+
+        cursor.advance_forward_many(5);
+
+        let new = cursor.split();
+
+        assert_eq!(list.len(), 5);
+        assert_eq!(new.len(), 5);
+
+        for (i, n) in (0..5).zip(&list) {
+            assert_eq!(&std::format!("{i}"), n);
+        }
+
+        for (i, n) in (5..10).zip(&new) {
+            assert_eq!(&std::format!("{i}"), n);
+        }
+
+        let mut cursor = list.cursor_mut();
+        let mut new = cursor.split();
+
+        assert_eq!(list.len(), 0);
+        assert_eq!(new.len(), 5);
+
+        for (i, n) in (0..5).zip(&new) {
+            assert_eq!(&std::format!("{i}"), n);
+        }
+
+        let mut cursor = new.cursor_back_mut();
+        cursor.advance_forward();
+        let new = cursor.split();
+
+        assert_eq!(new.len(), 0);
+        assert!(new.head.is_none());
+        assert!(new.tail.is_none());
     }
 }
