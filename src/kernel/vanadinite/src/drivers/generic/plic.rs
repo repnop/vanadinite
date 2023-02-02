@@ -17,7 +17,6 @@ pub struct Plic {
     interrupt_enable: [registers::Context<registers::InterruptEnable>; 15872],
     _padding2: [u8; 57344],
     threshold_and_claim: [registers::Context<registers::ThresholdAndClaim>; 15872],
-    _padding3: [u8; 8184],
 }
 
 impl Plic {
