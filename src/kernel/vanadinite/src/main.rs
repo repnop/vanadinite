@@ -133,6 +133,7 @@ extern "C" fn kmain(hart_id: usize, fdt: *const u8) -> ! {
 
         for (option, value) in split_args {
             match option {
+                "print-dt" => log::info!("{fdt:?}"),
                 "log-filter" => io::logging::parse_log_filter(value),
                 "init" => match value {
                     Some(path) => init_args = Some(path.split(',')),
