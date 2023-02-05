@@ -52,7 +52,7 @@ extern "C" {
 }
 
 #[lang = "start"]
-fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> isize {
+fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8, _: u8) -> isize {
     unsafe { ARGS = [argc as usize, argv as usize] };
 
     let mut map = crate::env::CAP_MAP.borrow_mut();

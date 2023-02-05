@@ -6,6 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod rust_2021 {
+    extern crate alloc;
     pub use crate::{dbg, print, println};
     pub use alloc::{
         boxed::Box,

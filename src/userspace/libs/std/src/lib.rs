@@ -20,8 +20,6 @@
 #![no_std]
 #![allow(incomplete_features)]
 
-extern crate alloc;
-
 pub mod env;
 pub mod heap;
 pub mod io;
@@ -32,15 +30,23 @@ pub mod rt;
 pub mod sync;
 pub mod task;
 mod task_local;
+pub mod alloc {
+    extern crate alloc;
+    pub use alloc::alloc::*;
+}
+pub mod collections {
+    extern crate alloc;
+    pub use alloc::collections::*;
+}
 pub mod string {
+    extern crate alloc;
     pub use alloc::string::*;
 }
 pub mod vec {
+    extern crate alloc;
     pub use alloc::vec::*;
 }
 pub mod vmspace;
-
-pub use alloc::collections;
 
 #[prelude_import]
 pub use prelude::rust_2021::*;
@@ -81,6 +87,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 }
 
 #[alloc_error_handler]
-fn alloc_error(layout: alloc::alloc::Layout) -> ! {
+fn alloc_error(layout: alloc::Layout) -> ! {
     panic!("Error allocating memory with layout: {:?}", layout)
 }
