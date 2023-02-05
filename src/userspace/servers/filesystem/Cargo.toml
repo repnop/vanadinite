@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 alchemy = { path = "../../libs/alchemy" }
 checksum = { path = "../../libs/checksum" }
+collections = { path = "../../../shared/collections" }
 endian = { path = "../../libs/endian" }
 librust = { path = "../../../shared/librust" }
 present = { path = "../../libs/present" }

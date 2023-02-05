@@ -8,6 +8,10 @@
 use crate::BoxedFuture;
 
 use super::{BlockDevice, DataBlock, DeviceError, SectorIndex};
+use collections::hash::FxBuildHasher;
+use collections::lru::LruCache;
+use core::num::NonZeroUsize;
+use core::ptr::NonNull;
 use librust::mem::{DmaElement, DmaRegion, PhysicalAddress};
 use present::sync::oneshot::{self, OneshotTx};
 use std::collections::BTreeMap;
@@ -47,11 +51,12 @@ struct VirtIoBlockDeviceInner {
     data_buffer: DataBuffer,
     queued_commands: BTreeMap<SplitqueueIndex<VirtqueueDescriptor>, QueuedCommand>,
     waiting_requests: VecDeque<WaitingCommands>,
+    block_cache: LruCache<std::alloc::Global, SectorIndex, DataBlock, FxBuildHasher>,
 }
 
 pub struct VirtIoBlockDevice {
     inner: SyncRc<SyncRefCell<VirtIoBlockDeviceInner>>,
-    data_drop: SyncRc<dyn Fn(usize, *mut [u8])>,
+    data_drop: SyncRc<dyn Fn(usize, NonNull<[u8]>)>,
 }
 
 impl VirtIoBlockDevice {
@@ -101,6 +106,7 @@ impl VirtIoBlockDevice {
                 data_buffer,
                 queued_commands: BTreeMap::new(),
                 waiting_requests: VecDeque::new(),
+                block_cache: LruCache::new(std::alloc::Global, NonZeroUsize::new(64).unwrap()),
             }
         }));
 
@@ -149,7 +155,7 @@ impl BlockDevice for VirtIoBlockDevice {
             let data_block = data_buffer.get(data_index).unwrap();
 
             let command = command.get();
-            let command_status = CommandStatus::from_u8(unsafe { (*command).status }).unwrap().into_result();
+            let command_status = CommandStatus::from_u8(unsafe { (*command.as_ptr()).status }).unwrap().into_result();
 
             if let Err(e) = command_status {
                 println!("[filesystem] Disk error: {e:?}");
@@ -214,8 +220,17 @@ impl BlockDevice for VirtIoBlockDevice {
             });
         };
 
-        let VirtIoBlockDeviceInner { device, queue, command_buffer, data_buffer, queued_commands, waiting_requests } =
-            &mut *this;
+        let VirtIoBlockDeviceInner {
+            device,
+            queue,
+            command_buffer,
+            data_buffer,
+            queued_commands,
+            waiting_requests,
+            block_cache,
+        } = &mut *this;
+
+        if let Some(data) = block_cache.get(&sector) {}
 
         let Some((command_index, request)) = command_buffer.alloc() else {
             queue.free_descriptor(desc1);
@@ -245,7 +260,9 @@ impl BlockDevice for VirtIoBlockDevice {
         };
 
         let descriptor_flags = DescriptorFlags::NEXT | DescriptorFlags::WRITE;
-        unsafe { *request.get() = Command { kind: CommandKind::Read, _reserved: 0, sector: sector.get(), status: 0 } };
+        unsafe {
+            *request.get().as_ptr() = Command { kind: CommandKind::Read, _reserved: 0, sector: sector.get(), status: 0 }
+        };
 
         queue.descriptors.write(
             desc1,
@@ -304,8 +321,15 @@ impl BlockDevice for VirtIoBlockDevice {
             });
         };
 
-        let VirtIoBlockDeviceInner { device, queue, command_buffer, data_buffer, queued_commands, waiting_requests } =
-            &mut *this;
+        let VirtIoBlockDeviceInner {
+            device,
+            queue,
+            command_buffer,
+            data_buffer,
+            queued_commands,
+            waiting_requests,
+            block_cache,
+        } = &mut *this;
 
         let (data_index, ptr) = DataBlock::leak(block);
         let Some(data_buffer) = data_buffer.get(data_index) else {
@@ -326,7 +350,10 @@ impl BlockDevice for VirtIoBlockDevice {
         };
 
         let descriptor_flags = DescriptorFlags::NEXT;
-        unsafe { *request.get() = Command { kind: CommandKind::Write, _reserved: 0, sector: sector.get(), status: 0 } };
+        unsafe {
+            *request.get().as_ptr() =
+                Command { kind: CommandKind::Write, _reserved: 0, sector: sector.get(), status: 0 }
+        };
 
         queue.descriptors.write(
             desc1,

@@ -8,6 +8,7 @@
 /// VirtIO block device driver
 pub mod virtio;
 
+use core::ptr::NonNull;
 use std::sync::SyncRc;
 
 use crate::BoxedFuture;
@@ -80,8 +81,8 @@ impl core::ops::AddAssign<SectorIndex> for SectorIndex {
 #[must_use = "Allocating a `DataBlock` and not using it is expensive and wasteful"]
 pub struct DataBlock {
     private: usize,
-    ptr: *mut [u8],
-    drop: SyncRc<dyn Fn(usize, *mut [u8])>,
+    ptr: NonNull<[u8]>,
+    drop: SyncRc<dyn Fn(usize, NonNull<[u8]>)>,
 }
 
 impl DataBlock {
@@ -93,14 +94,14 @@ impl DataBlock {
     /// `ptr` must point to a valid, initialized slice of bytes aligned to at
     /// least 8 bytes that is both readable and writable, and will not cause
     /// reference aliasing when used by the consumer of the [`DataBlock`]
-    pub unsafe fn new(private: usize, ptr: *mut [u8], drop: &SyncRc<dyn Fn(usize, *mut [u8])>) -> Self {
+    pub unsafe fn new(private: usize, ptr: NonNull<[u8]>, drop: &SyncRc<dyn Fn(usize, NonNull<[u8]>)>) -> Self {
         Self { private, ptr, drop: SyncRc::clone(drop) }
     }
 
     /// Leak the underlying pointer, returning it and not running the drop
     /// callback. Meant to be used by the [`BlockDevice`] implementations
     /// themselves.
-    pub fn leak(this: Self) -> (usize, *mut [u8]) {
+    pub fn leak(this: Self) -> (usize, NonNull<[u8]>) {
         let (private, ptr) = (this.private, this.ptr);
         core::mem::forget(this);
 
@@ -119,14 +120,14 @@ impl core::ops::Deref for DataBlock {
 
     fn deref(&self) -> &Self::Target {
         // Safety: this is safe as per the contract on `DataBlock::new`
-        unsafe { &*self.ptr }
+        unsafe { &*self.ptr.as_ptr() }
     }
 }
 
 impl core::ops::DerefMut for DataBlock {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // Safety: this is safe as per the contract on `DataBlock::new`
-        unsafe { &mut *self.ptr }
+        unsafe { &mut *self.ptr.as_ptr() }
     }
 }
 

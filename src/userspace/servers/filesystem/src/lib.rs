@@ -7,7 +7,7 @@
 
 //!
 
-#![feature(async_fn_in_trait, inline_const)]
+#![feature(allocator_api, async_fn_in_trait, inline_const)]
 #![allow(incomplete_features)]
 #![warn(missing_docs)]
 
