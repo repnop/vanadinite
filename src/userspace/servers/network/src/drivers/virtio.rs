@@ -244,7 +244,7 @@ impl super::NetworkDriver for VirtIoNetDevice {
             self.rx_data_buffer.dealloc(index);
 
             let buffer = self.rx_data_buffer.get(index).unwrap();
-            let buffer = unsafe { &*buffer.get() };
+            let buffer = unsafe { &*buffer.get().as_ptr() };
 
             return Ok(Some(&buffer.data[..data_len]));
         }
@@ -254,7 +254,7 @@ impl super::NetworkDriver for VirtIoNetDevice {
 
     fn tx_raw(&mut self, f: &dyn Fn(&mut [u8]) -> Option<usize>) -> Result<(), super::DriverError> {
         let (index, buffer) = self.tx_data_buffer.alloc().unwrap();
-        let header = unsafe { &mut *buffer.get() };
+        let header = unsafe { &mut *buffer.get().as_ptr() };
 
         let written = f(&mut header.data[..]).ok_or(DriverError::DataTooLong)?;
 

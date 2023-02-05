@@ -5,6 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+use core::ptr::NonNull;
+
 use super::Syscall;
 use crate::{
     capabilities::CapabilityPtr,
@@ -176,7 +178,7 @@ impl core::ops::BitAnd for DmaAllocationOptions {
 pub fn alloc_dma_memory(
     size_in_bytes: usize,
     options: DmaAllocationOptions,
-) -> Result<(PhysicalAddress, *mut u8), SyscallError> {
+) -> Result<(PhysicalAddress, NonNull<u8>), SyscallError> {
     let error: usize;
     let phys: usize;
     let virt: *mut u8;
@@ -192,6 +194,6 @@ pub fn alloc_dma_memory(
 
     match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
-        None => Ok((PhysicalAddress::new(phys), virt)),
+        None => Ok((PhysicalAddress::new(phys), unsafe { NonNull::new_unchecked(virt) })),
     }
 }

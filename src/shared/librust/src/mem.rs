@@ -113,18 +113,18 @@ impl core::fmt::Pointer for PhysicalAddress {
 
 pub struct DmaRegion<T: ?Sized> {
     phys: PhysicalAddress,
-    virt: *mut T,
+    virt: NonNull<T>,
 }
 
 impl<T: Sized> DmaRegion<[MaybeUninit<T>]> {
     pub fn new_many(n_elements: usize) -> Result<Self, SyscallError> {
         alloc_dma_memory(n_elements * core::mem::size_of::<T>(), DmaAllocationOptions::NONE)
-            .map(|(phys, virt)| Self { phys, virt: core::ptr::slice_from_raw_parts_mut(virt.cast(), n_elements) })
+            .map(|(phys, virt)| Self { phys, virt: NonNull::slice_from_raw_parts(virt.cast(), n_elements) })
     }
 
     pub unsafe fn zeroed_many(n_elements: usize) -> Result<Self, SyscallError> {
         alloc_dma_memory(n_elements * core::mem::size_of::<T>(), DmaAllocationOptions::ZERO)
-            .map(|(phys, virt)| Self { phys, virt: core::ptr::slice_from_raw_parts_mut(virt.cast(), n_elements) })
+            .map(|(phys, virt)| Self { phys, virt: NonNull::slice_from_raw_parts(virt.cast(), n_elements) })
     }
 
     pub unsafe fn assume_init(self) -> DmaRegion<[T]> {
@@ -132,7 +132,7 @@ impl<T: Sized> DmaRegion<[MaybeUninit<T>]> {
         let virt = self.virt;
         core::mem::forget(self);
 
-        DmaRegion { phys, virt: core::ptr::slice_from_raw_parts_mut(virt.as_mut_ptr().cast(), virt.len()) }
+        DmaRegion { phys, virt: NonNull::slice_from_raw_parts(virt.cast(), virt.len()) }
     }
 }
 
@@ -141,7 +141,7 @@ impl<T: Sized> DmaRegion<[T]> {
         if index < self.virt.len() {
             Some(DmaElement {
                 phys: PhysicalAddress::new(self.phys.0 + core::mem::size_of::<T>() * index),
-                virt: unsafe { self.virt.get_unchecked_mut(index) },
+                virt: unsafe { NonNull::new_unchecked(self.virt.as_ptr().get_unchecked_mut(index)) },
                 _region: self,
             })
         } else {
@@ -156,7 +156,7 @@ impl<T: ?Sized> DmaRegion<T> {
         let opts = if zero { DmaAllocationOptions::ZERO } else { DmaAllocationOptions::NONE };
 
         alloc_dma_memory(size, opts)
-            .map(|(phys, virt)| Self { phys, virt: core::ptr::from_raw_parts_mut(virt.cast(), metadata) })
+            .map(|(phys, virt)| Self { phys, virt: NonNull::from_raw_parts(virt.cast(), metadata) })
     }
 
     pub fn physical_address(&self) -> PhysicalAddress {
@@ -164,7 +164,7 @@ impl<T: ?Sized> DmaRegion<T> {
     }
 
     pub fn get_mut(&mut self) -> &mut T {
-        unsafe { &mut *self.virt }
+        unsafe { &mut *self.virt.as_ptr() }
     }
 }
 
@@ -174,7 +174,7 @@ impl<T> DmaRegion<MaybeUninit<T>> {
         T: Pointee<Metadata = ()>,
     {
         let (phys, virt) = alloc_dma_memory(core::mem::size_of::<T>(), DmaAllocationOptions::NONE)?;
-        Result::Ok(Self { phys, virt: core::ptr::from_raw_parts_mut(virt.cast(), ()) })
+        Result::Ok(Self { phys, virt: NonNull::from_raw_parts(virt.cast(), ()) })
     }
 
     pub unsafe fn zeroed() -> Result<Self, SyscallError>
@@ -182,7 +182,7 @@ impl<T> DmaRegion<MaybeUninit<T>> {
         T: Pointee<Metadata = ()>,
     {
         let (phys, virt) = alloc_dma_memory(core::mem::size_of::<T>(), DmaAllocationOptions::ZERO)?;
-        Result::Ok(Self { phys, virt: core::ptr::from_raw_parts_mut(virt.cast(), ()) })
+        Result::Ok(Self { phys, virt: NonNull::from_raw_parts(virt.cast(), ()) })
     }
 
     pub unsafe fn assume_init(self) -> DmaRegion<T> {
@@ -199,13 +199,13 @@ impl<T: ?Sized> core::ops::Deref for DmaRegion<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { &*self.virt }
+        unsafe { &*self.virt.as_ptr() }
     }
 }
 
 impl<T: ?Sized> core::ops::DerefMut for DmaRegion<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *self.virt }
+        unsafe { &mut *self.virt.as_ptr() }
     }
 }
 
@@ -216,7 +216,7 @@ impl<T: ?Sized> core::ops::Drop for DmaRegion<T> {
 
 pub struct DmaElement<'a, T> {
     phys: PhysicalAddress,
-    virt: *mut T,
+    virt: NonNull<T>,
     _region: &'a DmaRegion<[T]>,
 }
 
@@ -225,7 +225,7 @@ impl<'a, T> DmaElement<'a, T> {
         self.phys
     }
 
-    pub fn get(&self) -> *mut T {
+    pub fn get(&self) -> NonNull<T> {
         self.virt
     }
 }
