@@ -114,7 +114,7 @@ pub fn alloc_vmspace_object(task: &Task, frame: &mut GeneralRegisters) -> Result
         at,
         RegionDescription {
             size: PageSize::Kilopage,
-            len: size / 4.kib(),
+            count: size / 4.kib(),
             contiguous: false,
             flags,
             fill: FillOption::Zeroed,

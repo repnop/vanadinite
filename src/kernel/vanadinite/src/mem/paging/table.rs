@@ -9,23 +9,25 @@ mod allocator;
 pub mod flags;
 mod repr;
 
-use crate::mem::{phys2virt, virt2phys};
-use alloc::{boxed::Box, vec::Vec};
+pub use self::repr::Rsw;
+use crate::mem::{
+    phys::{PhysicalMemoryAllocator, PhysicalPage},
+    phys2virt, virt2phys,
+};
+use alloc::boxed::Box;
 use allocator::PageTableAllocator;
-use core::ptr::NonNull;
 use flags::Flags;
 pub use repr::{EntryKind, PageSize, PhysicalAddress, VirtualAddress};
 
 pub struct PageTable {
     root: Box<repr::PageTable, PageTableAllocator>,
-    subtables: Vec<NonNull<repr::PageTable>>,
 }
 
 impl PageTable {
     /// Creates a new [`PageTable`] without copying kernel regions
     pub fn new_raw() -> Self {
         let root = Self::new_table();
-        Self { root, subtables: Vec::new() }
+        Self { root }
     }
 
     /// Creates a new [`PageTable`], copying the kernel regions from the active
@@ -34,7 +36,7 @@ impl PageTable {
         // Safety: This is safe since page tables are made up of trivial types,
         // of which zero is a valid state (and the one we want for new ones)
         let root = Self::new_table();
-        let mut this = Self { root, subtables: Vec::new() };
+        let mut this = Self { root };
 
         this.copy_kernel_regions();
 
@@ -42,7 +44,7 @@ impl PageTable {
     }
 
     #[track_caller]
-    pub fn map(&mut self, from: PhysicalAddress, to: VirtualAddress, flags: Flags, size: PageSize) {
+    pub fn map(&mut self, from: PhysicalAddress, to: VirtualAddress, flags: Flags, size: PageSize, rsw: Rsw) {
         log::trace!("Mapping {:#p} -> {:#p}", from, to);
 
         size.assert_addr_aligned(from.as_usize());
@@ -63,6 +65,7 @@ impl PageTable {
 
                 entry.set_flags(flags);
                 entry.set_ppn(from);
+                entry.set_rsw(rsw);
                 return;
             }
 
@@ -81,8 +84,6 @@ impl PageTable {
 
                     entry.set_flags(Flags::VALID);
                     entry.set_ppn(subtable_phys);
-
-                    self.subtables.push(unsafe { NonNull::new_unchecked(new_subtable) });
 
                     table = new_subtable;
                 }
@@ -113,11 +114,11 @@ impl PageTable {
         .unwrap_or_default()
     }
 
-    pub fn page_rsw(&self, address: VirtualAddress) -> Option<u8> {
+    pub fn page_rsw(&self, address: VirtualAddress) -> Option<Rsw> {
         self.with_entry(address, |e, _| e.rsw())
     }
 
-    pub fn modify_page_rsw(&mut self, address: VirtualAddress, f: impl FnOnce(u8) -> u8) -> bool {
+    pub fn modify_page_rsw(&mut self, address: VirtualAddress, f: impl FnOnce(Rsw) -> Rsw) -> bool {
         self.with_entry_mut(address, |e, _| {
             e.set_rsw(f(e.rsw()));
             true
@@ -250,6 +251,33 @@ impl PageTable {
         // well-defined and safe to immediately init
         unsafe { Box::new_uninit_in(PageTableAllocator).assume_init() }
     }
+
+    fn deallocate(
+        phys_mem_allocator: &mut dyn PhysicalMemoryAllocator,
+        page_table: *mut repr::PageTable,
+        page_size: PageSize,
+    ) {
+        for entry in unsafe { (*page_table).entries.iter_mut() } {
+            match entry.kind() {
+                EntryKind::Branch(branch) => {
+                    let virt = crate::mem::phys2virt(branch);
+                    Self::deallocate(
+                        phys_mem_allocator,
+                        virt.as_mut_ptr().cast(),
+                        page_size.next().expect("Branch found on lowest level page table!"),
+                    );
+
+                    unsafe {
+                        phys_mem_allocator.dealloc(PhysicalPage::from_ptr(branch.as_mut_ptr()), PageSize::Kilopage)
+                    };
+                }
+                EntryKind::Leaf if entry.rsw() == Rsw::NONE => unsafe {
+                    phys_mem_allocator.dealloc(PhysicalPage::from_ptr(entry.ppn().unwrap().as_mut_ptr()), page_size)
+                },
+                _ => {}
+            }
+        }
+    }
 }
 
 unsafe impl Send for PageTable {}
@@ -257,9 +285,8 @@ unsafe impl Sync for PageTable {}
 
 impl Drop for PageTable {
     fn drop(&mut self) {
-        for pt in self.subtables.drain(..) {
-            unsafe { Box::from_raw_in(pt.as_ptr(), allocator::PageTableAllocator) };
-        }
+        let mut lock = crate::mem::phys::PHYSICAL_MEMORY_ALLOCATOR.lock();
+        Self::deallocate(&mut *lock, &mut *self.root, PageSize::top_level());
     }
 }
 

@@ -9,20 +9,17 @@ pub mod lazy;
 pub mod mutex;
 pub mod rwlock;
 
-use core::{
-    marker::PhantomData,
-    sync::atomic::{AtomicPtr, Ordering},
-};
+use core::sync::atomic::{AtomicPtr, Ordering};
 pub use lazy::Lazy;
 pub use mutex::SpinMutex;
 pub use rwlock::SpinRwLock;
 
 #[repr(transparent)]
-pub struct AtomicConstPtr<T>(AtomicPtr<T>, PhantomData<T>);
+pub struct AtomicConstPtr<T>(AtomicPtr<T>);
 
 impl<T> AtomicConstPtr<T> {
     pub const fn new(ptr: *const T) -> Self {
-        Self(AtomicPtr::new(ptr as *mut _), PhantomData)
+        Self(AtomicPtr::new(ptr as *mut _))
     }
 
     pub fn store(&self, ptr: *const T, ordering: Ordering) {

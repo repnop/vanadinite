@@ -57,7 +57,7 @@ pub fn alloc_virtual_memory(task: &Task, frame: &mut GeneralRegisters) -> Result
                     None,
                     RegionDescription {
                         size: page_size,
-                        len: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
+                        count: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
                         contiguous: false,
                         flags,
                         fill: if options & AllocationOptions::ZERO {
@@ -75,7 +75,7 @@ pub fn alloc_virtual_memory(task: &Task, frame: &mut GeneralRegisters) -> Result
                     None,
                     RegionDescription {
                         size: page_size,
-                        len: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
+                        count: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
                         contiguous: false,
                         flags,
                         fill: if options & AllocationOptions::ZERO {
@@ -134,7 +134,7 @@ pub fn alloc_dma_memory(task: &Task, frame: &mut GeneralRegisters) -> Result<(),
                 None,
                 RegionDescription {
                     size: page_size,
-                    len: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
+                    count: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
                     contiguous: true,
                     flags: Flags::VALID | Flags::USER | Flags::READ | Flags::WRITE,
                     fill: if options & DmaAllocationOptions::ZERO {

@@ -56,13 +56,13 @@ impl PageTableEntry {
         self.0 = this | flags.value() as u64;
     }
 
-    pub fn rsw(self) -> u8 {
-        ((self.0 >> 8) & 0b11) as u8
+    pub fn rsw(self) -> Rsw {
+        Rsw(((self.0 >> 8) & 0b11) as u8)
     }
 
-    pub fn set_rsw(&mut self, bits: u8) {
+    pub fn set_rsw(&mut self, rsw: Rsw) {
         let this = self.0 & !(0x3 << 8);
-        self.0 = this | (bits & 0x3) as u64;
+        self.0 = this | (rsw.0 & 0x3) as u64;
     }
 
     pub fn ppn(self) -> Option<PhysicalAddress> {
@@ -103,7 +103,7 @@ impl core::fmt::Debug for PageTableEntry {
                 write!(f, "NotValid")?;
             }
             EntryKind::Branch(next_level) => {
-                write!(f, "Branch, next_level={:#p}", next_level)?;
+                write!(f, "Branch, next_level={next_level:#p}")?;
             }
         }
         write!(f, ")")
@@ -120,6 +120,16 @@ impl core::fmt::Pointer for PhysicalAddress {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         core::fmt::Pointer::fmt(&(self.0 as *const u8), f)
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct Rsw(u8);
+
+impl Rsw {
+    pub const NONE: Self = Self(0);
+    pub const SHARED_MEMORY: Self = Self(1);
+    pub const DIRECT: Self = Self(2);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

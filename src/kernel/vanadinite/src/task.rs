@@ -72,6 +72,7 @@ pub struct MutableState {
     pub subscribes_to_events: bool,
 }
 
+#[derive(Debug)]
 pub struct Task {
     pub tid: Tid,
     pub name: Box<str>,
@@ -88,7 +89,7 @@ impl Task {
         memory_manager.alloc_region(
             Some(VirtualAddress::new(0xF00D_0000)),
             RegionDescription {
-                len: round_up_to_next(bin.len(), 4.kib()) / 4.kib(),
+                count: round_up_to_next(bin.len(), 4.kib()) / 4.kib(),
                 size: PageSize::Kilopage,
                 contiguous: false,
                 flags: Flags::USER | Flags::READ | Flags::WRITE | Flags::EXECUTE | Flags::VALID,
@@ -100,7 +101,7 @@ impl Task {
         let sp = memory_manager
             .alloc_guarded_region(RegionDescription {
                 size: PageSize::Kilopage,
-                len: 128,
+                count: 128,
                 contiguous: false,
                 flags: Flags::USER | Flags::READ | Flags::WRITE | Flags::VALID,
                 fill: FillOption::Unitialized,
@@ -116,7 +117,7 @@ impl Task {
                 None,
                 RegionDescription {
                     size: PageSize::Kilopage,
-                    len: round_up_to_next(fdt.total_size(), 4.kib()) / 4.kib(),
+                    count: round_up_to_next(fdt.total_size(), 4.kib()) / 4.kib(),
                     contiguous: false,
                     flags: Flags::USER | Flags::READ | Flags::VALID,
                     fill: FillOption::Data(slice),
@@ -133,7 +134,7 @@ impl Task {
                 let concatenated = args.clone().flat_map(|s| s.bytes()).collect::<Vec<_>>();
                 let storage = memory_manager.alloc_guarded_region(RegionDescription {
                     size: PageSize::Kilopage,
-                    len: round_up_to_next(total_size, 4.kib()) / 4.kib(),
+                    count: round_up_to_next(total_size, 4.kib()) / 4.kib(),
                     contiguous: false,
                     flags: Flags::USER | Flags::READ | Flags::VALID,
                     fill: FillOption::Data(&concatenated),
@@ -147,7 +148,7 @@ impl Task {
                 });
                 let ptrs = memory_manager.alloc_guarded_region(RegionDescription {
                     size: PageSize::Kilopage,
-                    len: round_up_to_next(n * 16, 4.kib()) / 4.kib(),
+                    count: round_up_to_next(n * 16, 4.kib()) / 4.kib(),
                     contiguous: false,
                     flags: Flags::USER | Flags::READ | Flags::VALID,
                     fill: FillOption::Data(&ptr_list),
@@ -204,12 +205,14 @@ impl Task {
 
     /// Creates a task which will idle and wait for interrupts in userspace
     pub fn idle() -> Self {
+        log::trace!("[Task::idle] Entered");
         let mut memory_manager = UserspaceMemoryManager::new();
         let mut cspace = CapabilitySpace::new();
+        log::trace!("[Task::idle] Allocating instructions");
         memory_manager.alloc_region(
             Some(VirtualAddress::new(0xF00D_0000)),
             RegionDescription {
-                len: 4.kib(),
+                count: 1,
                 size: PageSize::Kilopage,
                 contiguous: false,
                 flags: Flags::USER | Flags::READ | Flags::WRITE | Flags::EXECUTE | Flags::VALID,
@@ -221,6 +224,7 @@ impl Task {
             },
         );
 
+        log::trace!("[Task::idle] Allocating kernel stack");
         let kernel_stack = alloc_kernel_stack(2.mib());
         let trap_frame = unsafe { kernel_stack.sub(core::mem::size_of::<TrapFrame>()).cast::<TrapFrame>() };
         unsafe { *trap_frame = TrapFrame { sepc: 0xF00D_0000, registers: GeneralRegisters { ..Default::default() } } };
@@ -232,6 +236,8 @@ impl Task {
                 Capability { resource: CapabilityResource::Channel(user_read), rights: CapabilityRights::READ },
             )
             .expect("[BUG] kernel channel cap already created?");
+
+        log::trace!("[Task::idle] Returning idle task");
 
         Self {
             tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),

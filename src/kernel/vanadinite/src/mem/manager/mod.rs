@@ -10,7 +10,7 @@ pub mod kernel;
 
 use crate::{
     mem::{
-        paging::{flags::Flags, PageSize, PageTable, PageTableDebug, PhysicalAddress, VirtualAddress},
+        paging::{flags::Flags, PageSize, PageTable, PageTableDebug, PhysicalAddress, Rsw, VirtualAddress},
         region::{MemoryRegion, PhysicalRegion, UniquePhysicalRegion},
         sfence,
     },
@@ -35,7 +35,7 @@ pub enum InvalidRegion {
 
 pub struct RegionDescription<'a> {
     pub size: PageSize,
-    pub len: usize,
+    pub count: usize,
     pub contiguous: bool,
     pub flags: Flags,
     pub fill: FillOption<'a>,
@@ -66,15 +66,15 @@ impl UserspaceMemoryManager {
         at: Option<VirtualAddress>,
         description: RegionDescription,
     ) -> Range<VirtualAddress> {
-        let RegionDescription { size, len, contiguous, flags, fill, kind } = description;
-        let at = at.unwrap_or_else(|| self.find_free_region(size, len));
+        let RegionDescription { size, count, contiguous, flags, fill, kind } = description;
+        let at = at.unwrap_or_else(|| self.find_free_region(size, count));
 
-        log::debug!("Allocating region at {:#p}: size={:?} n_pages={} flags={:?}", at, size, len, flags);
+        log::debug!("Allocating region at {:#p}: size={:?} n_pages={} flags={:?}", at, size, count, flags);
 
         let mut backing = if contiguous {
-            UniquePhysicalRegion::alloc_contiguous(size, len)
+            UniquePhysicalRegion::alloc_contiguous(size, count)
         } else {
-            UniquePhysicalRegion::alloc_sparse(size, len)
+            UniquePhysicalRegion::alloc_sparse(size, count)
         };
 
         match fill {
@@ -86,10 +86,10 @@ impl UserspaceMemoryManager {
         let iter = backing.physical_addresses().enumerate().map(|(i, phys)| (phys, at.add(i * size.to_byte_size())));
         for (phys_addr, virt_addr) in iter {
             log::trace!("Mapping {:#p} -> {:#p}", phys_addr, virt_addr);
-            self.table.map(phys_addr, virt_addr, flags, size);
+            self.table.map(phys_addr, virt_addr, flags, size, Rsw::NONE);
         }
 
-        let range = at..at.add(size.to_byte_size() * len);
+        let range = at..at.add(size.to_byte_size() * count);
         self.address_map
             .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), kind, flags)
             .expect("bad address mapping");
@@ -100,14 +100,14 @@ impl UserspaceMemoryManager {
     /// Same as [`Self::alloc_region`], except attempts to find a free region
     /// with available space above and below the region to place guard pages.
     pub fn alloc_guarded_region(&mut self, description: RegionDescription) -> VirtualAddress {
-        let RegionDescription { size, len, contiguous, flags, fill, kind } = description;
-        let at = self.find_free_region_with_guards(size, len);
+        let RegionDescription { size, count, contiguous, flags, fill, kind } = description;
+        let at = self.find_free_region_with_guards(size, count);
 
-        log::debug!("Allocating guarded region at {:#p}: size={:?} len={} flags={:?}", at, size, len, flags);
+        log::debug!("Allocating guarded region at {:#p}: size={:?} len={} flags={:?}", at, size, count, flags);
 
         self.guard(VirtualAddress::new(at.as_usize() - 4.kib()));
-        self.alloc_region(Some(at), RegionDescription { size, len, contiguous, flags, fill, kind });
-        self.guard(at.add(size.to_byte_size() * len));
+        self.alloc_region(Some(at), RegionDescription { size, count, contiguous, flags, fill, kind });
+        self.guard(at.add(size.to_byte_size() * count));
 
         at
     }
@@ -120,12 +120,12 @@ impl UserspaceMemoryManager {
         at: Option<VirtualAddress>,
         description: RegionDescription,
     ) -> (Range<VirtualAddress>, SharedPhysicalRegion) {
-        let RegionDescription { size, len, contiguous, flags, fill, kind } = description;
-        let at = at.unwrap_or_else(|| self.find_free_region(size, len));
+        let RegionDescription { size, count, contiguous, flags, fill, kind } = description;
+        let at = at.unwrap_or_else(|| self.find_free_region(size, count));
         let mut backing = if contiguous {
-            UniquePhysicalRegion::alloc_contiguous(size, len)
+            UniquePhysicalRegion::alloc_contiguous(size, count)
         } else {
-            UniquePhysicalRegion::alloc_sparse(size, len)
+            UniquePhysicalRegion::alloc_sparse(size, count)
         };
 
         match fill {
@@ -136,12 +136,12 @@ impl UserspaceMemoryManager {
 
         let iter = backing.physical_addresses().enumerate().map(|(i, phys)| (phys, at.add(i * size.to_byte_size())));
         for (phys_addr, virt_addr) in iter {
-            self.table.map(phys_addr, virt_addr, flags, size);
+            self.table.map(phys_addr, virt_addr, flags, size, Rsw::SHARED_MEMORY);
             sfence(Some(virt_addr), None);
         }
 
         let shared = backing.into_shared_region();
-        let range = at..at.add(size.to_byte_size() * len);
+        let range = at..at.add(size.to_byte_size() * count);
 
         self.address_map
             .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(shared.clone())), kind, flags)
@@ -182,7 +182,7 @@ impl UserspaceMemoryManager {
             .map(|(i, phys)| (phys, at.add(i * PageSize::Kilopage.to_byte_size())));
         for (phys_addr, virt_addr) in iter {
             log::trace!("Mapping {:#p} -> {:#p}", phys_addr, virt_addr);
-            self.table.map(phys_addr, virt_addr, flags, PageSize::Kilopage);
+            self.table.map(phys_addr, virt_addr, flags, PageSize::Kilopage, Rsw::NONE);
         }
 
         let range = at..at.add(PageSize::Kilopage.to_byte_size() * n_pages);
@@ -221,7 +221,7 @@ impl UserspaceMemoryManager {
             .map(|(i, phys)| (phys, at.add(i * region.page_size().to_byte_size())));
 
         for (phys_addr, virt_addr) in iter {
-            self.table.map(phys_addr, virt_addr, flags, region.page_size());
+            self.table.map(phys_addr, virt_addr, flags, region.page_size(), Rsw::SHARED_MEMORY);
             sfence(Some(virt_addr), None);
         }
 
@@ -239,7 +239,7 @@ impl UserspaceMemoryManager {
         self.address_map
             .alloc(at..at.add(4.kib()), MemoryRegion::GuardPage, AddressRegionKind::Guard, Flags::USER)
             .unwrap();
-        self.table.map(PhysicalAddress::null(), at, Flags::USER | Flags::VALID, PageSize::Kilopage);
+        self.table.map(PhysicalAddress::null(), at, Flags::USER | Flags::VALID, PageSize::Kilopage, Rsw::NONE);
     }
 
     /// Deallocate the region specified by the given [`VirtualAddress`]
@@ -269,7 +269,7 @@ impl UserspaceMemoryManager {
     }
 
     pub fn map_direct(&mut self, map_from: PhysicalAddress, map_to: VirtualAddress, n_pages: PageSize, flags: Flags) {
-        self.table.map(map_from, map_to, flags, n_pages);
+        self.table.map(map_from, map_to, flags, n_pages, Rsw::DIRECT);
 
         sfence(Some(map_to), None);
     }
@@ -316,7 +316,7 @@ impl UserspaceMemoryManager {
 
     /// Returns the `RSW` bits of the given [`VirtualAddress`] mapping, if it's
     /// mapped
-    pub fn rsw(&self, virt: VirtualAddress) -> Option<u8> {
+    pub fn rsw(&self, virt: VirtualAddress) -> Option<Rsw> {
         self.table.page_rsw(virt)
     }
 
