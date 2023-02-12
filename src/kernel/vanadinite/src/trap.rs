@@ -264,11 +264,11 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, scause: usize, stval: usize
 
     let trap_kind = Trap::from_cause(scause);
     match trap_kind {
-        Trap::SupervisorTimerInterrupt => SCHEDULER.schedule(TaskState::Ready),
-        Trap::UserModeEnvironmentCall => match syscall::handle(regs) {
-            syscall::Outcome::Completed => regs.sepc += 4,
-            syscall::Outcome::Blocked => SCHEDULER.schedule(TaskState::Blocked),
-        },
+        Trap::SupervisorTimerInterrupt => SCHEDULER.schedule(),
+        Trap::UserModeEnvironmentCall => {
+            syscall::handle(regs);
+            regs.sepc += 4;
+        }
         Trap::SupervisorExternalInterrupt => {
             // FIXME: there has to be a better way
             if let Some(plic) = &*PLIC.lock() {
@@ -358,10 +358,11 @@ pub extern "C" fn trap_handler(regs: &mut TrapFrame, scause: usize, stval: usize
                             );
                             log::error!("Phys addr (if any): {:?}", active_task.memory_manager.resolve(stval));
 
+                            active_task.state = TaskState::Dead;
                             drop(active_task);
                             drop(active_task_lock);
 
-                            SCHEDULER.schedule(TaskState::Dead)
+                            SCHEDULER.schedule()
                         }
                     }
                 }

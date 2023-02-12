@@ -97,11 +97,12 @@ pub(super) struct Receiver {
 impl Receiver {
     pub fn recv(&self) -> Result<ChannelMessage, ()> {
         loop {
-            let msg = self.inner.lock().pop_front();
+            let mut lock = self.inner.lock();
+            let msg = lock.pop_front();
             match msg {
                 Some(message) => break Ok(message),
                 // FIXME: should we check `alive` here?
-                None => self.waitqueue.wait(),
+                None => self.waitqueue.wait(move || drop(lock)),
             }
         }
     }
@@ -135,6 +136,7 @@ pub struct Sender {
 }
 
 impl Sender {
+    #[track_caller]
     pub fn send(&self, message: ChannelMessage) -> Result<(), ChannelMessage> {
         if !self.alive.load(Ordering::Acquire) {
             log::debug!("Channel to {:?}:{:?} is dead", self.other_tid, self.other_cptr);
@@ -144,19 +146,21 @@ impl Sender {
         // FIXME: set a buffer limit at some point
         let mut lock = self.inner.lock();
 
-        lock.push_back(message);
-        self.waitqueue.wake_one();
-
         if let Some(task) = self.other_tid.and_then(|tid| TASKS.get(tid)) {
             log::debug!("Enqueuing kernel message for other cptr [{}:{:?}]", task.name, self.other_cptr);
             let task_state = task.mutable_state.lock();
             if task_state.subscribes_to_events {
-                task_state.kernel_channel.sender.send(ChannelMessage {
+                let sender = task_state.kernel_channel.sender.clone();
+                drop(task_state);
+                sender.send(ChannelMessage {
                     data: KernelMessage::into_parts(KernelMessage::NewChannelMessage(self.other_cptr)),
                     caps: Vec::new(),
                 })?;
             }
         }
+
+        lock.push_back(message);
+        self.waitqueue.wake_one();
 
         Ok(())
     }
@@ -181,7 +185,7 @@ pub fn send_message(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sys
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::WRITE =>
         {
-            channel
+            channel.clone()
         }
         _ => return Err(SyscallError::InvalidArgument(0)),
     };
@@ -226,13 +230,14 @@ pub fn send_message(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sys
     };
 
     log::debug!("[{}:{}] Sending channel message", task.name, task.tid);
+    drop(task_state);
     // FIXME: this should notify the sender the channel is dead if it is
     channel.sender.send(ChannelMessage { data, caps }).unwrap();
 
     Ok(())
 }
 
-pub fn read_message(task: &Task, regs: &mut GeneralRegisters) -> Result<super::Outcome, SyscallError> {
+pub fn read_message(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let task_state = task.mutable_state.lock();
 
     let cptr = CapabilityPtr::new(regs.a1);
@@ -388,9 +393,11 @@ pub fn read_message(task: &Task, regs: &mut GeneralRegisters) -> Result<super::O
                                 task_state.claimed_interrupts.insert(id, HART_ID.get());
 
                                 // FIXME: not sure if this is entirely correct..
-                                task_state
-                                    .kernel_channel
-                                    .sender
+                                let sender = task_state.kernel_channel.sender.clone();
+
+                                drop(task_state);
+
+                                sender
                                     .send(ChannelMessage {
                                         data: Into::into(KernelMessage::InterruptOccurred(id)),
                                         caps: Vec::new(),
@@ -442,5 +449,5 @@ pub fn read_message(task: &Task, regs: &mut GeneralRegisters) -> Result<super::O
     regs.t6 = data[6];
 
     log::debug!("[{}:{}:{:?}] Read channel message! ra={:#p}", task.name, task.tid, cptr, crate::asm::ra());
-    Ok(super::Outcome::Completed)
+    Ok(())
 }

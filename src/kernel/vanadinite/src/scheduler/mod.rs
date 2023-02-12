@@ -89,6 +89,8 @@ impl CurrentTask {
 
 pub struct Scheduler {
     inner: Lazy<Vec<SpinMutex<SchedulerInner, SameHartDeadlockDetection>>>,
+    // FIXME: actually go back to using this, maybe, at some point?
+    #[allow(dead_code)]
     wait_queue: SpinMutex<BTreeMap<Tid, (Arc<Task>, TaskMetadata)>, SameHartDeadlockDetection>,
 }
 
@@ -105,42 +107,40 @@ impl Scheduler {
     pub fn enqueue(&self, task: Task) {
         let (tid, task) = TASKS.insert(task);
         let mut inner = self.queue_for_hart().lock();
-        inner.run_queue.insert(tid, (task, TaskMetadata::new()));
-        inner.policy.task_enqueued(tid, TaskMetadata::new());
+        inner.run_queue.insert(tid, (Arc::clone(&task), TaskMetadata::new()));
+        inner.policy.task_enqueued(task, TaskMetadata::new());
     }
 
     pub fn enqueue_with(&self, f: impl FnOnce(Tid) -> Task) {
         let (tid, task) = TASKS.insert_with(f);
-
         let mut inner = self.queue_for_hart().lock();
-
-        inner.run_queue.insert(tid, (task, TaskMetadata::new()));
-        inner.policy.task_enqueued(tid, TaskMetadata::new());
+        inner.run_queue.insert(tid, (Arc::clone(&task), TaskMetadata::new()));
+        inner.policy.task_enqueued(task, TaskMetadata::new());
     }
 
-    pub fn wake(&self, tid: Tid) {
-        // FIXME: actually use the blocked queue
-        let mut inner = self.queue_for_hart().lock();
-        let (task, mut metadata) = self.wait_queue.lock().remove(&tid).expect("TID not in waitqueue!");
-        metadata.run_state = TaskState::Ready;
+    // pub fn wake(&self, tid: Tid) {
+    //     // FIXME: actually use the blocked queue
+    //     let mut inner = self.queue_for_hart().lock();
+    //     let (task, mut metadata) = self.wait_queue.lock().remove(&tid).expect("TID not in waitqueue!");
+    //     metadata.run_state = TaskState::Ready;
 
-        for (i, queue) in self.inner.iter().enumerate() {
-            let Some(mut queue) = queue.try_lock() else { continue };
-            if queue.run_queue.len() < inner.run_queue.len() {
-                log::debug!("Placed now-ready task {} into hart {}'s runqueue", task.name, i);
-                queue.run_queue.insert(task.tid, (task, metadata));
-                queue.policy.task_enqueued(tid, metadata);
-                return;
-            }
-        }
+    //     for (i, queue) in self.inner.iter().enumerate() {
+    //         let Some(mut queue) = queue.try_lock() else { continue };
+    //         if queue.run_queue.len() < inner.run_queue.len() {
+    //             log::debug!("Placed now-ready task {} into hart {}'s runqueue", task.name, i);
+    //             queue.run_queue.insert(task.tid, (Arc::clone(&task), metadata));
+    //             queue.policy.task_enqueued(task, metadata);
+    //             return;
+    //         }
+    //     }
 
-        log::debug!("Placed now-ready task {} into our hart's ({}) runqueue", task.name, crate::HART_ID.get());
-        inner.run_queue.insert(task.tid, (task, metadata));
-        inner.policy.task_enqueued(tid, metadata);
-    }
+    //     log::debug!("Placed now-ready task {} into our hart's ({}) runqueue", task.name, crate::HART_ID.get());
+    //     inner.run_queue.insert(task.tid, (Arc::clone(&task), metadata));
+    //     inner.policy.task_enqueued(task, metadata);
+    // }
 
     #[inline(never)]
-    pub fn schedule(&self, next_state: TaskState) {
+    pub fn schedule(&self) {
         log::trace!("Scheduling!");
         let mut inner = self.queue_for_hart().lock();
         let SchedulerInner { policy, run_queue, .. } = &mut *inner;
@@ -150,19 +150,7 @@ impl Scheduler {
         let (switch_out, out_lock) = unsafe { task.context.raw_locked_parts() };
 
         log::trace!("[OUT] Task {} [{}] metadata: {:?}", task.name, task.tid, metadata);
-        assert_eq!(metadata.run_state, TaskState::Running);
         metadata.run_time += csr::time::read() - metadata.last_scheduled_at;
-
-        match next_state {
-            TaskState::Blocked => {
-                let (task, metadata) = run_queue.remove(&current_tid).unwrap();
-                self.wait_queue.lock().insert(current_tid, (task, metadata));
-            }
-            _ => {
-                metadata.run_state = next_state;
-                policy.update_state(current_tid, next_state);
-            }
-        }
 
         let tid = policy.next();
         let (to_task, metadata) = run_queue.get_mut(&tid).expect("TID not in runqueue");
@@ -170,10 +158,7 @@ impl Scheduler {
         log::trace!("[IN] Task {} [{}] metadata: {:?}", to_task.name, to_task.tid, metadata);
 
         if tid != current_tid {
-            assert_eq!(metadata.run_state, TaskState::Ready);
-            metadata.run_state = TaskState::Running;
             metadata.last_scheduled_at = csr::time::read();
-            policy.update_state(tid, TaskState::Running);
 
             // Safety: `context_switch` unlocks the mutex
             let (switch_in, in_lock) = unsafe { to_task.context.raw_locked_parts() };
@@ -198,9 +183,6 @@ impl Scheduler {
             unsafe { context_switch(switch_out, switch_in, out_lock, in_lock, satp) };
         } else {
             unsafe { (*out_lock).store(false, Ordering::Release) };
-            assert_eq!(next_state, TaskState::Ready);
-            metadata.run_state = TaskState::Running;
-            inner.policy.update_state(current_tid, TaskState::Running);
             // Keep running the same task if we don't have anything else to do and its not blocked
         }
     }
@@ -210,6 +192,7 @@ impl Scheduler {
     /// # Safety
     /// This must only be called once at the start of each hart's lifecycle
     pub unsafe fn begin_scheduling(&self) -> ! {
+        log::debug!("Scheduling first process!");
         let mut idle_tid = Tid::new(NonZeroUsize::new(usize::MAX).unwrap());
         self.enqueue_with(|tid| {
             idle_tid = tid;
@@ -220,14 +203,10 @@ impl Scheduler {
         inner.policy.idle_task(idle_tid);
 
         let next = inner.policy.next();
-        let (to_task, metadata) = inner.run_queue.get_mut(&next).unwrap();
+        let (to_task, _) = inner.run_queue.get_mut(&next).unwrap();
 
         let to_task = Arc::clone(to_task);
         CURRENT_TASK.set(Arc::clone(&to_task));
-
-        assert_eq!(metadata.run_state, TaskState::Ready);
-        metadata.run_state = TaskState::Running;
-        inner.policy.update_state(to_task.tid, TaskState::Running);
 
         drop(inner);
 
@@ -285,22 +264,27 @@ impl TaskList {
         Self { map: SpinRwLock::new(BTreeMap::new()), next_id: AtomicUsize::new(1) }
     }
 
-    pub fn insert(&self, mut task: Task) -> (Tid, Arc<Task>) {
-        let tid = Tid::new(NonZeroUsize::new(self.next_id.load(Ordering::Acquire)).unwrap());
-        task.tid = tid;
-        let task: Arc<Task> = Arc::new(task);
-        // FIXME: reuse older pids at some point
-        let _ = self.map.write().insert(tid, Arc::clone(&task));
-        if self.next_id.fetch_add(1, Ordering::AcqRel) == usize::MAX {
-            todo!("something something overflow");
-        }
-
-        (tid, task)
+    pub fn insert(&self, task: Task) -> (Tid, Arc<Task>) {
+        self.insert_with(move |_| task)
     }
 
     pub fn insert_with(&self, f: impl FnOnce(Tid) -> Task) -> (Tid, Arc<Task>) {
-        let tid = Tid::new(NonZeroUsize::new(self.next_id.load(Ordering::Acquire)).unwrap());
-        self.insert(f(tid))
+        log::trace!("[TaskList::insert_with] Entered");
+        let tid = Tid::new(NonZeroUsize::new(self.next_id.fetch_add(1, Ordering::AcqRel)).unwrap());
+        log::trace!("[TaskList::insert_with] Calling f");
+        let mut task = f(tid);
+        log::trace!("[TaskList::insert_with] task={task:?}");
+
+        task.tid = tid;
+        log::trace!("[TaskList::insert_with] Allocating Arc");
+        let task: Arc<Task> = Arc::new(task);
+        // FIXME: reuse older pids at some point
+
+        log::trace!("[TaskList::insert_with] About to lock");
+        log::trace!("Removed task: {:?}", self.map.write().insert(tid, Arc::clone(&task)));
+        log::trace!("[TaskList::insert_with] Finished lock");
+
+        (tid, task)
     }
 
     pub fn remove(&self, tid: Tid) -> Option<Arc<Task>> {
@@ -316,11 +300,10 @@ impl TaskList {
 
 pub trait SchedulerPolicy {
     fn next(&mut self) -> Tid;
-    fn task_enqueued(&mut self, tid: Tid, metadata: TaskMetadata);
+    fn task_enqueued(&mut self, tid: Arc<Task>, metadata: TaskMetadata);
     fn task_dequeued(&mut self, tid: Tid);
     fn task_priority_changed(&mut self, tid: Tid, priority: u16);
     fn task_preempted(&mut self, tid: Tid);
-    fn update_state(&mut self, tid: Tid, state: TaskState);
 
     fn idle_task(&mut self, tid: Tid);
 }

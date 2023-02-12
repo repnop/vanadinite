@@ -18,7 +18,7 @@ use crate::{
     scheduler::{return_to_usermode, SCHEDULER},
     sync::SpinMutex,
     syscall::channel::UserspaceChannel,
-    task::{Context, MutableState, Task},
+    task::{Context, MutableState, Task, TaskState},
     trap::{GeneralRegisters, TrapFrame},
     utils::{self, Units},
 };
@@ -210,6 +210,7 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
             kernel_channel,
             claimed_interrupts: BTreeMap::new(),
             subscribes_to_events: true,
+            state: TaskState::Ready,
         }),
     };
 

@@ -8,34 +8,34 @@
 use core::num::NonZeroUsize;
 
 use super::SchedulerPolicy;
-use crate::task::TaskState;
-use alloc::collections::VecDeque;
+use crate::task::{Task, TaskState};
+use alloc::{collections::VecDeque, sync::Arc};
 use librust::task::Tid;
 
 pub struct RoundRobinPolicy {
-    tids: VecDeque<(Tid, TaskState)>,
+    tasks: VecDeque<Arc<Task>>,
     idle_tid: Tid,
 }
 
 impl RoundRobinPolicy {
     pub fn new() -> Self {
-        Self { tids: VecDeque::new(), idle_tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()) }
+        Self { tasks: VecDeque::new(), idle_tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()) }
     }
 }
 
 impl SchedulerPolicy for RoundRobinPolicy {
     fn next(&mut self) -> Tid {
-        match self.tids.is_empty() {
+        match self.tasks.is_empty() {
             true => self.idle_tid,
             false => {
-                for _ in 0..self.tids.len() {
-                    self.tids.rotate_left(1);
+                for _ in 0..self.tasks.len() {
+                    self.tasks.rotate_left(1);
 
-                    if !matches!(self.tids.front().unwrap().1, TaskState::Ready) {
+                    if !matches!(self.tasks.front().unwrap().mutable_state.lock().state, TaskState::Ready) {
                         continue;
                     }
 
-                    return self.tids.front().unwrap().0;
+                    return self.tasks.front().unwrap().tid;
                 }
 
                 self.idle_tid
@@ -43,23 +43,19 @@ impl SchedulerPolicy for RoundRobinPolicy {
         }
     }
 
-    fn task_enqueued(&mut self, tid: Tid, metadata: super::TaskMetadata) {
-        self.tids.push_back((tid, metadata.run_state))
+    fn task_enqueued(&mut self, tid: Arc<Task>, _metadata: super::TaskMetadata) {
+        self.tasks.push_back(tid)
     }
 
     fn task_dequeued(&mut self, tid: Tid) {
-        match self.tids.iter().position(|t| t.0 == tid) {
-            Some(index) => drop(self.tids.remove(index)),
+        match self.tasks.iter().position(|t| t.tid == tid) {
+            Some(index) => drop(self.tasks.remove(index)),
             None => unreachable!("Asked to remove TID that doesn't exist in policy: {:?}", tid),
         }
     }
 
     fn task_priority_changed(&mut self, _: Tid, _: u16) {}
     fn task_preempted(&mut self, _: Tid) {}
-
-    fn update_state(&mut self, tid: Tid, state: TaskState) {
-        self.tids.iter_mut().find(|t| t.0 == tid).unwrap().1 = state;
-    }
 
     fn idle_task(&mut self, tid: Tid) {
         self.idle_tid = tid;

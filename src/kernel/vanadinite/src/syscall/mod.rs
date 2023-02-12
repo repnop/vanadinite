@@ -25,9 +25,9 @@ pub enum Outcome {
     Completed,
 }
 
-pub fn handle(frame: &mut TrapFrame) -> Outcome {
-    let task_lock = CURRENT_TASK.get();
-    let task = &*task_lock;
+pub fn handle(frame: &mut TrapFrame) {
+    let task = CURRENT_TASK.get();
+    let task = &*task;
 
     let mut regs = &mut frame.registers;
 
@@ -35,14 +35,15 @@ pub fn handle(frame: &mut TrapFrame) -> Outcome {
         Some(syscall) => syscall,
         None => {
             regs.a0 = usize::from(SyscallError::UnknownSyscall);
-            return Outcome::Completed;
+            return;
         }
     };
 
     let res = match syscall {
         Syscall::Exit => {
+            task.mutable_state.lock().state = TaskState::Dead;
             log::trace!("Task {} ({:?}) exited", task.tid, task.name);
-            SCHEDULER.schedule(TaskState::Dead);
+            SCHEDULER.schedule();
             unreachable!("Dead task [{}] {} rescheduled?", task.tid, task.name)
         }
         Syscall::GetTid => {
@@ -59,13 +60,7 @@ pub fn handle(frame: &mut TrapFrame) -> Outcome {
         Syscall::SpawnVmspace => vmspace::spawn_vmspace(task, regs),
         Syscall::QueryMemoryCapability => mem::query_mem_cap(task, regs),
         Syscall::QueryMmioCapability => mem::query_mmio_cap(task, regs),
-        Syscall::ReadChannel => match channel::read_message(task, regs) {
-            Ok(Outcome::Blocked) => {
-                return Outcome::Blocked;
-            }
-            Ok(Outcome::Completed) => Ok(()),
-            Err(e) => Err(e),
-        },
+        Syscall::ReadChannel => channel::read_message(task, regs),
         Syscall::WriteChannel => channel::send_message(task, regs),
         Syscall::MintCapability => todo!(),
         Syscall::RevokeCapability => todo!(),
@@ -76,6 +71,4 @@ pub fn handle(frame: &mut TrapFrame) -> Outcome {
         Ok(()) => regs.a0 = 0,
         Err(e) => regs.a0 = usize::from(e),
     }
-
-    Outcome::Completed
 }

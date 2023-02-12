@@ -70,6 +70,7 @@ pub struct MutableState {
     pub kernel_channel: UserspaceChannel,
     pub claimed_interrupts: BTreeMap<usize, usize>,
     pub subscribes_to_events: bool,
+    pub state: TaskState,
 }
 
 #[derive(Debug)]
@@ -199,6 +200,7 @@ impl Task {
                 kernel_channel,
                 claimed_interrupts: BTreeMap::new(),
                 subscribes_to_events: false,
+                state: TaskState::Ready,
             }),
         }
     }
@@ -256,6 +258,7 @@ impl Task {
                 kernel_channel,
                 claimed_interrupts: BTreeMap::new(),
                 subscribes_to_events: false,
+                state: TaskState::Ready,
             }),
         }
     }
