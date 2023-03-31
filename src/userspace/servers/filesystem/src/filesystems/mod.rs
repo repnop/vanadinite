@@ -78,10 +78,16 @@ impl core::ops::BitAnd for FilePermissions {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub enum FileType {
     File,
     Directory,
+}
+
+#[derive(Debug, PartialEq, PartialOrd)]
+pub struct FileInfo {
+    pub filename: String,
+    pub file_type: FileType,
 }
 
 pub trait Filesystem: Send + Sync {
@@ -117,4 +123,5 @@ pub trait Filesystem: Send + Sync {
     ) -> BoxedFuture<'static, Result<Option<(usize, DataBlock)>, FilesystemError>>;
 
     fn exists(&self, root: Root, path: &Path) -> BoxedFuture<'static, Result<Option<FileType>, FilesystemError>>;
+    fn list_directory(&self, root: Root, path: &Path) -> BoxedFuture<'static, Result<Vec<FileInfo>, FilesystemError>>;
 }

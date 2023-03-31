@@ -11,7 +11,7 @@ use endian::{LittleEndianU16, LittleEndianU32};
 use super::{
     bpb::BiosParameterBlock,
     path::{Path, PathBuf},
-    FileId, FilePermissions, FileType, Filesystem, FilesystemError, Root,
+    FileId, FileInfo, FilePermissions, FileType, Filesystem, FilesystemError, Root,
 };
 use crate::{
     block_devices::{BlockDevice, DataBlock, DeviceError, SectorIndex},
@@ -411,6 +411,47 @@ impl Filesystem for Fat32 {
             })
         })
     }
+
+    fn list_directory(&self, root: Root, path: &Path) -> BoxedFuture<'static, Result<Vec<FileInfo>, FilesystemError>> {
+        let path = match self.inner().roots.get(&root) {
+            Some(root_path) => root_path.join(path),
+            None => return Box::pin(core::future::ready(Err(FilesystemError::InvalidRoot))),
+        };
+
+        let this = self.cloned();
+        let me = this.inner();
+        let root_directory_cluster = me.root_directory_first_cluster;
+        let first_cluster_sector = me.clusters_start;
+        let sectors_per_cluster = me.sectors_per_cluster;
+        let device = SyncRc::clone(&me.block_device);
+        drop(me);
+
+        Box::pin(async move {
+            let Some(directory) =
+                find_path(&*device, first_cluster_sector, root_directory_cluster, sectors_per_cluster, &path).await? else {
+                    return Err(FilesystemError::DirectoryNotFound);
+                };
+
+            let mut info = Vec::new();
+            let directory_sector = directory.start_cluster().to_sector(first_cluster_sector, sectors_per_cluster);
+            with_directory_entries(&*device, directory_sector, sectors_per_cluster, |name, dir_info| {
+                if let Some(name) = name {
+                    info.push(FileInfo {
+                        filename: name,
+                        file_type: match dir_info.attributes & DirectoryAttributes::SUBDIRECTORY {
+                            true => FileType::Directory,
+                            false => FileType::File,
+                        },
+                    });
+                }
+
+                core::future::ready(ControlFlow::Continue::<(), ()>(()))
+            })
+            .await?;
+
+            Ok(info)
+        })
+    }
 }
 
 async fn find_path(
@@ -483,11 +524,11 @@ async fn with_directory_entries<T, F, Fut>(
     device: &dyn BlockDevice,
     directory_start: SectorIndex,
     sectors_per_cluster: u64,
-    f: F,
+    mut f: F,
 ) -> Result<Option<T>, DeviceError>
 where
     T: 'static,
-    F: Fn(Option<String>, DirectoryData) -> Fut,
+    F: FnMut(Option<String>, DirectoryData) -> Fut,
     Fut: Future<Output = ControlFlow<T>>,
 {
     let mut vlfn = String::new();

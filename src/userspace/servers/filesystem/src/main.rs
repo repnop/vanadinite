@@ -97,7 +97,7 @@ async fn main() {
     let filesystems: SyncRc<[SyncRc<dyn Filesystem>]> = SyncRc::from(filesystems.into_boxed_slice());
 
     let (interrupts, _) = core::pin::Pin::into_inner(init_stream).unmerge();
-    let mut event_stream = interrupts.into_stream().merge(NewChannelListener::new().map(Event::NewChannel));
+    let event_stream = interrupts.into_stream().merge(NewChannelListener::new().map(Event::NewChannel));
     present::pin!(event_stream);
 
     while let Some(event) = event_stream.next().await {
