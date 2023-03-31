@@ -70,9 +70,13 @@ impl TaskLocalAllocator {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let size = usize::max(layout.size(), layout.align().min(4096));
 
-        //println!("Alloc request: {:?}", layout);
-
-        let slab = self.slabs.iter().find(|s| s.0 >= size).ok_or(AllocError)?;
+        // FIXME: this just straight up leaks, so uh, fix that sometime
+        let Some(slab) = self.slabs.iter().find(|s| s.0 >= size) else {
+            match mem::alloc_virtual_memory(Bytes(layout.size()), AllocationOptions::PRIVATE, MemoryPermissions::READ | MemoryPermissions::WRITE) {
+                Result::Ok((_, new_mem)) => return Ok(NonNull::slice_from_raw_parts(NonNull::new(new_mem.cast()).unwrap(), layout.size())),
+                Result::Err(_) => return Err(AllocError),
+            }
+        };
         let mut slab_head = slab.1.get();
 
         if slab_head.is_null() {
@@ -116,7 +120,8 @@ impl TaskLocalAllocator {
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         let size = usize::max(layout.size(), layout.align().min(4096));
-        let slab = self.slabs.iter().find(|s| s.0 >= size).expect("Invalid deallocation");
+        // we do a little bit of memory leaking
+        let Some(slab) = self.slabs.iter().find(|s| s.0 >= size) else { return }; //.expect("Invalid deallocation");
 
         *ptr.as_ptr().cast::<usize>() = slab.1.get() as usize;
         slab.1.set(ptr.as_ptr())
