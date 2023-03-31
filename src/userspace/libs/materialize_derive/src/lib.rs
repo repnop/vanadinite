@@ -6,7 +6,10 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use proc_macro2::Ident;
-use syn::{Attribute, Data, DataEnum, DataStruct, DeriveInput, Lit, LitStr, Meta, NestedMeta, Path};
+use syn::{
+    punctuated::Punctuated, Attribute, Data, DataEnum, DataStruct, DeriveInput, Expr, ExprLit, Lit, LitStr, Meta, Path,
+    Token,
+};
 
 #[proc_macro_derive(Serializable, attributes(materialize))]
 pub fn derive_serializable(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -372,20 +375,19 @@ struct DeriveAttr {
 fn filter_attrs(attrs: &[Attribute]) -> impl Iterator<Item = DeriveAttr> + '_ {
     attrs
         .iter()
-        .filter_map(|attr| attr.parse_meta().ok())
-        .filter_map(|meta| match meta {
-            Meta::List(l) => match l.path.get_ident()? == "materialize" {
-                true => Some(l.nested),
+        .filter_map(|attr| match &attr.meta {
+            Meta::List(l) => match l.path.is_ident("materialize") {
+                true => l.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated).ok(),
                 false => None,
             },
             _ => None,
         })
         .flat_map(|nm| {
             nm.into_iter().filter_map(|meta| match meta {
-                NestedMeta::Meta(Meta::NameValue(nv)) => Some(DeriveAttr {
+                Meta::NameValue(nv) => Some(DeriveAttr {
                     ident: nv.path.get_ident()?.clone(),
-                    value: match nv.lit {
-                        Lit::Str(ls) => Some(ls),
+                    value: match nv.value {
+                        Expr::Lit(ExprLit { lit: Lit::Str(ls), .. }) => Some(ls),
                         _ => None,
                     },
                 }),
@@ -398,16 +400,20 @@ fn repr(attrs: &[Attribute]) -> proc_macro2::TokenStream {
     attrs
         .iter()
         .find_map(|attr| {
-            let meta = attr.parse_meta().ok()?;
-            let Meta::List(list) = meta else { return None };
+            let Meta::List(list) = &attr.meta else { return None };
             if list.path.get_ident()? != "repr" {
                 return None;
             }
 
-            match list.nested.first()? {
-                NestedMeta::Meta(Meta::Path(path)) => Some(quote::quote!(#path)),
-                _ => None,
-            }
+            let mut path = None;
+            list.parse_nested_meta(|meta| {
+                let meta_path = meta.path;
+                path = Some(quote::quote!(#meta_path));
+                Ok(())
+            })
+            .ok()?;
+
+            path
         })
         .unwrap_or_else(|| quote::quote!(isize))
 }

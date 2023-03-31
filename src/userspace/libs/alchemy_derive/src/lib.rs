@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use proc_macro2::Span;
-use syn::{Attribute, GenericParam, Generics, ItemStruct, Meta, NestedMeta};
+use syn::{Attribute, GenericParam, Generics, ItemStruct, Meta};
 
 #[proc_macro_derive(PackedStruct)]
 pub fn derive_packed_struct(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -61,15 +61,16 @@ fn add_packed_struct_generic_bounds(generics: &mut Generics) {
 
 fn check_repr_c_or_transparent(attrs: &[Attribute]) -> Result<(), syn::Error> {
     for attr in attrs {
-        let Meta::List(meta) = attr.parse_meta()? else { continue };
-        let Some(ident) = meta.path.get_ident() else { continue };
-        if ident == "repr" {
-            if let Some(NestedMeta::Meta(Meta::Path(repr))) = meta.nested.first() {
-                let Some(repr) = repr.get_ident() else { continue };
+        let Meta::List(meta) = &attr.meta else { continue };
+        if meta.path.is_ident("repr") {
+            let mut repr = false;
+            meta.parse_nested_meta(|meta| {
+                repr = meta.path.is_ident("C") || meta.path.is_ident("transparent");
+                Ok(())
+            })?;
 
-                if repr == "C" || repr == "transparent" {
-                    return Ok(());
-                }
+            if repr {
+                return Ok(());
             }
         }
     }

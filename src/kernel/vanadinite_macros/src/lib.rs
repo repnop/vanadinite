@@ -232,7 +232,7 @@ impl Parse for ColoredPrint {
             input.parse::<Token![,]>()?;
         }
 
-        let args = input.parse_terminated::<_, Token![,]>(Expr::parse)?.into_iter().collect();
+        let args = input.parse_terminated(Expr::parse, Token![,])?.into_iter().collect();
 
         let (output, used_colors) = Self::process_input_str(&whole_line_color_name, &input_str);
         let output_str = LitStr::new(&output, input_str.span());
