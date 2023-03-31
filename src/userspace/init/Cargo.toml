@@ -7,11 +7,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+fdt = "0.1.4"
+filesystem = { path = "../servers/filesystem" }
 librust = { path = "../../shared/librust" }
 loadelf = { path = "../libs/loadelf" }
-fdt = "0.1.4"
+present = { path = "../libs/present" }
 std = { path = "../libs/std", features = ["init"] }
 tar = { path = "../libs/tar" }
+vidl = { path = "../libs/vidl", features = ["async"] }
+virtio = { path = "../libs/virtio" }
 
 [profile.release]
 debug = false
