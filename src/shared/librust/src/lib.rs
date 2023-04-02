@@ -9,6 +9,7 @@
     adt_const_params,
     allocator_api,
     const_option,
+    const_trait_impl,
     generic_const_exprs,
     inline_const_pat,
     layout_for_ptr,

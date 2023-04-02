@@ -39,6 +39,16 @@ where
     ISR_REGISTRY[interrupt_id].set(f);
 }
 
+pub fn unregister_isr(interrupt_id: usize) -> bool {
+    match ISR_REGISTRY[interrupt_id].f.read().is_some() {
+        true => {
+            let _ = ISR_REGISTRY[interrupt_id].f.write().take();
+            true
+        }
+        false => false,
+    }
+}
+
 pub fn invoke_isr(plic: &Plic, claim: InterruptClaim<'_>, interrupt_id: usize) -> Result<(), &'static str> {
     match ISR_REGISTRY[interrupt_id].f.read().as_ref() {
         Some(f) => f(plic, claim, interrupt_id),

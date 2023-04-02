@@ -48,6 +48,8 @@ impl core::ops::BitAnd for ChannelReadFlags {
     }
 }
 
+/// Attempt to send a message and/or capabilitires on the IPC channel
+/// represented by the given [`CapabilityPtr`]
 pub fn send_message(cptr: CapabilityPtr, message: ChannelMessage, caps: &[Capability]) -> Result<(), SyscallError> {
     let error: usize;
 
@@ -74,12 +76,19 @@ pub fn send_message(cptr: CapabilityPtr, message: ChannelMessage, caps: &[Capabi
     }
 }
 
+/// The result of a successful read from an IPC channel
 pub struct ReadResult {
+    /// Message data
     pub message: ChannelMessage,
+    /// Number of capabilities read
     pub capabilities_read: usize,
+    /// Number of capabilities remaining which can be received by further calls
+    /// to [`read_message`]
     pub capabilities_remaining: usize,
 }
 
+/// Attempt to read a message and/or capabilities from an IPC channel
+/// represented by the given [`CapabilityPtr`]
 pub fn read_message(
     cptr: CapabilityPtr,
     cap_buffer: &mut [CapabilityWithDescription],
@@ -114,19 +123,27 @@ pub fn read_message(
     }
 }
 
+/// A [`CapabilityPtr`] representing the IPC channel to the kernel
 pub const KERNEL_CHANNEL: CapabilityPtr = CapabilityPtr::new(0);
+/// A [`CapabilityPtr`] representing the IPC channel to the parent process
 pub const PARENT_CHANNEL: CapabilityPtr = CapabilityPtr::new(1);
 
+/// See [`KernelMessage::InterruptOccurred`]
 pub const KMSG_INTERRUPT_OCCURRED: usize = 0;
+/// See [`KernelMessage::NewChannelMessage`]
 pub const KMSG_NEW_CHANNEL_MESSAGE: usize = 1;
 
+/// A received kernel IPC channel message
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum KernelMessage {
+    /// An interrupt with the given interrupt ID has occurred
     InterruptOccurred(usize),
+    /// A new channel message is
     NewChannelMessage(CapabilityPtr),
 }
 
 impl KernelMessage {
+    /// Turn the [`KernelMessage`] into its constituent parts
     pub const fn into_parts(self) -> [usize; 7] {
         match self {
             Self::InterruptOccurred(n) => [KMSG_INTERRUPT_OCCURRED, n, 0, 0, 0, 0, 0],
@@ -134,6 +151,8 @@ impl KernelMessage {
         }
     }
 
+    /// Constructs a new [`KernelMessage`] from the raw message parts. Panics on
+    /// an invalid message type.
     pub const fn construct(parts: [usize; 7]) -> Self {
         match parts[0] {
             KMSG_INTERRUPT_OCCURRED => Self::InterruptOccurred(parts[1]),
@@ -149,6 +168,7 @@ impl From<KernelMessage> for [usize; 7] {
     }
 }
 
+/// Read a [`KernelMessage`] from the kernel IPC channel
 pub fn read_kernel_message() -> KernelMessage {
     KernelMessage::construct(read_message(KERNEL_CHANNEL, &mut [], ChannelReadFlags::NONE).unwrap().message.0)
 }

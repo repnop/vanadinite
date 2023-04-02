@@ -5,6 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+pub mod capabilities;
 pub mod channel;
 pub mod io;
 pub mod mem;
@@ -31,6 +32,7 @@ pub enum Syscall {
     MintCapability = 23,
     RevokeCapability = 24,
     EnableNotifications = 25,
+    DeleteCapability = 26,
 }
 
 impl Syscall {
@@ -53,6 +55,7 @@ impl Syscall {
             23 => Some(Self::MintCapability),
             24 => Some(Self::RevokeCapability),
             25 => Some(Self::EnableNotifications),
+            26 => Some(Self::DeleteCapability),
             _ => None,
         }
     }

@@ -46,7 +46,8 @@ impl MemoryPermissions {
     pub const WRITE: Self = Self(1 << 1);
     pub const EXECUTE: Self = Self(1 << 2);
 
-    pub const READ_WRITE: Self = Self(Self::READ.0 | Self::WRITE.0);
+    pub const READ_WRITE: Self = Self::READ | Self::WRITE;
+    pub const RWX: Self = Self::READ | Self::WRITE | Self::EXECUTE;
 
     pub fn new(flags: usize) -> Self {
         Self(flags)
@@ -57,7 +58,7 @@ impl MemoryPermissions {
     }
 }
 
-impl core::ops::BitOr for MemoryPermissions {
+impl const core::ops::BitOr for MemoryPermissions {
     type Output = Self;
 
     fn bitor(self, rhs: Self) -> Self::Output {
@@ -71,7 +72,7 @@ impl core::ops::BitOrAssign for MemoryPermissions {
     }
 }
 
-impl core::ops::BitAnd for MemoryPermissions {
+impl const core::ops::BitAnd for MemoryPermissions {
     type Output = bool;
 
     fn bitand(self, rhs: Self) -> Self::Output {
@@ -101,7 +102,7 @@ impl AllocationOptions {
     }
 }
 
-impl core::ops::BitOr for AllocationOptions {
+impl const core::ops::BitOr for AllocationOptions {
     type Output = Self;
 
     fn bitor(self, rhs: Self) -> Self::Output {
@@ -109,7 +110,7 @@ impl core::ops::BitOr for AllocationOptions {
     }
 }
 
-impl core::ops::BitAnd for AllocationOptions {
+impl const core::ops::BitAnd for AllocationOptions {
     type Output = bool;
 
     fn bitand(self, rhs: Self) -> Self::Output {
@@ -117,6 +118,10 @@ impl core::ops::BitAnd for AllocationOptions {
     }
 }
 
+/// Attempt to allocate a region of virtual memory with the given size, options,
+/// and permissions. A [`CapabilityPtr`] and slice pointer are returned,
+/// allowing the region to be dellocated and shared between processes if
+/// desired.
 #[inline]
 pub fn alloc_virtual_memory(
     size: Bytes,
@@ -144,10 +149,14 @@ pub fn alloc_virtual_memory(
     }
 }
 
+/// Allocation options when attempting to allocate a region of
+/// device-addressable memory
 pub struct DmaAllocationOptions(usize);
 
 impl DmaAllocationOptions {
+    /// No flags
     pub const NONE: Self = Self(0);
+    /// Zero the memory before receiving it
     pub const ZERO: Self = Self(1 << 1);
 
     pub fn new(flags: usize) -> Self {
@@ -159,7 +168,7 @@ impl DmaAllocationOptions {
     }
 }
 
-impl core::ops::BitOr for DmaAllocationOptions {
+impl const core::ops::BitOr for DmaAllocationOptions {
     type Output = Self;
 
     fn bitor(self, rhs: Self) -> Self::Output {
@@ -167,7 +176,7 @@ impl core::ops::BitOr for DmaAllocationOptions {
     }
 }
 
-impl core::ops::BitAnd for DmaAllocationOptions {
+impl const core::ops::BitAnd for DmaAllocationOptions {
     type Output = bool;
 
     fn bitand(self, rhs: Self) -> Self::Output {
@@ -175,6 +184,12 @@ impl core::ops::BitAnd for DmaAllocationOptions {
     }
 }
 
+/// Attempt to allocate a region of memory, which the physical address of can be
+/// given to devices.
+///
+/// FIXME: This should require a `SyscallCapability` or some such, and
+/// eventually be removed in favor of an IOMMU-based approach
+#[inline]
 pub fn alloc_dma_memory(
     size_in_bytes: usize,
     options: DmaAllocationOptions,

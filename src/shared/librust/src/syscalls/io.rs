@@ -11,6 +11,10 @@ use crate::{
     error::{RawSyscallError, SyscallError},
 };
 
+/// Attempt to claim a device from the devicetree and receive an MMIO capability
+/// to it.
+///
+/// FIXME: This should require a specific `SyscallCapability` of some kind
 #[inline]
 pub fn claim_device(node: &str) -> Result<CapabilityPtr, SyscallError> {
     let error: usize;
@@ -31,6 +35,7 @@ pub fn claim_device(node: &str) -> Result<CapabilityPtr, SyscallError> {
     }
 }
 
+/// Mark a pending interrupt ID as having been serviced
 #[inline]
 pub fn complete_interrupt(interrupt_id: usize) -> Result<(), SyscallError> {
     let error: usize;
@@ -52,6 +57,7 @@ pub fn complete_interrupt(interrupt_id: usize) -> Result<(), SyscallError> {
 unsafe impl Send for MmioCapabilityInfo {}
 unsafe impl Sync for MmioCapabilityInfo {}
 
+/// Information pertaining to a specific MMIO resource
 pub struct MmioCapabilityInfo {
     address: *mut u8,
     len: usize,
@@ -59,19 +65,26 @@ pub struct MmioCapabilityInfo {
 }
 
 impl MmioCapabilityInfo {
+    /// Starting address of the MMIO region
     pub fn address(&self) -> *mut u8 {
         self.address
     }
 
+    /// Length of the MMIO region
     pub fn len(&self) -> usize {
         self.len
     }
 
+    /// Number of interrupts that the MMIO region has associated with it
     pub fn total_interrupts(&self) -> usize {
         self.n_interrupts
     }
 }
 
+/// Attempt to query an MMIO capability represented by the [`CapabilityPtr`],
+/// returning information about the region and how many interrupts were read
+/// into `interrupt_buffer`
+#[inline]
 pub fn query_mmio_cap(
     cptr: CapabilityPtr,
     interrupt_buffer: &mut [usize],

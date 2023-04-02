@@ -5,6 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+pub mod capabilities;
 pub mod channel;
 pub mod io;
 pub mod mem;
@@ -65,6 +66,7 @@ pub fn handle(frame: &mut TrapFrame) {
         Syscall::MintCapability => todo!(),
         Syscall::RevokeCapability => todo!(),
         Syscall::EnableNotifications => Ok(task.mutable_state.lock().subscribes_to_events = true),
+        Syscall::DeleteCapability => capabilities::delete(task, regs),
     };
 
     match res {
