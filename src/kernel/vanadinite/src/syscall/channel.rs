@@ -213,7 +213,7 @@ pub fn send_message(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sys
                 match task_state.cspace.resolve(cptr) {
                     Some(cap) if cap.rights.is_superset(rights) && cap.rights & CapabilityRights::GRANT => {
                         // Can't allow sending invalid memory permissions
-                        if let CapabilityResource::Memory(..) = &cap.resource {
+                        if let CapabilityResource::SharedMemory(..) = &cap.resource {
                             if cap.rights & CapabilityRights::WRITE && !(cap.rights & CapabilityRights::READ) {
                                 return Err(SyscallError::InvalidArgument(2));
                             }
@@ -322,7 +322,7 @@ pub fn read_message(task: &Task, regs: &mut GeneralRegisters) -> Result<(), Sysc
 
                         (cptr, librust::capabilities::CapabilityDescription::Channel)
                     }
-                    CapabilityResource::Memory(region, _, kind) => {
+                    CapabilityResource::SharedMemory(region, _, kind) => {
                         let mut permissions = MemoryPermissions::new(0);
                         let mut memflags = Flags::VALID | Flags::USER;
 
@@ -344,7 +344,7 @@ pub fn read_message(task: &Task, regs: &mut GeneralRegisters) -> Result<(), Sysc
                         let addr = task_state.memory_manager.apply_shared_region(None, memflags, region.clone(), kind);
 
                         let cptr = task_state.cspace.mint(Capability {
-                            resource: CapabilityResource::Memory(region, addr.clone(), kind),
+                            resource: CapabilityResource::SharedMemory(region, addr.clone(), kind),
                             rights,
                         });
 

@@ -11,13 +11,9 @@ use crate::{
 };
 use core::{future::Future, pin::Pin};
 use librust::{
-    capabilities::{Capability, CapabilityDescription, CapabilityPtr, CapabilityRights, CapabilityWithDescription},
+    capabilities::{Capability, CapabilityPtr, CapabilityWithDescription},
     error::SyscallError,
-    syscalls::{
-        channel::{self, ChannelMessage, ChannelReadFlags, ReadResult, KERNEL_CHANNEL},
-        mem::{AllocationOptions, MemoryPermissions},
-    },
-    units::Bytes,
+    syscalls::channel::{self, ChannelMessage, ChannelReadFlags, ReadResult, KERNEL_CHANNEL},
 };
 use std::task::{Context, Poll};
 
@@ -88,44 +84,6 @@ impl IpcChannel {
 
     pub fn send(&self, msg: ChannelMessage, caps: &[Capability]) -> Result<(), SyscallError> {
         channel::send_message(self.0, msg, caps)
-    }
-
-    pub fn temp_send_json<T: json::deser::Serialize<Vec<u8>>>(
-        &self,
-        message: ChannelMessage,
-        t: &T,
-        other_caps: &[Capability],
-    ) -> Result<(), SyscallError> {
-        let serialized = json::to_bytes(t);
-        let (cptr, ptr) = librust::syscalls::mem::alloc_virtual_memory(
-            Bytes(serialized.len()),
-            AllocationOptions::NONE,
-            MemoryPermissions::READ | MemoryPermissions::WRITE,
-        )?;
-        unsafe { (*ptr)[..serialized.len()].copy_from_slice(&serialized) };
-        if other_caps.is_empty() {
-            channel::send_message(self.0, message, &[Capability { cptr, rights: CapabilityRights::READ }])
-        } else {
-            let mut all_caps = vec![Capability { cptr, rights: CapabilityRights::READ }];
-            all_caps.extend_from_slice(other_caps);
-            channel::send_message(self.0, message, &all_caps)
-        }
-    }
-
-    pub async fn temp_read_json<T: json::deser::Deserialize>(
-        &self,
-    ) -> Result<(T, ChannelMessage, Vec<CapabilityWithDescription>), SyscallError> {
-        let (msg, mut caps) = self.read_with_all_caps().await?;
-        let t = match caps.remove(0) {
-            CapabilityWithDescription {
-                capability: _,
-                description: CapabilityDescription::Memory { ptr, len, permissions: _ },
-            } => json::deserialize(unsafe { core::slice::from_raw_parts(ptr, len) })
-                .expect("failed to deserialize JSON in channel message"),
-            _ => panic!("no or invalid mem cap"),
-        };
-
-        Ok((t, msg, caps))
     }
 }
 

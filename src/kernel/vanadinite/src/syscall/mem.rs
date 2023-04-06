@@ -8,29 +8,28 @@
 use crate::{
     capabilities::{Capability, CapabilityResource},
     mem::{
-        manager::{AddressRegionKind, FillOption, RegionDescription},
+        manager::{AddressRegion, AddressRegionKind, FillOption, RegionDescription},
         paging::{flags::Flags, PageSize, VirtualAddress},
         user::{RawUserSlice, ReadWrite, ValidatedUserSlice},
     },
     task::Task,
     trap::GeneralRegisters,
-    utils,
+    utils::{self, Units},
 };
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
     error::SyscallError,
-    syscalls::mem::{AllocationOptions, DmaAllocationOptions, MemoryPermissions},
+    syscalls::mem::{DmaAllocationOptions, MemoryPermissions},
 };
 
-pub fn alloc_virtual_memory(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+pub fn allocate_shared_memory(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let mut task = task.mutable_state.lock();
 
     let size = frame.a1;
-    let options = AllocationOptions::new(frame.a2);
-    let permissions = MemoryPermissions::new(frame.a3);
+    let permissions = MemoryPermissions::new(frame.a2);
 
     if permissions & MemoryPermissions::WRITE && !(permissions & MemoryPermissions::READ) {
-        return Err(SyscallError::InvalidArgument(2));
+        return Err(SyscallError::InvalidArgument(1));
     }
 
     let mut flags = Flags::VALID | Flags::USER;
@@ -47,70 +46,44 @@ pub fn alloc_virtual_memory(task: &Task, frame: &mut GeneralRegisters) -> Result
         flags |= Flags::EXECUTE;
     }
 
-    let page_size = if options & AllocationOptions::LARGE_PAGE { PageSize::Megapage } else { PageSize::Kilopage };
+    let page_size = if size >= 2.mib() { PageSize::Megapage } else { PageSize::Kilopage };
 
     match size {
         0 => Err(SyscallError::InvalidArgument(0)),
         _ => {
-            let (cptr, allocated_at) = if options & AllocationOptions::PRIVATE {
-                let allocated_at = task.memory_manager.alloc_region(
-                    None,
-                    RegionDescription {
-                        size: page_size,
-                        count: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
-                        contiguous: false,
-                        flags,
-                        fill: if options & AllocationOptions::ZERO {
-                            FillOption::Zeroed
-                        } else {
-                            FillOption::Unitialized
-                        },
-                        kind: AddressRegionKind::UserAllocated,
-                    },
-                );
+            let (allocated_at, region) = task.memory_manager.alloc_shared_region(
+                None,
+                RegionDescription {
+                    size: page_size,
+                    count: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
+                    contiguous: false,
+                    flags,
+                    fill: FillOption::Zeroed,
+                    kind: AddressRegionKind::UserAllocated,
+                },
+            );
 
-                (CapabilityPtr::new(usize::MAX), allocated_at)
-            } else {
-                let (allocated_at, region) = task.memory_manager.alloc_shared_region(
-                    None,
-                    RegionDescription {
-                        size: page_size,
-                        count: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
-                        contiguous: false,
-                        flags,
-                        fill: if options & AllocationOptions::ZERO {
-                            FillOption::Zeroed
-                        } else {
-                            FillOption::Unitialized
-                        },
-                        kind: AddressRegionKind::UserAllocated,
-                    },
-                );
-
-                let rights = match (
-                    permissions & MemoryPermissions::READ,
-                    permissions & MemoryPermissions::WRITE,
-                    permissions & MemoryPermissions::EXECUTE,
-                ) {
-                    (true, true, true) => CapabilityRights::READ | CapabilityRights::WRITE | CapabilityRights::EXECUTE,
-                    (true, true, false) => CapabilityRights::READ | CapabilityRights::WRITE,
-                    (true, false, false) => CapabilityRights::READ,
-                    (r, w, x) => unreachable!("read={r} write={w} execute={x}"),
-                };
-
-                let cptr = task.cspace.mint(Capability {
-                    resource: CapabilityResource::Memory(
-                        region,
-                        allocated_at.clone(),
-                        AddressRegionKind::UserAllocated,
-                    ),
-                    rights: rights | CapabilityRights::GRANT,
-                });
-
-                (cptr, allocated_at)
+            let rights = match (
+                permissions & MemoryPermissions::READ,
+                permissions & MemoryPermissions::WRITE,
+                permissions & MemoryPermissions::EXECUTE,
+            ) {
+                (true, true, true) => CapabilityRights::READ | CapabilityRights::WRITE | CapabilityRights::EXECUTE,
+                (true, true, false) => CapabilityRights::READ | CapabilityRights::WRITE,
+                (true, false, false) => CapabilityRights::READ,
+                (r, w, x) => unreachable!("read={r} write={w} execute={x}"),
             };
 
-            log::trace!("Allocated memory at {:#p} ({:?}) for user process", allocated_at.start, page_size);
+            let cptr = task.cspace.mint(Capability {
+                resource: CapabilityResource::SharedMemory(
+                    region,
+                    allocated_at.clone(),
+                    AddressRegionKind::UserSharedMemory,
+                ),
+                rights: rights | CapabilityRights::GRANT,
+            });
+
+            log::trace!("Allocated shared memory at {:#p} ({:?}) for user process", allocated_at.start, page_size);
 
             frame.a1 = cptr.value();
             frame.a2 = allocated_at.start.as_usize();
@@ -121,7 +94,72 @@ pub fn alloc_virtual_memory(task: &Task, frame: &mut GeneralRegisters) -> Result
     }
 }
 
-pub fn alloc_dma_memory(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+pub fn allocate_virtual_memory(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+    let mut task = task.mutable_state.lock();
+
+    let size = frame.a1;
+    let permissions = MemoryPermissions::new(frame.a2);
+
+    if permissions & MemoryPermissions::WRITE && !(permissions & MemoryPermissions::READ) {
+        return Err(SyscallError::InvalidArgument(1));
+    }
+
+    let mut flags = Flags::VALID | Flags::USER;
+
+    if permissions & MemoryPermissions::READ {
+        flags |= Flags::READ;
+    }
+
+    if permissions & MemoryPermissions::WRITE {
+        flags |= Flags::WRITE;
+    }
+
+    if permissions & MemoryPermissions::EXECUTE {
+        flags |= Flags::EXECUTE;
+    }
+
+    let page_size = if size >= 2.mib() { PageSize::Megapage } else { PageSize::Kilopage };
+
+    match size {
+        0 => Err(SyscallError::InvalidArgument(0)),
+        _ => {
+            let allocated_at = task.memory_manager.alloc_region(
+                None,
+                RegionDescription {
+                    size: page_size,
+                    count: utils::round_up_to_next(size, page_size.to_byte_size()) / page_size.to_byte_size(),
+                    contiguous: false,
+                    flags,
+                    fill: FillOption::Zeroed,
+                    kind: AddressRegionKind::UserAllocated,
+                },
+            );
+
+            log::trace!("Allocated memory at {:#p} ({:?}) for user process", allocated_at.start, page_size);
+
+            frame.a1 = allocated_at.start.as_usize();
+            frame.a2 = allocated_at.end.as_usize() - allocated_at.start.as_usize();
+
+            Ok(())
+        }
+    }
+}
+
+pub fn deallocate_virtual_memory(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+    let mut task = task.mutable_state.lock();
+    let address = VirtualAddress::new(frame.a1);
+
+    match task.memory_manager.region_for(address) {
+        Some(AddressRegion { kind: AddressRegionKind::UserAllocated, .. }) => {}
+        Some(_) | None => return Err(SyscallError::InvalidArgument(0)),
+    }
+
+    task.memory_manager.dealloc_region(address);
+
+    Ok(())
+}
+
+pub fn allocate_device_addressable_memory(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let size = frame.a1;
     let options = DmaAllocationOptions::new(frame.a2);
     let page_size = PageSize::Kilopage;
@@ -161,7 +199,7 @@ pub fn query_mem_cap(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
     let cptr = CapabilityPtr::new(frame.a1);
 
     match task.mutable_state.lock().cspace.resolve(cptr) {
-        Some(Capability { resource: CapabilityResource::Memory(_, vmem, _), rights }) => {
+        Some(Capability { resource: CapabilityResource::SharedMemory(_, vmem, _), rights }) => {
             let memory_perms = match (*rights & CapabilityRights::READ, *rights & CapabilityRights::WRITE) {
                 (true, true) => MemoryPermissions::READ | MemoryPermissions::WRITE,
                 (true, false) => MemoryPermissions::READ,

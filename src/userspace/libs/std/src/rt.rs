@@ -57,9 +57,22 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8, _: u8) ->
 
     let mut map = crate::env::CAP_MAP.borrow_mut();
     let channel = crate::ipc::IpcChannel::new(PARENT_CHANNEL);
-    // FIXME: Wowie is this some awful code!
-    if let Ok((names, _, caps)) = channel.temp_read_json::<Vec<String>>(ChannelReadFlags::NONE) {
+
+    // FIXME: This is an inlined version of temp_read_json, replace this!
+    if let Ok((_, mut caps)) = channel.read_with_all_caps(ChannelReadFlags::NONE) {
+        let names: Vec<String> = match caps.remove(0) {
+            CapabilityWithDescription {
+                capability: _,
+                description: CapabilityDescription::Memory { ptr, len, permissions: _ },
+            } => json::deserialize(unsafe { core::slice::from_raw_parts(ptr, len) })
+                .expect("failed to deserialize JSON in channel message"),
+            _ => panic!("no or invalid mem cap"),
+        };
+
+        println!("{names:?}");
+
         for (name, cap) in names.into_iter().zip(caps) {
+            println!("{name:?} {cap:?}");
             map.insert(name, cap);
         }
     }

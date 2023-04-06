@@ -49,12 +49,28 @@ impl Vmspace {
     }
 
     pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<CapabilityPtr, SyscallError> {
-        let cptr = vmspace::spawn_vmspace(self.id, &self.name, env)?;
+        let task_cptr = vmspace::spawn_vmspace(self.id, &self.name, env)?;
 
-        let channel = crate::ipc::IpcChannel::new(cptr);
-        channel.temp_send_json(ChannelMessage::default(), &self.names, &self.caps_to_send[..])?;
+        // FIXME: this is an inlined version of `temp_send_json`, replace this!
+        let serialized = json::to_bytes(&self.names);
+        let (cptr, ptr) = librust::syscalls::mem::allocate_shared_memory(
+            librust::units::Bytes(serialized.len()),
+            MemoryPermissions::READ | MemoryPermissions::WRITE,
+        )?;
+        unsafe { (*ptr)[..serialized.len()].copy_from_slice(&serialized) };
+        if self.caps_to_send.is_empty() {
+            librust::syscalls::channel::send_message(
+                task_cptr,
+                ChannelMessage::default(),
+                &[Capability { cptr, rights: CapabilityRights::READ }],
+            )?;
+        } else {
+            let mut all_caps = vec![Capability { cptr, rights: CapabilityRights::READ }];
+            all_caps.extend_from_slice(&self.caps_to_send);
+            librust::syscalls::channel::send_message(task_cptr, ChannelMessage::default(), &all_caps)?;
+        }
 
-        Ok(cptr)
+        Ok(task_cptr)
     }
 
     pub fn grant(&mut self, name: &str, cptr: CapabilityPtr, rights: CapabilityRights) {

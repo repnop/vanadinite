@@ -17,7 +17,7 @@ macro_rules! vidl_include {
 #[doc(hidden)]
 pub use librust::{
     capabilities::{Capability, CapabilityDescription, CapabilityPtr, CapabilityRights, CapabilityWithDescription},
-    mem::MemoryAllocation,
+    mem::SharedMemoryAllocation,
     syscalls::channel::{ChannelMessage, ChannelReadFlags},
     units::Bytes,
 };

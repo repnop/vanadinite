@@ -87,6 +87,6 @@ pub struct Capability {
 #[derive(Debug, Clone)]
 pub enum CapabilityResource {
     Channel(UserspaceChannel),
-    Memory(SharedPhysicalRegion, Range<VirtualAddress>, AddressRegionKind),
+    SharedMemory(SharedPhysicalRegion, Range<VirtualAddress>, AddressRegionKind),
     Mmio(Range<PhysicalAddress>, Range<VirtualAddress>, alloc::vec::Vec<usize>),
 }

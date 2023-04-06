@@ -12,11 +12,7 @@ use core::{
     ops::{Deref, DerefMut},
     ptr::NonNull,
 };
-use librust::{
-    mem::MemoryAllocation,
-    syscalls::mem::{AllocationOptions, MemoryPermissions},
-    units::Bytes,
-};
+use librust::{mem::SharedMemoryAllocation, syscalls::mem::MemoryPermissions, units::Bytes};
 
 pub struct AlignedBuffer<MODE: BufferMode> {
     buffer: MODE::Buffer,
@@ -34,7 +30,7 @@ pub trait BufferMode {
 pub struct SharableMemory;
 
 pub struct MemoryCapabilityBuffer {
-    mem: MemoryAllocation,
+    mem: SharedMemoryAllocation,
     len: usize,
 }
 
@@ -42,11 +38,8 @@ impl MemoryCapabilityBuffer {
     const MAX_CAPACITY: usize = isize::MAX as usize;
 
     pub fn new(starting_capacity: usize) -> Result<Self, librust::error::SyscallError> {
-        let mem = MemoryAllocation::new(
-            Bytes(starting_capacity),
-            AllocationOptions::ZERO,
-            MemoryPermissions::READ | MemoryPermissions::WRITE,
-        )?;
+        let mem =
+            SharedMemoryAllocation::new(Bytes(starting_capacity), MemoryPermissions::READ | MemoryPermissions::WRITE)?;
 
         Ok(Self { mem, len: 0 })
     }
@@ -72,11 +65,8 @@ impl MemoryCapabilityBuffer {
         }
 
         let capacity = new_len.next_power_of_two().min(Self::MAX_CAPACITY);
-        let mut new_buffer = MemoryAllocation::new(
-            Bytes(capacity),
-            AllocationOptions::ZERO,
-            MemoryPermissions::READ | MemoryPermissions::WRITE,
-        )?;
+        let mut new_buffer =
+            SharedMemoryAllocation::new(Bytes(capacity), MemoryPermissions::READ | MemoryPermissions::WRITE)?;
 
         unsafe { new_buffer.as_mut()[..self.len].copy_from_slice(&self.mem.as_ref()[..self.len]) };
         // TODO: free old capability memory when that's a thing

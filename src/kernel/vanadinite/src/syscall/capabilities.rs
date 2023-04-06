@@ -22,9 +22,9 @@ pub fn delete(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallEr
 
     match capability.resource {
         CapabilityResource::Channel(channel) => drop(channel),
-        CapabilityResource::Memory(_, range, kind) => {
+        CapabilityResource::SharedMemory(_, range, kind) => {
             log::debug!("Freeing virtual memory @ {:?}", range);
-            assert_eq!(kind, AddressRegionKind::UserAllocated);
+            assert_eq!(kind, AddressRegionKind::UserSharedMemory);
             task.memory_manager.dealloc_region(range.start);
         }
         CapabilityResource::Mmio(_, range, interrupts) => {

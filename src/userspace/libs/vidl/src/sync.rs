@@ -9,7 +9,7 @@ use core::ptr::NonNull;
 use librust::{
     capabilities::{Capability, CapabilityPtr, CapabilityRights},
     error::SyscallError,
-    syscalls::mem::{alloc_virtual_memory, AllocationOptions, MemoryPermissions},
+    syscalls::mem::{allocate_shared_memory, MemoryPermissions},
     units::Bytes,
 };
 use materialize::DeserializeError;
@@ -21,7 +21,7 @@ pub struct SharedBuffer {
 
 impl SharedBuffer {
     pub fn new(size: usize) -> Result<Self, SyscallError> {
-        let (cptr, memory) = alloc_virtual_memory(Bytes(size), AllocationOptions::ZERO, MemoryPermissions::READ_WRITE)?;
+        let (cptr, memory) = allocate_shared_memory(Bytes(size), MemoryPermissions::READ_WRITE)?;
 
         Ok(Self {
             cptr,

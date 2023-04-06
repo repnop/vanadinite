@@ -12,7 +12,7 @@ use core::{
     ptr::{self, NonNull},
 };
 use librust::{
-    syscalls::mem::{self, AllocationOptions, MemoryPermissions},
+    syscalls::mem::{self, MemoryPermissions},
     units::Bytes,
 };
 
@@ -72,8 +72,8 @@ impl TaskLocalAllocator {
 
         // FIXME: this just straight up leaks, so uh, fix that sometime
         let Some(slab) = self.slabs.iter().find(|s| s.0 >= size) else {
-            match mem::alloc_virtual_memory(Bytes(layout.size()), AllocationOptions::PRIVATE, MemoryPermissions::READ | MemoryPermissions::WRITE) {
-                Result::Ok((_, new_mem)) => return Ok(NonNull::slice_from_raw_parts(NonNull::new(new_mem.cast()).unwrap(), layout.size())),
+            match mem::allocate_virtual_memory(Bytes(layout.size()), MemoryPermissions::READ | MemoryPermissions::WRITE) {
+                Result::Ok(new_mem) => return Ok(NonNull::slice_from_raw_parts(NonNull::new(new_mem.cast()).unwrap(), layout.size())),
                 Result::Err(_) => return Err(AllocError),
             }
         };
@@ -84,14 +84,7 @@ impl TaskLocalAllocator {
 
             let mem_size = slab.0 * 64;
             let perms = MemoryPermissions::READ | MemoryPermissions::WRITE;
-            let mut options = AllocationOptions::PRIVATE;
-
-            if mem_size >= 2 * 1024 * 1024 {
-                //println!("Asking for large pages");
-                options = options | AllocationOptions::LARGE_PAGE;
-            }
-
-            let (_, new_mem) = match mem::alloc_virtual_memory(Bytes(mem_size), options, perms) {
+            let new_mem = match mem::allocate_virtual_memory(Bytes(mem_size), perms) {
                 Result::Ok(new_mem) => new_mem,
                 Result::Err(_) => return Err(AllocError),
             };

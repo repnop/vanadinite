@@ -80,52 +80,59 @@ impl const core::ops::BitAnd for MemoryPermissions {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-#[repr(transparent)]
-pub struct AllocationOptions(usize);
-
-impl AllocationOptions {
-    pub const NONE: Self = Self(0);
-    pub const LARGE_PAGE: Self = Self(1 << 0);
-    pub const ZERO: Self = Self(1 << 1);
-    pub const ZERO_ON_DROP: Self = Self(1 << 2);
-    pub const LAZY: Self = Self(1 << 3);
-    pub const JOB_GROUP_AVAILABLE: Self = Self(1 << 4);
-    pub const PRIVATE: Self = Self(1 << 5);
-
-    pub fn new(flags: usize) -> Self {
-        Self(flags)
-    }
-
-    pub fn value(self) -> usize {
-        self.0
-    }
-}
-
-impl const core::ops::BitOr for AllocationOptions {
-    type Output = Self;
-
-    fn bitor(self, rhs: Self) -> Self::Output {
-        Self(self.0 | rhs.0)
-    }
-}
-
-impl const core::ops::BitAnd for AllocationOptions {
-    type Output = bool;
-
-    fn bitand(self, rhs: Self) -> Self::Output {
-        self.0 & rhs.0 == rhs.0
-    }
-}
-
 /// Attempt to allocate a region of virtual memory with the given size, options,
 /// and permissions. A [`CapabilityPtr`] and slice pointer are returned,
 /// allowing the region to be dellocated and shared between processes if
 /// desired.
 #[inline]
-pub fn alloc_virtual_memory(
+pub fn allocate_virtual_memory(size: Bytes, perms: MemoryPermissions) -> Result<*mut [u8], SyscallError> {
+    let error: usize;
+    let virt: *mut u8;
+    let real_size: usize;
+
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inlateout("a0") Syscall::AllocateVirtualMemory as usize => error,
+            inlateout("a1") size.0 => virt,
+            inlateout("a2") perms.0 => real_size,
+        );
+    }
+
+    match RawSyscallError::optional(error) {
+        Some(error) => Err(error.cook()),
+        None => Ok(core::ptr::slice_from_raw_parts_mut(virt, real_size)),
+    }
+}
+
+/// Deallocate a region of private virtual memory
+///
+/// ## Safety
+///
+/// The memory region specified by the address in `at` must not be accessed
+/// after calling this function, otherwise accesses will result in undefined
+/// behavior, and likely a fault, causing termination of the process.
+#[inline]
+pub unsafe fn deallocate_virtual_memory(at: *mut u8) -> Result<(), SyscallError> {
+    let error: usize;
+
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inlateout("a0") Syscall::AllocateVirtualMemory as usize => error,
+            in("a1") at,
+        );
+    }
+
+    match RawSyscallError::optional(error) {
+        Some(error) => Err(error.cook()),
+        None => Ok(()),
+    }
+}
+
+#[inline]
+pub fn allocate_shared_memory(
     size: Bytes,
-    options: AllocationOptions,
     perms: MemoryPermissions,
 ) -> Result<(CapabilityPtr, *mut [u8]), SyscallError> {
     let error: usize;
@@ -136,10 +143,10 @@ pub fn alloc_virtual_memory(
     unsafe {
         core::arch::asm!(
             "ecall",
-            inlateout("a0") Syscall::AllocVirtualMemory as usize => error,
+            inlateout("a0") Syscall::AllocateSharedMemory as usize => error,
             inlateout("a1") size.0 => cptr,
-            inlateout("a2") options.0 => virt,
-            inlateout("a3") perms.0 => real_size,
+            inlateout("a2") perms.0 => virt,
+            lateout("a3") real_size,
         );
     }
 
@@ -190,8 +197,8 @@ impl const core::ops::BitAnd for DmaAllocationOptions {
 /// FIXME: This should require a `SyscallCapability` or some such, and
 /// eventually be removed in favor of an IOMMU-based approach
 #[inline]
-pub fn alloc_dma_memory(
-    size_in_bytes: usize,
+pub fn allocate_device_addressable_memory(
+    size: Bytes,
     options: DmaAllocationOptions,
 ) -> Result<(PhysicalAddress, NonNull<u8>), SyscallError> {
     let error: usize;
@@ -201,8 +208,8 @@ pub fn alloc_dma_memory(
     unsafe {
         core::arch::asm!(
             "ecall",
-            inlateout("a0") Syscall::AllocDmaMemory as usize => error,
-            inlateout("a1") size_in_bytes => phys,
+            inlateout("a0") Syscall::AllocateDeviceAddressableMemory as usize => error,
+            inlateout("a1") size.0 => phys,
             inlateout("a2") options.0 => virt,
         );
     }

@@ -71,6 +71,7 @@ impl MmioCapabilityInfo {
     }
 
     /// Length of the MMIO region
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.len
     }

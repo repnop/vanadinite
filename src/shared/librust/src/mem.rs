@@ -8,7 +8,7 @@
 use crate::{
     capabilities::CapabilityPtr,
     error::SyscallError,
-    syscalls::mem::{alloc_dma_memory, AllocationOptions, DmaAllocationOptions, MemoryPermissions},
+    syscalls::mem::{allocate_device_addressable_memory, DmaAllocationOptions, MemoryPermissions},
     units::Bytes,
 };
 use core::{
@@ -16,14 +16,14 @@ use core::{
     ptr::{NonNull, Pointee},
 };
 
-pub struct MemoryAllocation {
+pub struct SharedMemoryAllocation {
     pub cptr: CapabilityPtr,
     ptr: NonNull<[u8]>,
 }
 
-impl MemoryAllocation {
-    pub fn new(size: Bytes, options: AllocationOptions, permissions: MemoryPermissions) -> Result<Self, SyscallError> {
-        let (cptr, ptr) = crate::syscalls::mem::alloc_virtual_memory(size, options, permissions)?;
+impl SharedMemoryAllocation {
+    pub fn new(size: Bytes, permissions: MemoryPermissions) -> Result<Self, SyscallError> {
+        let (cptr, ptr) = crate::syscalls::mem::allocate_shared_memory(size, permissions)?;
 
         Ok(Self {
             cptr,
@@ -34,11 +34,11 @@ impl MemoryAllocation {
     }
 
     pub fn public_rw(size: Bytes) -> Result<Self, SyscallError> {
-        Self::new(size, AllocationOptions::ZERO, MemoryPermissions::READ | MemoryPermissions::WRITE)
+        Self::new(size, MemoryPermissions::READ | MemoryPermissions::WRITE)
     }
 
     pub fn private_rw(size: Bytes) -> Result<Self, SyscallError> {
-        Self::new(size, AllocationOptions::PRIVATE, MemoryPermissions::READ | MemoryPermissions::WRITE).map(|mut s| {
+        Self::new(size, MemoryPermissions::READ | MemoryPermissions::WRITE).map(|mut s| {
             s.cptr = CapabilityPtr::new(usize::MAX);
             s
         })
@@ -118,12 +118,12 @@ pub struct DmaRegion<T: ?Sized> {
 
 impl<T: Sized> DmaRegion<[MaybeUninit<T>]> {
     pub fn new_many(n_elements: usize) -> Result<Self, SyscallError> {
-        alloc_dma_memory(n_elements * core::mem::size_of::<T>(), DmaAllocationOptions::NONE)
+        allocate_device_addressable_memory(Bytes(n_elements * core::mem::size_of::<T>()), DmaAllocationOptions::NONE)
             .map(|(phys, virt)| Self { phys, virt: NonNull::slice_from_raw_parts(virt.cast(), n_elements) })
     }
 
     pub unsafe fn zeroed_many(n_elements: usize) -> Result<Self, SyscallError> {
-        alloc_dma_memory(n_elements * core::mem::size_of::<T>(), DmaAllocationOptions::ZERO)
+        allocate_device_addressable_memory(Bytes(n_elements * core::mem::size_of::<T>()), DmaAllocationOptions::ZERO)
             .map(|(phys, virt)| Self { phys, virt: NonNull::slice_from_raw_parts(virt.cast(), n_elements) })
     }
 
@@ -155,7 +155,7 @@ impl<T: ?Sized> DmaRegion<T> {
         let size = core::mem::size_of_val_raw::<T>(core::ptr::from_raw_parts(core::ptr::null(), metadata));
         let opts = if zero { DmaAllocationOptions::ZERO } else { DmaAllocationOptions::NONE };
 
-        alloc_dma_memory(size, opts)
+        allocate_device_addressable_memory(Bytes(size), opts)
             .map(|(phys, virt)| Self { phys, virt: NonNull::from_raw_parts(virt.cast(), metadata) })
     }
 
@@ -173,7 +173,8 @@ impl<T> DmaRegion<MaybeUninit<T>> {
     where
         T: Pointee<Metadata = ()>,
     {
-        let (phys, virt) = alloc_dma_memory(core::mem::size_of::<T>(), DmaAllocationOptions::NONE)?;
+        let (phys, virt) =
+            allocate_device_addressable_memory(Bytes(core::mem::size_of::<T>()), DmaAllocationOptions::NONE)?;
         Result::Ok(Self { phys, virt: NonNull::from_raw_parts(virt.cast(), ()) })
     }
 
@@ -181,7 +182,8 @@ impl<T> DmaRegion<MaybeUninit<T>> {
     where
         T: Pointee<Metadata = ()>,
     {
-        let (phys, virt) = alloc_dma_memory(core::mem::size_of::<T>(), DmaAllocationOptions::ZERO)?;
+        let (phys, virt) =
+            allocate_device_addressable_memory(Bytes(core::mem::size_of::<T>()), DmaAllocationOptions::ZERO)?;
         Result::Ok(Self { phys, virt: NonNull::from_raw_parts(virt.cast(), ()) })
     }
 

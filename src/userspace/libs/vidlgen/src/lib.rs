@@ -168,7 +168,7 @@ impl<T: {0}Provider> {0}<T> {{
                     let mut serializer = vidl::materialize::Serializer::new();
                     serializer.serialize(&response).unwrap();
                     let (buffer, mut caps) = serializer.into_parts();
-                    let mut mem = vidl::MemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
+                    let mut mem = vidl::SharedMemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
                     unsafe {{ mem.as_mut()[..buffer.len()].copy_from_slice(&buffer) }};
                     caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
                     let _ = channel.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]);
@@ -281,7 +281,7 @@ impl {0}Client {{
 
         compiled.write_fmt(format_args!(r#")).unwrap();
         let (buffer, mut caps) = serializer.into_parts();
-        let mut mem = vidl::MemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
+        let mut mem = vidl::SharedMemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
         unsafe {{ mem.as_mut()[..buffer.len()].copy_from_slice(&buffer) }};
         caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
         self.0.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]).unwrap();
@@ -365,7 +365,7 @@ impl<T: Async{0}Provider> Async{0}<T> {{
                     let mut serializer = vidl::materialize::Serializer::new();
                     serializer.serialize(&response).unwrap();
                     let (buffer, mut caps) = serializer.into_parts();
-                    let mut mem = vidl::MemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
+                    let mut mem = vidl::SharedMemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
                     unsafe {{ mem.as_mut()[..buffer.len()].copy_from_slice(&buffer) }};
                     caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
                     let _ = self.1.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]);
@@ -474,7 +474,7 @@ impl Async{0}Client {{
 
         compiled.write_fmt(format_args!(r#")).unwrap();
         let (buffer, mut caps) = serializer.into_parts();
-        let mut mem = vidl::MemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
+        let mut mem = vidl::SharedMemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
         unsafe {{ mem.as_mut()[..buffer.len()].copy_from_slice(&buffer) }};
         caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
         self.0.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]).unwrap();

@@ -46,6 +46,7 @@ pub enum AddressRegionKind {
     UserAllocated,
     Dma,
     Mmio,
+    UserSharedMemory,
 }
 
 #[derive(Debug)]

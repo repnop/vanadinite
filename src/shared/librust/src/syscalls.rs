@@ -17,11 +17,11 @@ pub mod vmspace;
 pub enum Syscall {
     Exit = 0,
     DebugPrint = 1,
-    AllocVirtualMemory = 4,
+    AllocateVirtualMemory = 4,
     GetTid = 5,
     ReadChannel = 7,
     WriteChannel = 9,
-    AllocDmaMemory = 12,
+    AllocateDeviceAddressableMemory = 12,
     CreateVmspace = 13,
     AllocVmspaceObject = 14,
     SpawnVmspace = 15,
@@ -33,6 +33,8 @@ pub enum Syscall {
     RevokeCapability = 24,
     EnableNotifications = 25,
     DeleteCapability = 26,
+    AllocateSharedMemory = 27,
+    DeallocateVirtualMemory = 28,
 }
 
 impl Syscall {
@@ -40,11 +42,11 @@ impl Syscall {
         match n {
             0 => Some(Self::Exit),
             1 => Some(Self::DebugPrint),
-            4 => Some(Self::AllocVirtualMemory),
+            4 => Some(Self::AllocateVirtualMemory),
             5 => Some(Self::GetTid),
             7 => Some(Self::ReadChannel),
             9 => Some(Self::WriteChannel),
-            12 => Some(Self::AllocDmaMemory),
+            12 => Some(Self::AllocateDeviceAddressableMemory),
             13 => Some(Self::CreateVmspace),
             14 => Some(Self::AllocVmspaceObject),
             15 => Some(Self::SpawnVmspace),
@@ -56,6 +58,8 @@ impl Syscall {
             24 => Some(Self::RevokeCapability),
             25 => Some(Self::EnableNotifications),
             26 => Some(Self::DeleteCapability),
+            27 => Some(Self::AllocateSharedMemory),
+            28 => Some(Self::DeallocateVirtualMemory),
             _ => None,
         }
     }

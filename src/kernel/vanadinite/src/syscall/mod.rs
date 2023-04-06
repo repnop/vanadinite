@@ -52,8 +52,8 @@ pub fn handle(frame: &mut TrapFrame) {
             Ok(())
         }
         Syscall::DebugPrint => misc::print(task, VirtualAddress::new(regs.a1), regs.a2),
-        Syscall::AllocDmaMemory => mem::alloc_dma_memory(task, regs),
-        Syscall::AllocVirtualMemory => mem::alloc_virtual_memory(task, regs),
+        Syscall::AllocateDeviceAddressableMemory => mem::allocate_device_addressable_memory(task, regs),
+        Syscall::AllocateVirtualMemory => mem::allocate_virtual_memory(task, regs),
         Syscall::ClaimDevice => io::claim_device(task, regs),
         Syscall::CompleteInterrupt => io::complete_interrupt(task, regs),
         Syscall::CreateVmspace => vmspace::create_vmspace(task, regs),
@@ -67,6 +67,8 @@ pub fn handle(frame: &mut TrapFrame) {
         Syscall::RevokeCapability => todo!(),
         Syscall::EnableNotifications => Ok(task.mutable_state.lock().subscribes_to_events = true),
         Syscall::DeleteCapability => capabilities::delete(task, regs),
+        Syscall::AllocateSharedMemory => mem::allocate_shared_memory(task, regs),
+        Syscall::DeallocateVirtualMemory => mem::deallocate_virtual_memory(task, regs),
     };
 
     match res {
