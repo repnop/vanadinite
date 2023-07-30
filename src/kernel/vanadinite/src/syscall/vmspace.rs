@@ -16,11 +16,11 @@ use crate::{
         user::RawUserSlice,
     },
     scheduler::{return_to_usermode, SCHEDULER},
-    sync::SpinMutex,
-    syscall::channel::UserspaceChannel,
+    sync::{NoCheck, SpinMutex},
+    syscall::channel::ChannelEndpoint,
     task::{Context, MutableState, Task, TaskState},
     trap::{GeneralRegisters, TrapFrame},
-    utils::{self, Units},
+    utils::{self, SameHartDeadlockDetection, Units},
 };
 use alloc::{collections::BTreeMap, vec::Vec};
 use librust::{
@@ -192,29 +192,35 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
         *trap_frame = TrapFrame { sepc: pc, registers: GeneralRegisters { sp, tp, a0, a1, a2, ..Default::default() } }
     };
 
-    let (kernel_channel, user_read) = UserspaceChannel::new();
+    let kernel_channel = ChannelEndpoint::new();
     let mut new_task = Task {
         tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),
         name: alloc::string::String::from(task_name).into_boxed_str(),
-        context: SpinMutex::new(Context {
-            ra: return_to_usermode as usize,
-            sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
-            sx: [0; 12],
-        }),
+        context: SpinMutex::new(
+            Context {
+                ra: return_to_usermode as usize,
+                sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
+                sx: [0; 12],
+            },
+            NoCheck,
+        ),
         kernel_stack,
-        mutable_state: SpinMutex::new(MutableState {
-            memory_manager: object.memory_manager,
-            vmspace_next_id: 0,
-            vmspace_objects: Default::default(),
-            cspace: CapabilitySpace::new(),
-            kernel_channel,
-            claimed_interrupts: BTreeMap::new(),
-            subscribes_to_events: true,
-            state: TaskState::Ready,
-        }),
+        mutable_state: SpinMutex::new(
+            MutableState {
+                memory_manager: object.memory_manager,
+                vmspace_next_id: 0,
+                vmspace_objects: Default::default(),
+                cspace: CapabilitySpace::new(),
+                kernel_channel: kernel_channel.clone(),
+                claimed_interrupts: BTreeMap::new(),
+                subscribes_to_events: true,
+                state: TaskState::Ready,
+            },
+            SameHartDeadlockDetection::new(),
+        ),
     };
 
-    let (mut channel1, mut channel2) = UserspaceChannel::new();
+    let parent_channel = ChannelEndpoint::new();
 
     new_task
         .mutable_state
@@ -222,45 +228,35 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
         .cspace
         .mint_with_id(
             KERNEL_CHANNEL,
-            Capability { resource: CapabilityResource::Channel(user_read), rights: CapabilityRights::READ },
+            Capability { resource: CapabilityResource::Channel(kernel_channel), rights: CapabilityRights::READ },
         )
-        .expect("[BUG] kernel channel cap already created?");
+        .unwrap();
 
-    SCHEDULER.enqueue_with(|tid| {
-        channel1.sender.other_tid = Some(tid);
-        channel2.sender.other_tid = Some(task.tid);
-
-        for region in object.inprocess_mappings {
-            task_state.memory_manager.dealloc_region(region);
-        }
-
-        let cptr = task_state.cspace.mint_with(|cptr| {
-            channel1.sender.other_cptr = PARENT_CHANNEL;
-            channel2.sender.other_cptr = cptr;
-
-            new_task
-                .mutable_state
-                .get_mut()
-                .cspace
-                .mint_with_id(
-                    PARENT_CHANNEL,
-                    Capability {
-                        resource: CapabilityResource::Channel(channel2),
-                        rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
-                    },
-                )
-                .expect("[BUG] parent channel cap already created?");
-
+    new_task
+        .mutable_state
+        .get_mut()
+        .cspace
+        .mint_with_id(
+            PARENT_CHANNEL,
             Capability {
-                resource: CapabilityResource::Channel(channel1),
-                rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
-            }
-        });
+                resource: CapabilityResource::Channel(parent_channel.clone()),
+                rights: CapabilityRights::READ,
+            },
+        )
+        .unwrap();
 
-        frame.a1 = cptr.value();
+    for region in object.inprocess_mappings {
+        task_state.memory_manager.dealloc_region(region);
+    }
 
-        new_task
+    let cptr = task_state.cspace.mint(Capability {
+        resource: CapabilityResource::Channel(parent_channel),
+        rights: CapabilityRights::GRANT | CapabilityRights::WRITE | CapabilityRights::READ,
     });
+
+    frame.a1 = cptr.value();
+
+    SCHEDULER.enqueue(new_task);
 
     Ok(())
 }

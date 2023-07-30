@@ -112,7 +112,13 @@ pub struct SameHartDeadlockDetection {
     hart_id: AtomicUsize,
 }
 
-impl const Default for SameHartDeadlockDetection {
+impl SameHartDeadlockDetection {
+    pub const fn new() -> Self {
+        Self { hart_id: AtomicUsize::new(usize::MAX) }
+    }
+}
+
+impl Default for SameHartDeadlockDetection {
     fn default() -> Self {
         Self { hart_id: AtomicUsize::new(usize::MAX) }
     }

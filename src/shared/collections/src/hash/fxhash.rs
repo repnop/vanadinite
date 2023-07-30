@@ -5,23 +5,28 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
+/// Hasher builder for [`FxHasher`]
 pub type FxBuildHasher = core::hash::BuildHasherDefault<FxHasher>;
 
 const K: u64 = 0x517cc1b727220a95;
 
+/// A hasher using the FX hash algorithm
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FxHasher(u64);
 
 impl FxHasher {
+    /// Create a new [`FxHasher`]
     pub const fn new() -> Self {
         Self(0)
     }
 
+    /// Hash the given `u64` value
     #[must_use]
     pub const fn hash(self, value: u64) -> Self {
         Self((self.0.rotate_left(5) ^ value).wrapping_mul(K))
     }
 
+    /// Return the generated hash value after inputs have been processed
     pub const fn finish(self) -> u64 {
         self.0
     }

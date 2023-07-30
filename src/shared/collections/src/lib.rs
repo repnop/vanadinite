@@ -8,14 +8,7 @@
 //! A replacement for `alloc` which contains collections that will never panic
 //! on allocation failure except when otherwise necessary (e.g. `Clone` impls)
 
-#![feature(
-    allocator_api,
-    array_chunks,
-    const_nonnull_slice_from_raw_parts,
-    const_trait_impl,
-    nonnull_slice_from_raw_parts,
-    slice_ptr_get
-)]
+#![feature(allocator_api, array_chunks, const_trait_impl, const_slice_from_raw_parts_mut, slice_ptr_get)]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![warn(missing_docs)]
 #![no_std]

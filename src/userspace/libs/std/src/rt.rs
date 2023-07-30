@@ -69,10 +69,7 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8, _: u8) ->
             _ => panic!("no or invalid mem cap"),
         };
 
-        println!("{names:?}");
-
         for (name, cap) in names.into_iter().zip(caps) {
-            println!("{name:?} {cap:?}");
             map.insert(name, cap);
         }
     }

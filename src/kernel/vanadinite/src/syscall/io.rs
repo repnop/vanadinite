@@ -110,15 +110,13 @@ pub fn claim_device(task: &Task, regs: &mut GeneralRegisters) -> Result<(), Sysc
 
                             task_state.claimed_interrupts.insert(id, HART_ID.get());
                             // FIXME: not sure if this is entirely correct..
-                            let sender = task_state.kernel_channel.sender.clone();
+                            let sender = task_state.kernel_channel.clone();
                             drop(task_state);
 
-                            sender
-                                .send(ChannelMessage {
-                                    data: Into::into(KernelMessage::InterruptOccurred(id)),
-                                    caps: Vec::new(),
-                                })
-                                .expect("handle kernel channel send failure");
+                            sender.send(ChannelMessage {
+                                data: Into::into(KernelMessage::InterruptOccurred(id)),
+                                caps: Vec::new(),
+                            });
 
                             Ok(())
                         });

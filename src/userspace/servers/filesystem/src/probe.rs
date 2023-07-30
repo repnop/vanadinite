@@ -142,7 +142,7 @@ pub async fn filesystem_probe(device: SyncRc<dyn BlockDevice>) -> Result<Vec<Syn
                     // println!("[{}] TODO: check for ext2/3/4", entry.unique_guid)
                 }
                 ty => {
-                    // println!("[{}] Skipping unknown type GUID: {}", entry.unique_guid, ty)
+                    println!("[{}] Skipping unknown type GUID: {}", entry.unique_guid, ty)
                 }
             }
         }

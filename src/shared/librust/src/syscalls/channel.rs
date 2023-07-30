@@ -11,9 +11,42 @@ use crate::{
     syscalls::Syscall,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct ChannelCapability(CapabilityPtr);
+
+impl ChannelCapability {
+    pub fn new(cptr: CapabilityPtr) -> Self {
+        Self(cptr)
+    }
+
+    pub fn get(self) -> usize {
+        self.0.value()
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
 pub struct ChannelMessage(pub [usize; 7]);
+
+#[derive(Debug)]
+pub struct EndpointAlreadyMinted;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct EndpointIdentifier(usize);
+
+impl EndpointIdentifier {
+    pub const UNIDENTIFIED: Self = Self(0);
+
+    pub fn new(raw: usize) -> Self {
+        Self(raw)
+    }
+
+    pub fn get(&self) -> usize {
+        self.0
+    }
+}
 
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(transparent)]
@@ -50,7 +83,7 @@ impl core::ops::BitAnd for ChannelReadFlags {
 
 /// Attempt to send a message and/or capabilitires on the IPC channel
 /// represented by the given [`CapabilityPtr`]
-pub fn send_message(cptr: CapabilityPtr, message: ChannelMessage, caps: &[Capability]) -> Result<(), SyscallError> {
+pub fn send(cptr: CapabilityPtr, message: ChannelMessage, caps: &[Capability]) -> Result<(), SyscallError> {
     let error: usize;
 
     unsafe {
@@ -78,18 +111,20 @@ pub fn send_message(cptr: CapabilityPtr, message: ChannelMessage, caps: &[Capabi
 
 /// The result of a successful read from an IPC channel
 pub struct ReadResult {
+    /// Endpoint identifier for the sender
+    pub identifier: EndpointIdentifier,
     /// Message data
     pub message: ChannelMessage,
     /// Number of capabilities read
     pub capabilities_read: usize,
     /// Number of capabilities remaining which can be received by further calls
-    /// to [`read_message`]
+    /// to [`recv`]
     pub capabilities_remaining: usize,
 }
 
 /// Attempt to read a message and/or capabilities from an IPC channel
 /// represented by the given [`CapabilityPtr`]
-pub fn read_message(
+pub fn recv(
     cptr: CapabilityPtr,
     cap_buffer: &mut [CapabilityWithDescription],
     flags: ChannelReadFlags,
@@ -97,6 +132,7 @@ pub fn read_message(
     let error: usize;
     let capabilities_read: usize;
     let capabilities_remaining: usize;
+    let endpoint_id: usize;
     let mut message = [0; 7];
 
     unsafe {
@@ -105,7 +141,7 @@ pub fn read_message(
             inlateout("a0") Syscall::ReadChannel as usize => error,
             inlateout("a1") cptr.value() => capabilities_read,
             inlateout("a2") cap_buffer.as_mut_ptr() => capabilities_remaining,
-            in("a3") cap_buffer.len(),
+            inlateout("a3") cap_buffer.len() => endpoint_id,
             in("a4") flags.0,
             lateout("t0") message[0],
             lateout("t1") message[1],
@@ -119,7 +155,53 @@ pub fn read_message(
 
     match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
-        None => Ok(ReadResult { message: ChannelMessage(message), capabilities_read, capabilities_remaining }),
+        None => Ok(ReadResult {
+            identifier: EndpointIdentifier(endpoint_id),
+            message: ChannelMessage(message),
+            capabilities_read,
+            capabilities_remaining,
+        }),
+    }
+}
+
+pub fn call(
+    channel: ChannelCapability,
+    mut message: ChannelMessage,
+    to_send: &[Capability],
+    to_recv: &mut [CapabilityWithDescription],
+) -> Result<ReadResult, SyscallError> {
+    let error: usize;
+    let capabilities_read: usize;
+    let capabilities_remaining: usize;
+    let endpoint_id: usize;
+
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inlateout("a0") Syscall::ReadChannel as usize => error,
+            inlateout("a1") channel.get() => capabilities_read,
+            inlateout("a2") to_send.as_ptr() => capabilities_remaining,
+            inlateout("a3") to_send.len() => endpoint_id,
+            in("a4") to_recv.as_mut_ptr(),
+            in("a5") to_recv.len(),
+            inlateout("t0") message.0[0] => message.0[0],
+            inlateout("t1") message.0[1] => message.0[1],
+            inlateout("t2") message.0[2] => message.0[2],
+            inlateout("t3") message.0[3] => message.0[3],
+            inlateout("t4") message.0[4] => message.0[4],
+            inlateout("t5") message.0[5] => message.0[5],
+            inlateout("t6") message.0[6] => message.0[6],
+        );
+    }
+
+    match RawSyscallError::optional(error) {
+        Some(error) => Err(error.cook()),
+        None => Ok(ReadResult {
+            identifier: EndpointIdentifier(endpoint_id),
+            message,
+            capabilities_read,
+            capabilities_remaining,
+        }),
     }
 }
 
@@ -170,5 +252,5 @@ impl From<KernelMessage> for [usize; 7] {
 
 /// Read a [`KernelMessage`] from the kernel IPC channel
 pub fn read_kernel_message() -> KernelMessage {
-    KernelMessage::construct(read_message(KERNEL_CHANNEL, &mut [], ChannelReadFlags::NONE).unwrap().message.0)
+    KernelMessage::construct(recv(KERNEL_CHANNEL, &mut [], ChannelReadFlags::NONE).unwrap().message.0)
 }

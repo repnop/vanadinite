@@ -23,7 +23,7 @@ pub struct FreeListAllocator {
 
 impl FreeListAllocator {
     pub const fn new() -> Self {
-        Self { inner: SpinMutex::new(FreeList { head: None }) }
+        Self { inner: SpinMutex::new(FreeList { head: None }, SameHartDeadlockDetection::new()) }
     }
 
     /// Returns the start and end for logging purposes

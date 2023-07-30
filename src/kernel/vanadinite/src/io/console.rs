@@ -68,7 +68,7 @@ unsafe impl Send for StaticConsoleDevice {}
 unsafe impl Sync for StaticConsoleDevice {}
 
 pub static CONSOLE: SpinMutex<StaticConsoleDevice, SameHartDeadlockDetection> =
-    SpinMutex::new(StaticConsoleDevice(None));
+    SpinMutex::new(StaticConsoleDevice(None), SameHartDeadlockDetection::new());
 
 /// # Safety
 ///

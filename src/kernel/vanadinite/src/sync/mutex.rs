@@ -5,9 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::TIMER_FREQ;
-
 use super::{DeadlockDetection, NoCheck};
+use crate::TIMER_FREQ;
 use core::{
     cell::UnsafeCell,
     sync::atomic::{AtomicBool, Ordering},
@@ -19,9 +18,9 @@ pub struct SpinMutex<T: Send, D: DeadlockDetection = NoCheck> {
     deadlock_detection: D,
 }
 
-impl<T: Send, D: DeadlockDetection + ~const Default> SpinMutex<T, D> {
-    pub const fn new(data: T) -> Self {
-        Self { lock: AtomicBool::new(false), data: UnsafeCell::new(data), deadlock_detection: D::default() }
+impl<T: Send, D: DeadlockDetection> SpinMutex<T, D> {
+    pub const fn new(data: T, deadlock_detection: D) -> Self {
+        Self { lock: AtomicBool::new(false), data: UnsafeCell::new(data), deadlock_detection }
     }
 }
 
@@ -103,6 +102,23 @@ impl<T: Send, D: DeadlockDetection> core::fmt::Debug for SpinMutex<T, D> {
 
 pub struct SpinMutexGuard<'a, T: Send, D: DeadlockDetection> {
     lock: &'a SpinMutex<T, D>,
+}
+
+impl<'a, T: Send, D: DeadlockDetection> SpinMutexGuard<'a, T, D> {
+    /// Unlock the [`SpinMutex`] guarded by this struct
+    ///
+    /// ## Safety
+    /// This requires that [`SpinMutexGuard::lock`] be called before the data is
+    /// further accessed, otherwise UB could occur
+    pub unsafe fn unlock(this: &mut Self) {
+        this.lock.unlock();
+    }
+
+    /// Relock the [`SpinMutex`] guarded by this struct, potentially causing a
+    /// deadlock if [`SpinMutexGuard::unlock`] was never called
+    pub fn lock(this: &mut Self) {
+        this.lock.acquire_lock();
+    }
 }
 
 impl<T: Send, D: DeadlockDetection> core::ops::Deref for SpinMutexGuard<'_, T, D> {

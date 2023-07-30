@@ -6,10 +6,13 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    capabilities::CapabilityResource, interrupts::PLIC, mem::manager::AddressRegionKind, task::Task,
+    capabilities::{Capability, CapabilityResource},
+    interrupts::PLIC,
+    mem::manager::AddressRegionKind,
+    task::Task,
     trap::GeneralRegisters,
 };
-use librust::{capabilities::CapabilityPtr, error::SyscallError};
+use librust::{capabilities::CapabilityPtr, error::SyscallError, syscalls::channel::EndpointIdentifier};
 
 /// Delete a capability from a task
 pub fn delete(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
@@ -46,4 +49,31 @@ pub fn delete(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallEr
     }
 
     Ok(())
+}
+
+pub fn mint(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
+    let mut task = task.mutable_state.lock();
+    let cptr = CapabilityPtr::new(frame.a0);
+
+    let Some(capability) = task.cspace.resolve(cptr) else {
+        return Err(SyscallError::InvalidArgument(0));
+    };
+
+    match &capability.resource {
+        CapabilityResource::Channel(channel) => {
+            let id = EndpointIdentifier::new(frame.a2);
+            if id == EndpointIdentifier::UNIDENTIFIED {
+                return Err(SyscallError::InvalidArgument(1));
+            }
+
+            let rights = capability.rights;
+            let channel = channel.mint(id).map_err(|_| SyscallError::InvalidOperation(1))?;
+
+            frame.a1 = task.cspace.mint(Capability { resource: CapabilityResource::Channel(channel), rights }).value();
+
+            Ok(())
+        }
+        CapabilityResource::SharedMemory(_, _, _) => Err(SyscallError::InvalidArgument(0)),
+        CapabilityResource::Mmio(_, _, _) => Err(SyscallError::InvalidArgument(0)),
+    }
 }

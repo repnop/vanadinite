@@ -40,7 +40,13 @@ pub trait DeadlockDetection {
 #[derive(Debug, Clone, Copy)]
 pub struct NoCheck;
 
-impl const Default for NoCheck {
+impl NoCheck {
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for NoCheck {
     fn default() -> Self {
         Self
     }

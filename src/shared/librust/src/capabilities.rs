@@ -21,7 +21,7 @@ impl CapabilityPtr {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct CapabilityRights(usize);
 
@@ -66,6 +66,46 @@ impl core::ops::BitAnd for CapabilityRights {
 
     fn bitand(self, rhs: Self) -> Self::Output {
         (self.0 & rhs.0) == rhs.0
+    }
+}
+
+impl core::fmt::Debug for CapabilityRights {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "CapabilityRights(")?;
+
+        match *self {
+            CapabilityRights::NONE => write!(f, "NONE")?,
+            rights => {
+                let mut tracking = [None, None, None, None];
+
+                if rights & CapabilityRights::READ {
+                    tracking[0] = Some("READ");
+                }
+
+                if rights & CapabilityRights::WRITE {
+                    tracking[1] = Some("WRITE");
+                }
+
+                if rights & CapabilityRights::EXECUTE {
+                    tracking[2] = Some("EXECUTE");
+                }
+
+                if rights & CapabilityRights::GRANT {
+                    tracking[3] = Some("GRANT");
+                }
+
+                let (last_idx, _) = tracking.iter().flatten().enumerate().last().unwrap();
+                for (i, right) in tracking.into_iter().flatten().enumerate() {
+                    write!(f, "{}", right)?;
+
+                    if i != last_idx {
+                        write!(f, "| ")?;
+                    }
+                }
+            }
+        }
+
+        write!(f, ")")
     }
 }
 

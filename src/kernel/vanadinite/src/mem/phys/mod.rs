@@ -14,7 +14,8 @@ use bitmap::BitmapAllocator;
 use super::paging::PageSize;
 
 #[cfg(any(not(any(feature = "pmalloc.allocator.buddy")), feature = "pmalloc.allocator.bitmap"))]
-pub static PHYSICAL_MEMORY_ALLOCATOR: SpinMutex<BitmapAllocator> = SpinMutex::new(BitmapAllocator::new());
+pub static PHYSICAL_MEMORY_ALLOCATOR: SpinMutex<BitmapAllocator> =
+    SpinMutex::new(BitmapAllocator::new(), crate::sync::NoCheck);
 
 pub unsafe trait PhysicalMemoryAllocator {
     /// # Safety

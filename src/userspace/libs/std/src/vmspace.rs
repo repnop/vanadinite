@@ -59,7 +59,7 @@ impl Vmspace {
         )?;
         unsafe { (*ptr)[..serialized.len()].copy_from_slice(&serialized) };
         if self.caps_to_send.is_empty() {
-            librust::syscalls::channel::send_message(
+            librust::syscalls::channel::send(
                 task_cptr,
                 ChannelMessage::default(),
                 &[Capability { cptr, rights: CapabilityRights::READ }],
@@ -67,7 +67,7 @@ impl Vmspace {
         } else {
             let mut all_caps = vec![Capability { cptr, rights: CapabilityRights::READ }];
             all_caps.extend_from_slice(&self.caps_to_send);
-            librust::syscalls::channel::send_message(task_cptr, ChannelMessage::default(), &all_caps)?;
+            librust::syscalls::channel::send(task_cptr, ChannelMessage::default(), &all_caps)?;
         }
 
         Ok(task_cptr)

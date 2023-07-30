@@ -32,16 +32,11 @@ impl<A, K, V, S> HashMap<A, K, V, S>
 where
     A: Allocator,
     K: Eq + Hash,
-    S: BuildHasher + ~const Default,
+    S: BuildHasher,
 {
     /// Create a new [`HashMap`] with the given allocator
-    pub const fn new(allocator: A) -> Self {
-        Self {
-            allocator,
-            hash_builder: S::default(),
-            len: 0,
-            bucket: NonNull::slice_from_raw_parts(NonNull::dangling(), 0),
-        }
+    pub const fn new(allocator: A, hash_builder: S) -> Self {
+        Self { allocator, hash_builder, len: 0, bucket: NonNull::slice_from_raw_parts(NonNull::dangling(), 0) }
     }
 }
 
@@ -815,7 +810,7 @@ mod tests {
 
     #[test]
     fn hash_some_stuff() {
-        let mut hashmap: HashMap<Global, _, _, FxBuildHasher> = HashMap::new(Global);
+        let mut hashmap: HashMap<Global, _, _, FxBuildHasher> = HashMap::new(Global, FxBuildHasher::default());
 
         assert!(hashmap.insert(String::from("A hash key!"), 1u32).unwrap().is_none());
         assert!(hashmap.insert(String::from("Another hash key!"), 2u32).unwrap().is_none());
@@ -832,7 +827,7 @@ mod tests {
 
     #[test]
     fn collision_tests() {
-        let mut hashmap: HashMap<Global, _, _, HorribleBuildHasher> = HashMap::new(Global);
+        let mut hashmap: HashMap<Global, _, _, HorribleBuildHasher> = HashMap::new(Global, FxBuildHasher::default());
 
         assert!(hashmap.insert(String::from("123"), 5u32).unwrap().is_none());
         assert_eq!(hashmap.len(), 1);
@@ -850,7 +845,7 @@ mod tests {
         assert_eq!(hashmap.get_mut("456"), Some(&mut 11u32));
         assert_eq!(hashmap.len(), 2);
 
-        let mut hashmap: HashMap<Global, _, _, HorribleBuildHasher> = HashMap::new(Global);
+        let mut hashmap: HashMap<Global, _, _, HorribleBuildHasher> = HashMap::new(Global, FxBuildHasher::default());
 
         #[cfg(miri)]
         let (range_a, range_b) = (1000..1050, 0..50);
@@ -891,7 +886,7 @@ mod tests {
 
     #[test]
     fn entry() -> Result<(), std::boxed::Box<dyn std::error::Error>> {
-        let mut hashmap: HashMap<Global, _, _, FxBuildHasher> = HashMap::new(Global);
+        let mut hashmap: HashMap<Global, _, _, FxBuildHasher> = HashMap::new(Global, FxBuildHasher::default());
 
         hashmap.entry(String::from("key1"))?.or_insert(5u32);
         assert_eq!(*hashmap.entry(String::from("key1")).unwrap().and_modify(|n| *n += 1).or_insert(5u32), 6);
@@ -909,14 +904,14 @@ mod tests {
 
     #[test]
     fn get_get_mut() {
-        let mut hashmap: HashMap<Global, String, u32, FxBuildHasher> = HashMap::new(Global);
+        let mut hashmap: HashMap<Global, String, u32, FxBuildHasher> = HashMap::new(Global, FxBuildHasher::default());
         assert!(hashmap.get("fraz").is_none());
         assert!(hashmap.get_mut("fraz").is_none());
     }
 
     #[test]
     fn reserve() {
-        let mut hashmap: HashMap<Global, String, u32, FxBuildHasher> = HashMap::new(Global);
+        let mut hashmap: HashMap<Global, String, u32, FxBuildHasher> = HashMap::new(Global, FxBuildHasher::default());
         hashmap.reserve(10).unwrap();
         assert!(hashmap.capacity() >= 10);
         assert_eq!(hashmap.len(), 0);

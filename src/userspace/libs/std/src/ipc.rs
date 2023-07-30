@@ -30,7 +30,7 @@ impl IpcChannel {
         cap_buffer: &mut [CapabilityWithDescription],
         flags: ChannelReadFlags,
     ) -> Result<ReadResult, SyscallError> {
-        channel::read_message(self.cptr, cap_buffer, flags)
+        channel::recv(self.cptr, cap_buffer, flags)
     }
 
     pub fn read_with_all_caps(
@@ -49,6 +49,6 @@ impl IpcChannel {
     }
 
     pub fn send(&self, msg: ChannelMessage, caps: &[Capability]) -> Result<(), SyscallError> {
-        channel::send_message(self.cptr, msg, caps)
+        channel::send(self.cptr, msg, caps)
     }
 }

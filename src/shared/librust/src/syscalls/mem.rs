@@ -46,8 +46,9 @@ impl MemoryPermissions {
     pub const WRITE: Self = Self(1 << 1);
     pub const EXECUTE: Self = Self(1 << 2);
 
-    pub const READ_WRITE: Self = Self::READ | Self::WRITE;
-    pub const RWX: Self = Self::READ | Self::WRITE | Self::EXECUTE;
+    // FIXME: turn this back to the clean way once const traits are usable again
+    pub const READ_WRITE: Self = Self(Self::READ.0 | Self::WRITE.0);
+    pub const RWX: Self = Self(Self::READ.0 | Self::WRITE.0 | Self::EXECUTE.0);
 
     pub fn new(flags: usize) -> Self {
         Self(flags)
@@ -58,7 +59,7 @@ impl MemoryPermissions {
     }
 }
 
-impl const core::ops::BitOr for MemoryPermissions {
+impl core::ops::BitOr for MemoryPermissions {
     type Output = Self;
 
     fn bitor(self, rhs: Self) -> Self::Output {
@@ -72,7 +73,7 @@ impl core::ops::BitOrAssign for MemoryPermissions {
     }
 }
 
-impl const core::ops::BitAnd for MemoryPermissions {
+impl core::ops::BitAnd for MemoryPermissions {
     type Output = bool;
 
     fn bitand(self, rhs: Self) -> Self::Output {
@@ -175,7 +176,7 @@ impl DmaAllocationOptions {
     }
 }
 
-impl const core::ops::BitOr for DmaAllocationOptions {
+impl core::ops::BitOr for DmaAllocationOptions {
     type Output = Self;
 
     fn bitor(self, rhs: Self) -> Self::Output {
@@ -183,7 +184,7 @@ impl const core::ops::BitOr for DmaAllocationOptions {
     }
 }
 
-impl const core::ops::BitAnd for DmaAllocationOptions {
+impl core::ops::BitAnd for DmaAllocationOptions {
     type Output = bool;
 
     fn bitand(self, rhs: Self) -> Self::Output {

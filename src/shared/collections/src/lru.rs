@@ -31,11 +31,16 @@ impl<A, K, V, S> LruCache<A, K, V, S>
 where
     A: Allocator,
     K: Eq + Hash,
-    S: BuildHasher + ~const Default,
+    S: BuildHasher,
 {
     /// Create a new [`LruCache`] with the given allocator and cache capacity
-    pub const fn new(allocator: A, cache_capacity: NonZeroUsize) -> Self {
-        Self { map: HashMap::new(allocator), head: None, tail: None, cache_capacity: cache_capacity.get() }
+    pub const fn new(allocator: A, build_hasher: S, cache_capacity: NonZeroUsize) -> Self {
+        Self {
+            map: HashMap::new(allocator, build_hasher),
+            head: None,
+            tail: None,
+            cache_capacity: cache_capacity.get(),
+        }
     }
 }
 

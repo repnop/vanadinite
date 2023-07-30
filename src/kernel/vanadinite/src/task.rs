@@ -15,8 +15,8 @@ use crate::{
         paging::{flags::Flags, PageSize, VirtualAddress},
     },
     platform::FDT,
-    sync::SpinMutex,
-    syscall::{channel::UserspaceChannel, vmspace::VmspaceObject},
+    sync::{NoCheck, SpinMutex},
+    syscall::{channel::ChannelEndpoint, vmspace::VmspaceObject},
     trap::{GeneralRegisters, TrapFrame},
     utils::{round_up_to_next, SameHartDeadlockDetection, Units},
 };
@@ -67,7 +67,7 @@ pub struct MutableState {
     pub vmspace_objects: BTreeMap<VmspaceObjectId, VmspaceObject>,
     pub vmspace_next_id: usize,
     pub cspace: CapabilitySpace,
-    pub kernel_channel: UserspaceChannel,
+    pub kernel_channel: ChannelEndpoint,
     pub claimed_interrupts: BTreeMap<usize, usize>,
     pub subscribes_to_events: bool,
     pub state: TaskState,
@@ -160,11 +160,14 @@ impl Task {
             }
         };
 
-        let (kernel_channel, user_read) = UserspaceChannel::new();
+        let kernel_channel = ChannelEndpoint::new();
         cspace
             .mint_with_id(
                 KERNEL_CHANNEL,
-                Capability { resource: CapabilityResource::Channel(user_read), rights: CapabilityRights::READ },
+                Capability {
+                    resource: CapabilityResource::Channel(kernel_channel.clone()),
+                    rights: CapabilityRights::READ,
+                },
             )
             .expect("[BUG] kernel channel cap already created?");
 
@@ -186,22 +189,28 @@ impl Task {
         Self {
             tid: Tid::new(NonZeroUsize::new(1).unwrap()),
             name: Box::from("init"),
-            context: SpinMutex::new(Context {
-                ra: crate::scheduler::return_to_usermode as usize,
-                sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
-                sx: [0; 12],
-            }),
+            context: SpinMutex::new(
+                Context {
+                    ra: crate::scheduler::return_to_usermode as usize,
+                    sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
+                    sx: [0; 12],
+                },
+                NoCheck,
+            ),
             kernel_stack,
-            mutable_state: SpinMutex::new(MutableState {
-                memory_manager,
-                vmspace_objects: BTreeMap::new(),
-                vmspace_next_id: 0,
-                cspace,
-                kernel_channel,
-                claimed_interrupts: BTreeMap::new(),
-                subscribes_to_events: false,
-                state: TaskState::Ready,
-            }),
+            mutable_state: SpinMutex::new(
+                MutableState {
+                    memory_manager,
+                    vmspace_objects: BTreeMap::new(),
+                    vmspace_next_id: 0,
+                    cspace,
+                    kernel_channel,
+                    claimed_interrupts: BTreeMap::new(),
+                    subscribes_to_events: false,
+                    state: TaskState::Ready,
+                },
+                SameHartDeadlockDetection::new(),
+            ),
         }
     }
 
@@ -231,11 +240,14 @@ impl Task {
         let trap_frame = unsafe { kernel_stack.sub(core::mem::size_of::<TrapFrame>()).cast::<TrapFrame>() };
         unsafe { *trap_frame = TrapFrame { sepc: 0xF00D_0000, registers: GeneralRegisters { ..Default::default() } } };
 
-        let (kernel_channel, user_read) = UserspaceChannel::new();
+        let kernel_channel = ChannelEndpoint::new();
         cspace
             .mint_with_id(
                 KERNEL_CHANNEL,
-                Capability { resource: CapabilityResource::Channel(user_read), rights: CapabilityRights::READ },
+                Capability {
+                    resource: CapabilityResource::Channel(kernel_channel.clone()),
+                    rights: CapabilityRights::READ,
+                },
             )
             .expect("[BUG] kernel channel cap already created?");
 
@@ -244,22 +256,28 @@ impl Task {
         Self {
             tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),
             name: Box::from("<idle>"),
-            context: SpinMutex::new(Context {
-                ra: crate::scheduler::return_to_usermode as usize,
-                sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
-                sx: [0; 12],
-            }),
+            context: SpinMutex::new(
+                Context {
+                    ra: crate::scheduler::return_to_usermode as usize,
+                    sp: kernel_stack.addr() - core::mem::size_of::<TrapFrame>(),
+                    sx: [0; 12],
+                },
+                NoCheck,
+            ),
             kernel_stack,
-            mutable_state: SpinMutex::new(MutableState {
-                memory_manager,
-                vmspace_objects: BTreeMap::new(),
-                vmspace_next_id: 0,
-                cspace,
-                kernel_channel,
-                claimed_interrupts: BTreeMap::new(),
-                subscribes_to_events: false,
-                state: TaskState::Ready,
-            }),
+            mutable_state: SpinMutex::new(
+                MutableState {
+                    memory_manager,
+                    vmspace_objects: BTreeMap::new(),
+                    vmspace_next_id: 0,
+                    cspace,
+                    kernel_channel,
+                    claimed_interrupts: BTreeMap::new(),
+                    subscribes_to_events: false,
+                    state: TaskState::Ready,
+                },
+                SameHartDeadlockDetection::new(),
+            ),
         }
     }
 }

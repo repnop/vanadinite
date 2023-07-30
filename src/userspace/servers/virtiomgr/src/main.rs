@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(drain_filter)]
+#![feature(extract_if)]
 
 use virtio::DeviceType;
 
@@ -28,9 +28,7 @@ impl virtiomgr::VirtIoMgrProvider for Provider {
         println!("[virtiomgr] Request for: {:?}", DeviceType::from_u32(virtio_device_type));
         match DeviceType::from_u32(virtio_device_type) {
             None => Ok(vec![]),
-            Some(ty) => {
-                Ok(self.devices.drain_filter(|dev| dev.virtio_device_type == ty).map(|dev| dev.device).collect())
-            }
+            Some(ty) => Ok(self.devices.extract_if(|dev| dev.virtio_device_type == ty).map(|dev| dev.device).collect()),
         }
     }
 }

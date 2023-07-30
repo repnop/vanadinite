@@ -106,7 +106,11 @@ impl VirtIoBlockDevice {
                 data_buffer,
                 queued_commands: BTreeMap::new(),
                 waiting_requests: VecDeque::new(),
-                block_cache: LruCache::new(std::alloc::Global, NonZeroUsize::new(64).unwrap()),
+                block_cache: LruCache::new(
+                    std::alloc::Global,
+                    FxBuildHasher::default(),
+                    NonZeroUsize::new(64).unwrap(),
+                ),
             }
         }));
 
@@ -215,9 +219,7 @@ impl BlockDevice for VirtIoBlockDevice {
             let (tx, rx) = oneshot::oneshot();
             this.waiting_requests.push_back(WaitingCommands::Read(sector, tx));
 
-            return Box::pin(async move {
-                rx.recv().await
-            });
+            return Box::pin(async move { rx.recv().await });
         };
 
         let VirtIoBlockDeviceInner {
@@ -240,9 +242,7 @@ impl BlockDevice for VirtIoBlockDevice {
             let (tx, rx) = oneshot::oneshot();
             waiting_requests.push_back(WaitingCommands::Read(sector, tx));
 
-            return Box::pin(async move {
-                rx.recv().await
-            });
+            return Box::pin(async move { rx.recv().await });
         };
 
         let Some((data_index, data_buffer)) = data_buffer.alloc() else {
@@ -254,9 +254,7 @@ impl BlockDevice for VirtIoBlockDevice {
             let (tx, rx) = oneshot::oneshot();
             this.waiting_requests.push_back(WaitingCommands::Read(sector, tx));
 
-            return Box::pin(async move {
-                rx.recv().await
-            });
+            return Box::pin(async move { rx.recv().await });
         };
 
         let descriptor_flags = DescriptorFlags::NEXT | DescriptorFlags::WRITE;
@@ -316,9 +314,7 @@ impl BlockDevice for VirtIoBlockDevice {
             let (tx, rx) = oneshot::oneshot();
             this.waiting_requests.push_back(WaitingCommands::Write(sector, block, tx));
 
-            return Box::pin(async move {
-                rx.recv().await
-            });
+            return Box::pin(async move { rx.recv().await });
         };
 
         let VirtIoBlockDeviceInner {
@@ -342,11 +338,13 @@ impl BlockDevice for VirtIoBlockDevice {
             queue.free_descriptor(desc3);
 
             let (tx, rx) = oneshot::oneshot();
-            waiting_requests.push_back(WaitingCommands::Write(sector, unsafe { DataBlock::new(data_index, ptr, &self.data_drop)}, tx));
+            waiting_requests.push_back(WaitingCommands::Write(
+                sector,
+                unsafe { DataBlock::new(data_index, ptr, &self.data_drop) },
+                tx,
+            ));
 
-            return Box::pin(async move {
-                rx.recv().await
-            });
+            return Box::pin(async move { rx.recv().await });
         };
 
         let descriptor_flags = DescriptorFlags::NEXT;

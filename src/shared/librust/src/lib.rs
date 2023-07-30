@@ -14,7 +14,6 @@
     inline_const_pat,
     layout_for_ptr,
     never_type,
-    nonnull_slice_from_raw_parts,
     ptr_metadata,
     slice_ptr_get,
     slice_ptr_len,

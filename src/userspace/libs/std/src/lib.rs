@@ -13,7 +13,6 @@
     inline_const,
     lang_items,
     naked_functions,
-    nonnull_slice_from_raw_parts,
     prelude_import,
     thread_local,
     unsize
