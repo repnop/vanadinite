@@ -10,12 +10,13 @@ use crate::{
     interrupts::PLIC,
     io::CLAIMED_DEVICES,
     mem::{
-        paging::{PhysicalAddress, VirtualAddress},
+        paging::{PageSize, PhysicalAddress, VirtualAddress},
         user::RawUserSlice,
+        PageRange,
     },
     platform::FDT,
     scheduler::TASKS,
-    syscall::channel::ChannelMessage,
+    syscall::channel::EndpointMessage,
     task::Task,
     trap::GeneralRegisters,
     HART_ID,
@@ -77,12 +78,16 @@ pub fn claim_device(task: &Task, regs: &mut GeneralRegisters) -> Result<(), Sysc
                     // FIXME: this probably needs marked as `Clone` in
                     // `fdt` or something
                     let interrupts = node.interrupts().into_iter().flatten();
-                    let phys_range = {
+                    let physical_range = {
                         let start = PhysicalAddress::from_ptr(starting_address);
-                        start..start.offset(len)
+                        PageRange::new(start, start.offset(len), PageSize::Kilopage)
                     };
                     let cptr = task_state.cspace.mint(Capability {
-                        resource: CapabilityResource::Mmio(phys_range, map_to, interrupts.collect()),
+                        resource: CapabilityResource::Mmio(crate::capabilities::MmioRegion {
+                            physical_range,
+                            virtual_range: map_to,
+                            interrupts: interrupts.collect(),
+                        }),
                         rights: CapabilityRights::GRANT | CapabilityRights::READ | CapabilityRights::WRITE,
                     });
 
@@ -109,13 +114,14 @@ pub fn claim_device(task: &Task, regs: &mut GeneralRegisters) -> Result<(), Sysc
                             );
 
                             task_state.claimed_interrupts.insert(id, HART_ID.get());
-                            // FIXME: not sure if this is entirely correct..
-                            let sender = task_state.kernel_channel.clone();
                             drop(task_state);
 
-                            sender.send(ChannelMessage {
+                            // FIXME: not sure if this is entirely correct..
+                            task.endpoint.send(EndpointMessage {
                                 data: Into::into(KernelMessage::InterruptOccurred(id)),
                                 caps: Vec::new(),
+                                reply_endpoint: None,
+                                shared_physical_address: None,
                             });
 
                             Ok(())

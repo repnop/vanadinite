@@ -121,7 +121,7 @@ impl<T: {0}Provider> {0}<T> {{
     pub fn new(provider: T) -> Self {{ Self(provider) }}
     pub fn serve(&mut self) -> ! {{
         loop {{
-            let vidl::internal::KernelMessage::NewChannelMessage(cptr) = vidl::internal::read_kernel_message() else {{ continue }};
+            let vidl::internal::KernelMessage::NewEndpointMessage(cptr) = vidl::internal::read_kernel_message() else {{ continue }};
             let channel = vidl::internal::IpcChannel::new(cptr);
             let Ok((msg, mut caps)) = channel.read_with_all_caps(vidl::internal::ChannelReadFlags::NONBLOCKING) else {{ continue }};
             if caps.is_empty() {{
@@ -171,7 +171,7 @@ impl<T: {0}Provider> {0}<T> {{
                     let mut mem = vidl::SharedMemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
                     unsafe {{ mem.as_mut()[..buffer.len()].copy_from_slice(&buffer) }};
                     caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
-                    let _ = channel.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]);
+                    let _ = channel.send(vidl::EndpointMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]);
                 }}"#,
                 service.name.to_uppercase(),
                 method.name.to_uppercase()
@@ -284,7 +284,7 @@ impl {0}Client {{
         let mut mem = vidl::SharedMemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
         unsafe {{ mem.as_mut()[..buffer.len()].copy_from_slice(&buffer) }};
         caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
-        self.0.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]).unwrap();
+        self.0.send(vidl::EndpointMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]).unwrap();
         let (_msg, mut caps) = self.0.read_with_all_caps(vidl::ChannelReadFlags::NONE).unwrap();
         let _ = vidl::internal::read_kernel_message();
 
@@ -368,7 +368,7 @@ impl<T: Async{0}Provider> Async{0}<T> {{
                     let mut mem = vidl::SharedMemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
                     unsafe {{ mem.as_mut()[..buffer.len()].copy_from_slice(&buffer) }};
                     caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
-                    let _ = self.1.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]);
+                    let _ = self.1.send(vidl::EndpointMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]);
                 }}"#,
                 service.name.to_uppercase(),
                 method.name.to_uppercase()
@@ -477,7 +477,7 @@ impl Async{0}Client {{
         let mut mem = vidl::SharedMemoryAllocation::public_rw(vidl::Bytes(buffer.len())).unwrap();
         unsafe {{ mem.as_mut()[..buffer.len()].copy_from_slice(&buffer) }};
         caps.insert(0, vidl::Capability {{ cptr: mem.cptr, rights: vidl::CapabilityRights::READ }});
-        self.0.send(vidl::ChannelMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]).unwrap();
+        self.0.send(vidl::EndpointMessage([{}_{}_ID, 0, 0, 0, 0, 0, 0]), &caps[..]).unwrap();
         let (_msg, mut caps) = self.0.read_with_all_caps().await.unwrap();
 
         match caps.remove(0) {{

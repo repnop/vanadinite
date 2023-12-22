@@ -58,6 +58,6 @@ fn main() {
         env.a1 = 0;
 
         let cap = space.spawn(env).unwrap();
-        caps.insert(server.name, cap);
+        caps.insert(server.name, cap.get());
     }
 }

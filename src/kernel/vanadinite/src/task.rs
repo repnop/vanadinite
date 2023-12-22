@@ -12,7 +12,8 @@ use crate::{
     mem::{
         alloc_kernel_stack,
         manager::{AddressRegionKind, FillOption, RegionDescription, UserspaceMemoryManager},
-        paging::{flags::Flags, PageSize, VirtualAddress},
+        paging::{flags::Flags, PageSize, PhysicalAddress, VirtualAddress},
+        PageRange,
     },
     platform::FDT,
     sync::{NoCheck, SpinMutex},
@@ -24,7 +25,7 @@ use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 use fdt::Fdt;
 use librust::{
     capabilities::CapabilityRights,
-    syscalls::{channel::KERNEL_CHANNEL, vmspace::VmspaceObjectId},
+    syscalls::{channel::OWN_ENDPOINT, vmspace::VmspaceObjectId},
     task::Tid,
 };
 
@@ -67,8 +68,8 @@ pub struct MutableState {
     pub vmspace_objects: BTreeMap<VmspaceObjectId, VmspaceObject>,
     pub vmspace_next_id: usize,
     pub cspace: CapabilitySpace,
-    pub kernel_channel: ChannelEndpoint,
     pub claimed_interrupts: BTreeMap<usize, usize>,
+    pub lock_regions: BTreeMap<PhysicalAddress, PageRange<VirtualAddress>>,
     pub subscribes_to_events: bool,
     pub state: TaskState,
 }
@@ -79,6 +80,7 @@ pub struct Task {
     pub name: Box<str>,
     pub kernel_stack: *mut u8,
     pub context: SpinMutex<Context>,
+    pub endpoint: ChannelEndpoint,
     pub mutable_state: SpinMutex<MutableState, SameHartDeadlockDetection>,
 }
 
@@ -160,14 +162,11 @@ impl Task {
             }
         };
 
-        let kernel_channel = ChannelEndpoint::new();
+        let endpoint = ChannelEndpoint::new();
         cspace
             .mint_with_id(
-                KERNEL_CHANNEL,
-                Capability {
-                    resource: CapabilityResource::Channel(kernel_channel.clone()),
-                    rights: CapabilityRights::READ,
-                },
+                OWN_ENDPOINT,
+                Capability { resource: CapabilityResource::Channel(endpoint.clone()), rights: CapabilityRights::READ },
             )
             .expect("[BUG] kernel channel cap already created?");
 
@@ -198,14 +197,15 @@ impl Task {
                 NoCheck,
             ),
             kernel_stack,
+            endpoint,
             mutable_state: SpinMutex::new(
                 MutableState {
                     memory_manager,
                     vmspace_objects: BTreeMap::new(),
                     vmspace_next_id: 0,
                     cspace,
-                    kernel_channel,
                     claimed_interrupts: BTreeMap::new(),
+                    lock_regions: BTreeMap::new(),
                     subscribes_to_events: false,
                     state: TaskState::Ready,
                 },
@@ -240,14 +240,11 @@ impl Task {
         let trap_frame = unsafe { kernel_stack.sub(core::mem::size_of::<TrapFrame>()).cast::<TrapFrame>() };
         unsafe { *trap_frame = TrapFrame { sepc: 0xF00D_0000, registers: GeneralRegisters { ..Default::default() } } };
 
-        let kernel_channel = ChannelEndpoint::new();
+        let endpoint = ChannelEndpoint::new();
         cspace
             .mint_with_id(
-                KERNEL_CHANNEL,
-                Capability {
-                    resource: CapabilityResource::Channel(kernel_channel.clone()),
-                    rights: CapabilityRights::READ,
-                },
+                OWN_ENDPOINT,
+                Capability { resource: CapabilityResource::Channel(endpoint.clone()), rights: CapabilityRights::READ },
             )
             .expect("[BUG] kernel channel cap already created?");
 
@@ -265,14 +262,15 @@ impl Task {
                 NoCheck,
             ),
             kernel_stack,
+            endpoint: ChannelEndpoint::new(),
             mutable_state: SpinMutex::new(
                 MutableState {
                     memory_manager,
                     vmspace_objects: BTreeMap::new(),
                     vmspace_next_id: 0,
                     cspace,
-                    kernel_channel,
                     claimed_interrupts: BTreeMap::new(),
+                    lock_regions: BTreeMap::new(),
                     subscribes_to_events: false,
                     state: TaskState::Ready,
                 },

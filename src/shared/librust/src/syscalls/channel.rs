@@ -11,11 +11,25 @@ use crate::{
     syscalls::Syscall,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct ChannelCapability(CapabilityPtr);
+pub struct EndpointCapability(CapabilityPtr);
 
-impl ChannelCapability {
+impl EndpointCapability {
+    pub fn new(cptr: CapabilityPtr) -> Self {
+        Self(cptr)
+    }
+
+    pub fn get(self) -> CapabilityPtr {
+        CapabilityPtr::new(self.0.value())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct ReplyCapability(CapabilityPtr);
+
+impl ReplyCapability {
     pub fn new(cptr: CapabilityPtr) -> Self {
         Self(cptr)
     }
@@ -27,12 +41,12 @@ impl ChannelCapability {
 
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
-pub struct ChannelMessage(pub [usize; 7]);
+pub struct EndpointMessage(pub [usize; 7]);
 
 #[derive(Debug)]
 pub struct EndpointAlreadyMinted;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct EndpointIdentifier(usize);
 
@@ -83,14 +97,14 @@ impl core::ops::BitAnd for ChannelReadFlags {
 
 /// Attempt to send a message and/or capabilitires on the IPC channel
 /// represented by the given [`CapabilityPtr`]
-pub fn send(cptr: CapabilityPtr, message: ChannelMessage, caps: &[Capability]) -> Result<(), SyscallError> {
+pub fn send(cptr: EndpointCapability, message: EndpointMessage, caps: &[Capability]) -> Result<(), SyscallError> {
     let error: usize;
 
     unsafe {
         core::arch::asm!(
             "ecall",
             inlateout("a0") Syscall::WriteChannel as usize => error,
-            in("a1") cptr.value(),
+            in("a1") cptr.get().value(),
             in("a2") caps.as_ptr(),
             in("a3") caps.len(),
             in("t0") message.0[0],
@@ -110,39 +124,46 @@ pub fn send(cptr: CapabilityPtr, message: ChannelMessage, caps: &[Capability]) -
 }
 
 /// The result of a successful read from an IPC channel
-pub struct ReadResult {
+pub struct RecvResult {
     /// Endpoint identifier for the sender
     pub identifier: EndpointIdentifier,
     /// Message data
-    pub message: ChannelMessage,
+    pub message: EndpointMessage,
     /// Number of capabilities read
     pub capabilities_read: usize,
     /// Number of capabilities remaining which can be received by further calls
     /// to [`recv`]
     pub capabilities_remaining: usize,
+    // FIXME: this shouldn't exist in `call` return values
+    pub reply_cptr: Option<ReplyCapability>,
+}
+
+pub enum ReadMessage {
+    Kernel(KernelMessage),
+    Ipc(RecvResult),
 }
 
 /// Attempt to read a message and/or capabilities from an IPC channel
 /// represented by the given [`CapabilityPtr`]
 pub fn recv(
-    cptr: CapabilityPtr,
     cap_buffer: &mut [CapabilityWithDescription],
     flags: ChannelReadFlags,
-) -> Result<ReadResult, SyscallError> {
+) -> Result<ReadMessage, SyscallError> {
     let error: usize;
     let capabilities_read: usize;
     let capabilities_remaining: usize;
     let endpoint_id: usize;
+    let reply_cptr: usize;
     let mut message = [0; 7];
 
     unsafe {
         core::arch::asm!(
             "ecall",
             inlateout("a0") Syscall::ReadChannel as usize => error,
-            inlateout("a1") cptr.value() => capabilities_read,
-            inlateout("a2") cap_buffer.as_mut_ptr() => capabilities_remaining,
-            inlateout("a3") cap_buffer.len() => endpoint_id,
-            in("a4") flags.0,
+            inlateout("a1") cap_buffer.as_mut_ptr() => capabilities_read,
+            inlateout("a2") cap_buffer.len() => capabilities_remaining,
+            inlateout("a3") flags.0 => endpoint_id,
+            lateout("a4") reply_cptr,
             lateout("t0") message[0],
             lateout("t1") message[1],
             lateout("t2") message[2],
@@ -155,21 +176,28 @@ pub fn recv(
 
     match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
-        None => Ok(ReadResult {
-            identifier: EndpointIdentifier(endpoint_id),
-            message: ChannelMessage(message),
-            capabilities_read,
-            capabilities_remaining,
-        }),
+        None => match endpoint_id {
+            usize::MAX => Ok(ReadMessage::Kernel(KernelMessage::construct(message))),
+            _ => Ok(ReadMessage::Ipc(RecvResult {
+                identifier: EndpointIdentifier(endpoint_id),
+                message: EndpointMessage(message),
+                capabilities_read,
+                capabilities_remaining,
+                reply_cptr: match reply_cptr {
+                    usize::MAX => None,
+                    _ => Some(ReplyCapability(CapabilityPtr::new(reply_cptr))),
+                },
+            })),
+        },
     }
 }
 
 pub fn call(
-    channel: ChannelCapability,
-    mut message: ChannelMessage,
+    channel: EndpointCapability,
+    mut message: EndpointMessage,
     to_send: &[Capability],
     to_recv: &mut [CapabilityWithDescription],
-) -> Result<ReadResult, SyscallError> {
+) -> Result<RecvResult, SyscallError> {
     let error: usize;
     let capabilities_read: usize;
     let capabilities_remaining: usize;
@@ -179,7 +207,7 @@ pub fn call(
         core::arch::asm!(
             "ecall",
             inlateout("a0") Syscall::ReadChannel as usize => error,
-            inlateout("a1") channel.get() => capabilities_read,
+            inlateout("a1") channel.get().value() => capabilities_read,
             inlateout("a2") to_send.as_ptr() => capabilities_remaining,
             inlateout("a3") to_send.len() => endpoint_id,
             in("a4") to_recv.as_mut_ptr(),
@@ -196,32 +224,29 @@ pub fn call(
 
     match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
-        None => Ok(ReadResult {
+        None => Ok(RecvResult {
             identifier: EndpointIdentifier(endpoint_id),
             message,
             capabilities_read,
             capabilities_remaining,
+            reply_cptr: None,
         }),
     }
 }
 
-/// A [`CapabilityPtr`] representing the IPC channel to the kernel
-pub const KERNEL_CHANNEL: CapabilityPtr = CapabilityPtr::new(0);
-/// A [`CapabilityPtr`] representing the IPC channel to the parent process
+/// A [`CapabilityPtr`] representing the process's own IPC endpoint
+pub const OWN_ENDPOINT: CapabilityPtr = CapabilityPtr::new(0);
+/// A [`CapabilityPtr`] representing the parent process's IPC endpoint
 pub const PARENT_CHANNEL: CapabilityPtr = CapabilityPtr::new(1);
 
 /// See [`KernelMessage::InterruptOccurred`]
 pub const KMSG_INTERRUPT_OCCURRED: usize = 0;
-/// See [`KernelMessage::NewChannelMessage`]
-pub const KMSG_NEW_CHANNEL_MESSAGE: usize = 1;
 
 /// A received kernel IPC channel message
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum KernelMessage {
     /// An interrupt with the given interrupt ID has occurred
     InterruptOccurred(usize),
-    /// A new channel message is
-    NewChannelMessage(CapabilityPtr),
 }
 
 impl KernelMessage {
@@ -229,7 +254,6 @@ impl KernelMessage {
     pub const fn into_parts(self) -> [usize; 7] {
         match self {
             Self::InterruptOccurred(n) => [KMSG_INTERRUPT_OCCURRED, n, 0, 0, 0, 0, 0],
-            Self::NewChannelMessage(cptr) => [KMSG_NEW_CHANNEL_MESSAGE, cptr.value(), 0, 0, 0, 0, 0],
         }
     }
 
@@ -238,7 +262,6 @@ impl KernelMessage {
     pub const fn construct(parts: [usize; 7]) -> Self {
         match parts[0] {
             KMSG_INTERRUPT_OCCURRED => Self::InterruptOccurred(parts[1]),
-            KMSG_NEW_CHANNEL_MESSAGE => Self::NewChannelMessage(CapabilityPtr::new(parts[1])),
             _ => unreachable!(),
         }
     }
@@ -248,9 +271,4 @@ impl From<KernelMessage> for [usize; 7] {
     fn from(km: KernelMessage) -> Self {
         km.into_parts()
     }
-}
-
-/// Read a [`KernelMessage`] from the kernel IPC channel
-pub fn read_kernel_message() -> KernelMessage {
-    KernelMessage::construct(recv(KERNEL_CHANNEL, &mut [], ChannelReadFlags::NONE).unwrap().message.0)
 }

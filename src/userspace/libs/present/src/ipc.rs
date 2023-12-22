@@ -13,7 +13,7 @@ use core::{future::Future, pin::Pin};
 use librust::{
     capabilities::{Capability, CapabilityPtr, CapabilityWithDescription},
     error::SyscallError,
-    syscalls::channel::{self, ChannelMessage, ChannelReadFlags, ReadResult, KERNEL_CHANNEL},
+    syscalls::channel::{self, ChannelReadFlags, EndpointMessage, RecvResult, KERNEL_CHANNEL},
 };
 use std::task::{Context, Poll};
 
@@ -62,17 +62,17 @@ pub struct IpcChannel(CapabilityPtr);
 impl IpcChannel {
     #[track_caller]
     pub fn new(cptr: CapabilityPtr) -> Self {
-        EVENT_REGISTRY.register_interest(BlockType::IpcChannelMessage(cptr));
+        EVENT_REGISTRY.register_interest(BlockType::IpcEndpointMessage(cptr));
         Self(cptr)
     }
 
-    pub async fn read(&self, cap_buffer: &mut [CapabilityWithDescription]) -> Result<ReadResult, SyscallError> {
+    pub async fn read(&self, cap_buffer: &mut [CapabilityWithDescription]) -> Result<RecvResult, SyscallError> {
         IpcRead(self, cap_buffer).await
     }
 
-    pub async fn read_with_all_caps(&self) -> Result<(ChannelMessage, Vec<CapabilityWithDescription>), SyscallError> {
+    pub async fn read_with_all_caps(&self) -> Result<(EndpointMessage, Vec<CapabilityWithDescription>), SyscallError> {
         let mut caps = Vec::new();
-        let ReadResult { message, capabilities_remaining, .. } = self.read(&mut caps[..]).await?;
+        let RecvResult { message, capabilities_remaining, .. } = self.read(&mut caps[..]).await?;
 
         if capabilities_remaining > 0 {
             caps.resize(capabilities_remaining, CapabilityWithDescription::default());
@@ -82,19 +82,19 @@ impl IpcChannel {
         Ok((message, caps))
     }
 
-    pub fn send(&self, msg: ChannelMessage, caps: &[Capability]) -> Result<(), SyscallError> {
+    pub fn send(&self, msg: EndpointMessage, caps: &[Capability]) -> Result<(), SyscallError> {
         channel::send(self.0, msg, caps)
     }
 }
 
 impl Drop for IpcChannel {
     fn drop(&mut self) {
-        EVENT_REGISTRY.unregister_interest(BlockType::IpcChannelMessage(self.0));
+        EVENT_REGISTRY.unregister_interest(BlockType::IpcEndpointMessage(self.0));
     }
 }
 
 impl IntoStream for IpcChannel {
-    type Item = Result<(ChannelMessage, Vec<CapabilityWithDescription>), SyscallError>;
+    type Item = Result<(EndpointMessage, Vec<CapabilityWithDescription>), SyscallError>;
     type Stream = IpcMessageStream;
 
     fn into_stream(self) -> Self::Stream {
@@ -107,14 +107,14 @@ pub struct IpcMessageStream {
 }
 
 impl Stream for IpcMessageStream {
-    type Item = Result<(ChannelMessage, Vec<CapabilityWithDescription>), SyscallError>;
+    type Item = Result<(EndpointMessage, Vec<CapabilityWithDescription>), SyscallError>;
 
     fn poll_next(self: Pin<&mut Self>, context: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
         match channel::recv(this.channel.0, &mut [], ChannelReadFlags::NONBLOCKING) {
             Ok(rr) => {
-                let ReadResult { message, capabilities_remaining, .. } = rr;
+                let RecvResult { message, capabilities_remaining, .. } = rr;
                 let mut caps = Vec::new();
 
                 if capabilities_remaining > 0 {
@@ -125,7 +125,7 @@ impl Stream for IpcMessageStream {
                 Poll::Ready(Some(Ok((message, caps))))
             }
             Err(SyscallError::WouldBlock) => {
-                EVENT_REGISTRY.register(BlockType::IpcChannelMessage(this.channel.0), context.waker().clone());
+                EVENT_REGISTRY.register(BlockType::IpcEndpointMessage(this.channel.0), context.waker().clone());
                 Poll::Pending
             }
             Err(e) => Poll::Ready(Some(Err(e))),
@@ -136,7 +136,7 @@ impl Stream for IpcMessageStream {
 pub struct IpcRead<'a>(&'a IpcChannel, &'a mut [CapabilityWithDescription]);
 
 impl<'a> Future for IpcRead<'a> {
-    type Output = Result<ReadResult, SyscallError>;
+    type Output = Result<RecvResult, SyscallError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -144,15 +144,10 @@ impl<'a> Future for IpcRead<'a> {
         match channel::recv(this.0 .0, this.1, ChannelReadFlags::NONBLOCKING) {
             Ok(rr) => Poll::Ready(Ok(rr)),
             Err(SyscallError::WouldBlock) => {
-                EVENT_REGISTRY.register(BlockType::IpcChannelMessage(this.0 .0), cx.waker().clone());
+                EVENT_REGISTRY.register(BlockType::IpcEndpointMessage(this.0 .0), cx.waker().clone());
                 Poll::Pending
             }
             Err(e) => Poll::Ready(Err(e)),
         }
     }
-}
-
-pub async fn read_kernel_message() -> channel::KernelMessage {
-    let kernel_chan = IpcChannel::new(KERNEL_CHANNEL);
-    channel::KernelMessage::construct(kernel_chan.read(&mut []).await.unwrap().message.0)
 }

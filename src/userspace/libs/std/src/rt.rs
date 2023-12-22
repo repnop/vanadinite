@@ -56,10 +56,9 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8, _: u8) ->
     unsafe { ARGS = [argc as usize, argv as usize] };
 
     let mut map = crate::env::CAP_MAP.borrow_mut();
-    let channel = crate::ipc::IpcChannel::new(PARENT_CHANNEL);
 
     // FIXME: This is an inlined version of temp_read_json, replace this!
-    if let Ok((_, mut caps)) = channel.read_with_all_caps(ChannelReadFlags::NONE) {
+    if let Ok((_, mut caps)) = crate::ipc::recv_with_all_caps(ChannelReadFlags::NONE) {
         let names: Vec<String> = match caps.remove(0) {
             CapabilityWithDescription {
                 capability: _,

@@ -27,19 +27,21 @@ pub struct CapabilityRights(usize);
 
 impl CapabilityRights {
     pub const NONE: Self = Self(0);
-    pub const READ: Self = Self(1);
-    pub const WRITE: Self = Self(2);
-    pub const EXECUTE: Self = Self(4);
-    pub const GRANT: Self = Self(8);
+    pub const READ: Self = Self(1 << 0);
+    pub const WRITE: Self = Self(1 << 1);
+    pub const EXECUTE: Self = Self(1 << 2);
+    pub const GRANT: Self = Self(1 << 3);
+    pub const MOVE: Self = Self(1 << 4);
 }
 
 impl CapabilityRights {
     pub fn new(value: usize) -> Self {
-        Self(value & 0xF)
+        Self(value & 0x1F)
     }
 
     pub fn is_superset(self, other: Self) -> bool {
-        (self.0 | !other.0) == usize::MAX
+        // `MOVE` rights are sticky and so must be set in both or neither
+        (self.0 | !other.0) == usize::MAX && ((self & Self::MOVE) == (other & Self::MOVE))
     }
 
     pub fn value(self) -> usize {
@@ -142,6 +144,7 @@ pub enum CapabilityDescription {
     Channel = 0,
     Memory { ptr: *mut u8, len: usize, permissions: MemoryPermissions } = 1,
     MappedMmio { ptr: *mut u8, len: usize, n_interrupts: usize } = 2,
+    Bundle { ptr: *mut u8, len: usize } = 3,
 }
 
 impl Default for CapabilityDescription {

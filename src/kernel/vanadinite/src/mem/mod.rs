@@ -37,6 +37,120 @@ pub mod paging {
     pub const SATP_MODE: SatpMode = SatpMode::Sv48;
 }
 
+pub struct PageRange<A: Address> {
+    pub start: A,
+    pub end: A,
+    pub page_size: PageSize,
+}
+
+impl<A: Address> PageRange<A> {
+    #[track_caller]
+    pub fn new(start: A, end: A, page_size: PageSize) -> Self {
+        page_size.assert_addr_aligned(start.address());
+        page_size.assert_addr_aligned(end.address());
+
+        Self { start, end, page_size }
+    }
+
+    pub fn into_std_range(self) -> core::ops::Range<A> {
+        self.start..self.end
+    }
+}
+
+impl<A: Address> IntoIterator for PageRange<A> {
+    type IntoIter = PageRangeIter<A>;
+    type Item = A;
+
+    fn into_iter(self) -> Self::IntoIter {
+        PageRangeIter { current: self.start, end: self.end, page_size: self.page_size }
+    }
+}
+
+impl<A: Address> IntoIterator for &'_ PageRange<A> {
+    type IntoIter = PageRangeIter<A>;
+    type Item = A;
+
+    fn into_iter(self) -> Self::IntoIter {
+        PageRangeIter { current: self.start, end: self.end, page_size: self.page_size }
+    }
+}
+
+impl<A: Address> Copy for PageRange<A> {}
+impl<A: Address> Clone for PageRange<A> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<A: Address + core::fmt::Debug> core::fmt::Debug for PageRange<A> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PageRange")
+            .field("start", &self.start)
+            .field("end", &self.end)
+            .field("page_size", &self.page_size)
+            .finish()
+    }
+}
+
+pub struct PageRangeIter<A: Address> {
+    current: A,
+    end: A,
+    page_size: PageSize,
+}
+
+impl<A: Address> Iterator for PageRangeIter<A> {
+    type Item = A;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current.address() == self.end.address() {
+            return None;
+        }
+
+        let new = self.current.checked_add(self.page_size.to_byte_size())?;
+        Some(core::mem::replace(&mut self.current, new))
+    }
+}
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+impl sealed::Sealed for VirtualAddress {}
+impl sealed::Sealed for PhysicalAddress {}
+pub trait Address: sealed::Sealed + Sized + Copy {
+    fn address(self) -> usize;
+    fn from_address(addr: usize) -> Self;
+    fn checked_add(self, amount: usize) -> Option<Self>;
+}
+
+impl Address for VirtualAddress {
+    fn address(self) -> usize {
+        self.as_usize()
+    }
+
+    fn from_address(addr: usize) -> Self {
+        Self::new(addr)
+    }
+
+    fn checked_add(self, amount: usize) -> Option<Self> {
+        self.checked_add(amount)
+    }
+}
+
+impl Address for PhysicalAddress {
+    fn address(self) -> usize {
+        self.as_usize()
+    }
+
+    fn from_address(addr: usize) -> Self {
+        Self::new(addr)
+    }
+
+    fn checked_add(self, amount: usize) -> Option<Self> {
+        Some(Self::new(self.as_usize() + amount))
+    }
+}
+
 #[inline(always)]
 pub fn sfence(vaddr: Option<paging::VirtualAddress>, asid: Option<u16>) {
     unsafe {

@@ -11,7 +11,7 @@ use librust::{
     capabilities::{Capability, CapabilityPtr, CapabilityRights},
     error::SyscallError,
     syscalls::{
-        channel::ChannelMessage,
+        channel::{EndpointCapability, EndpointMessage},
         mem::MemoryPermissions,
         vmspace::{self, VmspaceObjectId, VmspaceObjectMapping, VmspaceSpawnEnv},
     },
@@ -48,7 +48,7 @@ impl Vmspace {
         }
     }
 
-    pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<CapabilityPtr, SyscallError> {
+    pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<EndpointCapability, SyscallError> {
         let task_cptr = vmspace::spawn_vmspace(self.id, &self.name, env)?;
 
         // FIXME: this is an inlined version of `temp_send_json`, replace this!
@@ -61,13 +61,13 @@ impl Vmspace {
         if self.caps_to_send.is_empty() {
             librust::syscalls::channel::send(
                 task_cptr,
-                ChannelMessage::default(),
+                EndpointMessage::default(),
                 &[Capability { cptr, rights: CapabilityRights::READ }],
             )?;
         } else {
             let mut all_caps = vec![Capability { cptr, rights: CapabilityRights::READ }];
             all_caps.extend_from_slice(&self.caps_to_send);
-            librust::syscalls::channel::send(task_cptr, ChannelMessage::default(), &all_caps)?;
+            librust::syscalls::channel::send(task_cptr, EndpointMessage::default(), &all_caps)?;
         }
 
         Ok(task_cptr)

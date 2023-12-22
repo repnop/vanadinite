@@ -20,7 +20,7 @@ use address_map::{AddressMap, Userspace};
 pub use address_map::{AddressRegion, AddressRegionKind};
 use core::ops::Range;
 
-use super::region::SharedPhysicalRegion;
+use super::{region::SharedPhysicalRegion, PageRange};
 
 pub enum FillOption<'a> {
     Data(&'a [u8]),
@@ -65,7 +65,7 @@ impl UserspaceMemoryManager {
         &mut self,
         at: Option<VirtualAddress>,
         description: RegionDescription,
-    ) -> Range<VirtualAddress> {
+    ) -> PageRange<VirtualAddress> {
         let RegionDescription { size, count, contiguous, flags, fill, kind } = description;
         let at = at.unwrap_or_else(|| self.find_free_region(size, count));
 
@@ -89,9 +89,9 @@ impl UserspaceMemoryManager {
             self.table.map(phys_addr, virt_addr, flags, size, Rsw::NONE);
         }
 
-        let range = at..at.add(size.to_byte_size() * count);
+        let range = PageRange::new(at, at.add(size.to_byte_size() * count), size);
         self.address_map
-            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), kind, flags)
+            .alloc(range.into_std_range(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), kind, flags)
             .expect("bad address mapping");
 
         range
@@ -119,7 +119,7 @@ impl UserspaceMemoryManager {
         &mut self,
         at: Option<VirtualAddress>,
         description: RegionDescription,
-    ) -> (Range<VirtualAddress>, SharedPhysicalRegion) {
+    ) -> (PageRange<VirtualAddress>, SharedPhysicalRegion) {
         let RegionDescription { size, count, contiguous, flags, fill, kind } = description;
         let at = at.unwrap_or_else(|| self.find_free_region(size, count));
         let mut backing = if contiguous {
@@ -141,10 +141,10 @@ impl UserspaceMemoryManager {
         }
 
         let shared = backing.into_shared_region();
-        let range = at..at.add(size.to_byte_size() * count);
+        let range = PageRange::new(at, at.add(size.to_byte_size() * count), size);
 
         self.address_map
-            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(shared.clone())), kind, flags)
+            .alloc(range.into_std_range(), MemoryRegion::Backed(PhysicalRegion::Shared(shared.clone())), kind, flags)
             .unwrap();
 
         (range, shared)
@@ -161,7 +161,7 @@ impl UserspaceMemoryManager {
         from: PhysicalAddress,
         to: Option<VirtualAddress>,
         len: usize,
-    ) -> Range<VirtualAddress> {
+    ) -> PageRange<VirtualAddress> {
         let n_pages = crate::utils::round_up_to_next(4.kib(), len) / 4.kib();
         let at = to.unwrap_or_else(|| self.find_free_region(PageSize::Kilopage, n_pages));
 
@@ -185,9 +185,14 @@ impl UserspaceMemoryManager {
             self.table.map(phys_addr, virt_addr, flags, PageSize::Kilopage, Rsw::NONE);
         }
 
-        let range = at..at.add(PageSize::Kilopage.to_byte_size() * n_pages);
+        let range = PageRange::new(at, at.add(PageSize::Kilopage.to_byte_size() * n_pages), PageSize::Kilopage);
         self.address_map
-            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Unique(backing)), AddressRegionKind::Mmio, flags)
+            .alloc(
+                range.into_std_range(),
+                MemoryRegion::Backed(PhysicalRegion::Unique(backing)),
+                AddressRegionKind::Mmio,
+                flags,
+            )
             .expect("bad address mapping");
 
         log::trace!("Mapped MMIO at {:#p}-{:#p}", range.start, range.end);
@@ -201,7 +206,7 @@ impl UserspaceMemoryManager {
         flags: Flags,
         region: SharedPhysicalRegion,
         kind: AddressRegionKind,
-    ) -> Range<VirtualAddress> {
+    ) -> PageRange<VirtualAddress> {
         let at = at.unwrap_or_else(|| self.find_free_region(region.page_size(), region.n_pages()));
 
         // FIXME: I suspect there's a bug with the address map where its giving
@@ -225,10 +230,11 @@ impl UserspaceMemoryManager {
             sfence(Some(virt_addr), None);
         }
 
-        let range = at..at.add(region.page_size().to_byte_size() * region.n_pages());
+        let range =
+            PageRange::new(at, at.add(region.page_size().to_byte_size() * region.n_pages()), region.page_size());
 
         self.address_map
-            .alloc(range.clone(), MemoryRegion::Backed(PhysicalRegion::Shared(region)), kind, flags)
+            .alloc(range.into_std_range(), MemoryRegion::Backed(PhysicalRegion::Shared(region)), kind, flags)
             .unwrap();
 
         range
@@ -280,15 +286,10 @@ impl UserspaceMemoryManager {
     /// it is invalid
     pub fn is_user_region_valid(
         &self,
-        range: Range<VirtualAddress>,
+        range: PageRange<VirtualAddress>,
         f: impl Fn(Flags) -> bool,
     ) -> Result<(), (VirtualAddress, InvalidRegion)> {
-        let start = range.start.align_down_to(PageSize::Kilopage);
-        let end = range.end.align_to_next(PageSize::Kilopage);
-
-        for page in (start.as_usize()..end.as_usize()).step_by(4.kib()) {
-            let page = VirtualAddress::new(page);
-
+        for page in range {
             if page.is_kernel_region() {
                 return Err((page, InvalidRegion::InvalidPermissions));
             }

@@ -1,2 +1,0 @@
-{"rule":"DASH_RULE","sentence":"^\\QKernel RNG -  Find a half decent way to seed RNG -  Implement ChaCha8 -  Figure out what entropy pools look like -  Find good source of entropy\\E$"}
-{"rule":"WHITESPACE_RULE","sentence":"^\\QKernel RNG -  Find a half decent way to seed RNG -  Implement ChaCha8 -  Figure out what entropy pools look like -  Find good source of entropy\\E$"}

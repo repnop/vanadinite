@@ -6,15 +6,15 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    capabilities::{Capability, CapabilityResource},
+    capabilities::{Capability, CapabilityBundle, CapabilityResource, MmioRegion, SharedMemory},
     interrupts::PLIC,
     mem::{
-        paging::{flags::Flags, VirtualAddress},
+        paging::{flags::Flags, PhysicalAddress, VirtualAddress},
         user::{self, RawUserSlice},
     },
     scheduler::{waitqueue::WaitQueue, TASKS},
     sync::SpinMutex,
-    task::Task,
+    task::{MutableState, Task},
     trap::GeneralRegisters,
     utils::SameHartDeadlockDetection,
     HART_ID,
@@ -29,82 +29,118 @@ use librust::{
     },
 };
 
+#[derive(Debug)]
+struct ChannelEndpointInner {
+    queue: SpinMutex<VecDeque<(EndpointIdentifier, EndpointMessage)>, SameHartDeadlockDetection>,
+    waitqueue: WaitQueue,
+}
+
 #[derive(Debug, Clone)]
 pub struct ChannelEndpoint {
-    queue: Arc<SpinMutex<VecDeque<(EndpointIdentifier, ChannelMessage)>, SameHartDeadlockDetection>>,
-    waitqueue: WaitQueue,
+    inner: Arc<ChannelEndpointInner>,
     id: EndpointIdentifier,
 }
 
 impl ChannelEndpoint {
     pub fn new() -> Self {
         Self {
-            queue: Arc::new(SpinMutex::new(VecDeque::new())),
-            waitqueue: WaitQueue::new(),
+            inner: Arc::new(ChannelEndpointInner {
+                queue: SpinMutex::new(VecDeque::new(), SameHartDeadlockDetection::new()),
+                waitqueue: WaitQueue::new(),
+            }),
             id: EndpointIdentifier::UNIDENTIFIED,
         }
     }
 
     /// Receive a message on the endpoint, blocking until one is received
-    pub fn recv(&self) -> (EndpointIdentifier, ChannelMessage) {
-        let mut queue = self.queue.lock();
+    pub fn recv(&self) -> (EndpointIdentifier, EndpointMessage) {
+        let mut queue = self.inner.queue.lock();
         loop {
             match queue.pop_front() {
                 Some(msg) => break msg,
-                None => self.waitqueue.wait(&mut queue),
+                None => self.inner.waitqueue.wait(&mut queue),
             }
         }
     }
 
-    pub fn try_recv(&self) -> Option<(EndpointIdentifier, ChannelMessage)> {
-        self.queue.lock().pop_front()
+    pub fn try_recv(&self) -> Option<(EndpointIdentifier, EndpointMessage)> {
+        self.inner.queue.lock().pop_front()
     }
 
     /// Send a message on the endpoint, waking anyone waiting for a message
-    pub fn send(&self, message: ChannelMessage) {
-        let mut queue = self.queue.lock();
+    pub fn send(&self, message: EndpointMessage) {
+        let mut queue = self.inner.queue.lock();
         // FIXME: this should definitely block after a certain size
         queue.push_back((self.id, message));
-        self.waitqueue.wake_one();
+        self.inner.waitqueue.wake_one();
     }
 
     pub fn mint(&self, new_identifier: EndpointIdentifier) -> Result<Self, EndpointAlreadyMinted> {
         match self.id {
-            EndpointIdentifier::UNIDENTIFIED => {
-                let mut new = self.clone();
-                new.id = new_identifier;
-                Ok(new)
-            }
+            EndpointIdentifier::UNIDENTIFIED => Ok(Self { id: new_identifier, inner: Arc::clone(&self.inner) }),
             _ => Err(EndpointAlreadyMinted),
         }
     }
 }
 
-#[derive(Clone)]
-pub struct ReplyEndpoint {
-    response: Arc,
+#[derive(Debug, Clone)]
+pub struct ReplyEndpoint(ChannelEndpoint);
+
+impl ReplyEndpoint {
+    pub fn new(endpoint: ChannelEndpoint) -> Self {
+        Self(endpoint)
+    }
+
+    pub fn reply(self, message: EndpointMessage) {
+        self.0.send(message);
+    }
+
+    pub fn into_inner(self) -> ChannelEndpoint {
+        self.0
+    }
 }
 
 #[derive(Debug)]
-pub struct ChannelMessage {
+pub struct EndpointMessage {
     pub data: [usize; 7],
     pub caps: Vec<Capability>,
     pub reply_endpoint: Option<ReplyEndpoint>,
+    pub shared_physical_address: Option<PhysicalAddress>,
 }
 
 pub fn send(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
-    let task_state = task.mutable_state.lock();
+    let mut task_state = task.mutable_state.lock();
+    // Borrowchecker is angry if its all deref'd through `task_state`, this
+    // allows the borrows to be disjoint
+    let MutableState { cspace, memory_manager, .. } = &mut *task_state;
 
     let cptr = CapabilityPtr::new(frame.a1);
     let caps =
         RawUserSlice::<user::Read, librust::capabilities::Capability>::new(VirtualAddress::new(frame.a2), frame.a3);
     let data = [frame.t0, frame.t1, frame.t2, frame.t3, frame.t4, frame.t5, frame.t6];
 
-    let channel = match task_state.cspace.resolve(cptr) {
+    let (channel, shared_physical_address) = match cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::WRITE =>
         {
-            channel.clone()
+            (channel.clone(), None)
+        }
+        Some(Capability { resource: CapabilityResource::Reply(_), .. }) => {
+            match cspace.remove(cptr).unwrap().resource {
+                CapabilityResource::Reply(endpoint) => (endpoint.into_inner(), None),
+                _ => unreachable!(),
+            }
+        }
+        // TODO: figure out bundle rights
+        Some(Capability {
+            resource: CapabilityResource::Bundle(CapabilityBundle { endpoint, shared_memory }),
+            rights,
+        }) => {
+            for addr in shared_memory.virtual_range {
+                memory_manager.modify_page_flags(addr, |_| Flags::USER | Flags::VALID);
+            }
+
+            (endpoint.clone(), shared_memory.physical_region.physical_addresses().next())
         }
         _ => return Err(SyscallError::InvalidArgument(0)),
     };
@@ -114,7 +150,7 @@ pub fn send(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallErro
     let caps = match caps.len() {
         0 => Vec::new(),
         _ => {
-            let cap_slice = match unsafe { caps.validate(&task_state.memory_manager) } {
+            let cap_slice = match unsafe { caps.validate(&memory_manager) } {
                 Ok(cap_slice) => cap_slice,
                 Err(_) => return Err(SyscallError::InvalidArgument(3)),
             };
@@ -129,7 +165,7 @@ pub fn send(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallErro
             // preallocation amount.
             let mut cloned_caps = Vec::with_capacity(2);
             for librust::capabilities::Capability { cptr, rights } in cap_slice.iter().copied() {
-                match task_state.cspace.resolve(cptr) {
+                match cspace.resolve(cptr) {
                     Some(cap) if cap.rights.is_superset(rights) && cap.rights & CapabilityRights::GRANT => {
                         // Can't allow sending invalid memory permissions
                         if let CapabilityResource::SharedMemory(..) = &cap.resource {
@@ -138,7 +174,11 @@ pub fn send(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallErro
                             }
                         }
 
-                        cloned_caps.push(cap.clone())
+                        match cap.rights & CapabilityRights::MOVE {
+                            // Remove the capability if its `MOVE`
+                            true => cloned_caps.push(cspace.remove(cptr).unwrap()),
+                            false => cloned_caps.push(cap.clone()),
+                        }
                     }
                     _ => return Err(SyscallError::InvalidArgument(2)),
                 }
@@ -150,62 +190,233 @@ pub fn send(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallErro
 
     log::debug!("[{}:{}] Sending channel message", task.name, task.tid);
     drop(task_state);
-    channel.send(ChannelMessage { data, caps });
+    channel.send(EndpointMessage { data, caps, reply_endpoint: None, shared_physical_address });
 
     Ok(())
 }
 
 pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
-    let task_state = task.mutable_state.lock();
+    let cap_buffer = RawUserSlice::<user::ReadWrite, librust::capabilities::CapabilityWithDescription>::new(
+        VirtualAddress::new(regs.a1),
+        regs.a2,
+    );
+
+    let flags = ChannelReadFlags::new(regs.a3);
+    let (id, EndpointMessage { data, caps, shared_physical_address, reply_endpoint }) =
+        if flags & ChannelReadFlags::NONBLOCKING {
+            match task.endpoint.try_recv() {
+                Some(msg) => msg,
+                None => return Err(SyscallError::WouldBlock),
+            }
+        } else {
+            task.endpoint.recv()
+        };
+
+    let mut task_state = task.mutable_state.lock();
+
+    if let Some(phys_addr) = shared_physical_address {
+        if let Some(virt_addr) = task_state.lock_regions.get(&phys_addr) {
+            for addr in virt_addr {
+                task_state
+                    .memory_manager
+                    .modify_page_flags(addr, |_| Flags::USER | Flags::VALID | Flags::READ | Flags::WRITE);
+            }
+        } else {
+            log::error!("[recv:{}:{}] no lock region found for physical address {:#p}", task.name, task.tid, phys_addr);
+        }
+    }
+
+    let cap_slice = match unsafe { cap_buffer.validate(&task_state.memory_manager) } {
+        Ok(cap_slice) => cap_slice,
+        Err(_) => return Err(SyscallError::InvalidArgument(2)),
+    };
+
+    let cap_slice = cap_slice.guarded();
+    let (caps_written, caps_remaining) = process_recv_caps(task, &mut task_state, id, &task.endpoint, caps, cap_slice);
+
+    let reply_endpoint_cptr = match reply_endpoint {
+        Some(reply) => task_state
+            .cspace
+            .mint(Capability {
+                resource: CapabilityResource::Reply(reply),
+                rights: CapabilityRights::GRANT | CapabilityRights::MOVE | CapabilityRights::WRITE,
+            })
+            .value(),
+        None => usize::MAX,
+    };
+
+    regs.a1 = caps_written;
+    regs.a2 = caps_remaining;
+    regs.a3 = id.get();
+    regs.a4 = reply_endpoint_cptr;
+    regs.t0 = data[0];
+    regs.t1 = data[1];
+    regs.t2 = data[2];
+    regs.t3 = data[3];
+    regs.t4 = data[4];
+    regs.t5 = data[5];
+    regs.t6 = data[6];
+
+    log::debug!("[{}:{}:{:?}] Read channel message! ra={:#p}", task.name, task.tid, id, crate::asm::ra());
+
+    Ok(())
+}
+
+pub fn call(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
+    let mut task_state = task.mutable_state.lock();
 
     let cptr = CapabilityPtr::new(regs.a1);
-    let cap_buffer = RawUserSlice::<user::ReadWrite, librust::capabilities::CapabilityWithDescription>::new(
-        VirtualAddress::new(regs.a2),
-        regs.a3,
+    let read_caps =
+        RawUserSlice::<user::Read, librust::capabilities::Capability>::new(VirtualAddress::new(regs.a2), regs.a3);
+    let write_caps = RawUserSlice::<user::ReadWrite, librust::capabilities::CapabilityWithDescription>::new(
+        VirtualAddress::new(regs.a4),
+        regs.a5,
     );
-    let flags = ChannelReadFlags::new(regs.a4);
+    let data = [regs.t0, regs.t1, regs.t2, regs.t3, regs.t4, regs.t5, regs.t6];
 
-    let channel = match task_state.cspace.resolve(cptr) {
+    let (channel, shared_physical_address) = match task_state.cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
-            if *rights & CapabilityRights::READ =>
+            if *rights & CapabilityRights::WRITE =>
         {
-            channel.clone()
+            (channel.clone(), None)
+        }
+        // FIXME: maybe use `rights` after figuring out bundle rights
+        Some(Capability {
+            resource: CapabilityResource::Bundle(CapabilityBundle { endpoint, shared_memory }),
+            rights,
+        }) => {
+            // Shared memory permissions don't need edited here since its a synchronous call
+            (endpoint.clone(), shared_memory.physical_region.physical_addresses().next())
         }
         _ => return Err(SyscallError::InvalidArgument(0)),
     };
 
-    drop(task_state);
-    let (id, ChannelMessage { data, mut caps }) = if flags & ChannelReadFlags::NONBLOCKING {
-        match channel.try_recv() {
-            Some(msg) => msg,
-            None => return Err(SyscallError::WouldBlock),
-        }
-    } else {
-        channel.recv()
+    let read_cap_slice = match unsafe { read_caps.validate(&task_state.memory_manager) } {
+        Ok(cap_slice) => cap_slice,
+        Err(_) => return Err(SyscallError::InvalidArgument(3)),
     };
 
-    let mut task_state = task.mutable_state.lock();
+    let read_cap_slice = read_cap_slice.guarded();
 
-    let (caps_written, caps_remaining) = match cap_buffer.len() {
+    let write_cap_slice = match unsafe { write_caps.validate(&task_state.memory_manager) } {
+        Ok(cap_slice) => cap_slice,
+        Err(_) => return Err(SyscallError::InvalidArgument(4)),
+    };
+
+    let write_cap_slice = write_cap_slice.guarded();
+
+    // Fixup caps here so we can error on any invalid caps/slice and not dealloc
+    // the message region
+    let caps = match read_cap_slice.len() {
+        0 => Vec::new(),
+        _ => {
+            // NOTE: A capacity of 2 is used to prevent users from passing us a
+            // (potentially very) large slice of invalid cptrs and causing us to
+            // pre-allocate a large amount of memory that will only potentially
+            // cause heap allocator pressure. Messages are unlikely to contain
+            // more than 1 or 2 caps, so default to 2 as a reasonable
+            // preallocation amount.
+            let mut cloned_caps = Vec::with_capacity(2);
+            for librust::capabilities::Capability { cptr, rights } in read_cap_slice.iter().copied() {
+                match task_state.cspace.resolve(cptr) {
+                    Some(cap) if cap.rights.is_superset(rights) && cap.rights & CapabilityRights::GRANT => {
+                        // Can't allow sending invalid memory permissions
+                        if let CapabilityResource::SharedMemory(..) = &cap.resource {
+                            if cap.rights & CapabilityRights::WRITE && !(cap.rights & CapabilityRights::READ) {
+                                return Err(SyscallError::InvalidArgument(2));
+                            }
+                        }
+
+                        match cap.rights & CapabilityRights::MOVE {
+                            // Remove the capability if its `MOVE`
+                            true => cloned_caps.push(task_state.cspace.remove(cptr).unwrap()),
+                            false => cloned_caps.push(cap.clone()),
+                        }
+                    }
+                    _ => return Err(SyscallError::InvalidArgument(2)),
+                }
+            }
+
+            cloned_caps
+        }
+    };
+
+    let tmp_endpoint = ChannelEndpoint::new();
+    channel.send(EndpointMessage {
+        data,
+        caps,
+        reply_endpoint: Some(ReplyEndpoint::new(tmp_endpoint.clone())),
+        shared_physical_address,
+    });
+
+    let (id, EndpointMessage { data, caps, .. }) = tmp_endpoint.recv();
+    let (caps_written, caps_remaining) = process_recv_caps(task, &mut task_state, id, &channel, caps, write_cap_slice);
+
+    regs.a1 = caps_written;
+    regs.a2 = caps_remaining;
+    regs.a3 = id.get();
+    regs.t0 = data[0];
+    regs.t1 = data[1];
+    regs.t2 = data[2];
+    regs.t3 = data[3];
+    regs.t4 = data[4];
+    regs.t5 = data[5];
+    regs.t6 = data[6];
+
+    log::debug!("[{}:{}:{:?}] Read call reply! ra={:#p}", task.name, task.tid, cptr, crate::asm::ra());
+
+    Ok(())
+}
+
+fn process_recv_caps(
+    task: &Task,
+    task_state: &mut MutableState,
+    id: EndpointIdentifier,
+    channel: &ChannelEndpoint,
+    mut caps: Vec<Capability>,
+    mut cap_slice: user::ValidUserSliceGuard<user::ReadWrite, librust::capabilities::CapabilityWithDescription>,
+) -> (usize, usize) {
+    let (read, left) = match cap_slice.len() {
         0 => (0, caps.len()),
         len => {
-            let cap_slice = match unsafe { cap_buffer.validate(&task_state.memory_manager) } {
-                Ok(cap_slice) => cap_slice,
-                Err(_) => return Err(SyscallError::InvalidArgument(3)),
-            };
-
             let n_caps_to_write = len.min(caps.len());
-            let mut cap_slice = cap_slice.guarded();
             for (target, cap) in cap_slice.iter_mut().zip(caps.drain(..n_caps_to_write)) {
                 let rights = cap.rights;
                 let (cptr, description) = match cap.resource {
+                    CapabilityResource::Reply(_) => todo!("idk if this should be a thing yet lol 🦀"),
+                    CapabilityResource::Bundle(CapabilityBundle {
+                        endpoint,
+                        shared_memory: SharedMemory { physical_region, kind, .. },
+                        ..
+                    }) => {
+                        let addr = task_state.memory_manager.apply_shared_region(
+                            None,
+                            Flags::VALID | Flags::USER | Flags::READ | Flags::WRITE,
+                            physical_region.clone(),
+                            kind,
+                        );
+
+                        let cptr = task_state.cspace.mint(Capability {
+                            resource: CapabilityResource::Bundle(CapabilityBundle {
+                                endpoint,
+                                shared_memory: SharedMemory { physical_region, virtual_range: addr.clone(), kind },
+                            }),
+                            rights,
+                        });
+
+                        (
+                            cptr,
+                            librust::capabilities::CapabilityDescription::Bundle {
+                                ptr: addr.start.as_mut_ptr(),
+                                len: addr.end.as_usize() - addr.start.as_usize(),
+                            },
+                        )
+                    }
                     CapabilityResource::Channel(channel) => (
-                        task_state
-                            .cspace
-                            .mint(Capability { resource: CapabilityResource::Channel(channel.clone()), rights }),
+                        task_state.cspace.mint(Capability { resource: CapabilityResource::Channel(channel), rights }),
                         librust::capabilities::CapabilityDescription::Channel,
                     ),
-                    CapabilityResource::SharedMemory(region, _, kind) => {
+                    CapabilityResource::SharedMemory(SharedMemory { physical_region, kind, .. }) => {
                         let mut permissions = MemoryPermissions::new(0);
                         let mut memflags = Flags::VALID | Flags::USER;
 
@@ -224,10 +435,19 @@ pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
                             memflags |= Flags::EXECUTE;
                         }
 
-                        let addr = task_state.memory_manager.apply_shared_region(None, memflags, region.clone(), kind);
+                        let addr = task_state.memory_manager.apply_shared_region(
+                            None,
+                            memflags,
+                            physical_region.clone(),
+                            kind,
+                        );
 
                         let cptr = task_state.cspace.mint(Capability {
-                            resource: CapabilityResource::SharedMemory(region, addr.clone(), kind),
+                            resource: CapabilityResource::SharedMemory(SharedMemory {
+                                physical_region,
+                                virtual_range: addr.clone(),
+                                kind,
+                            }),
                             rights,
                         });
 
@@ -240,13 +460,13 @@ pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
                             },
                         )
                     }
-                    CapabilityResource::Mmio(phys, _, interrupts) => {
+                    CapabilityResource::Mmio(MmioRegion { physical_range, interrupts, .. }) => {
                         // FIXME: check if this device has already been mapped
                         let virt = unsafe {
                             task_state.memory_manager.map_mmio_device(
-                                phys.start,
+                                physical_range.start,
                                 None,
-                                phys.end.as_usize() - phys.start.as_usize(),
+                                physical_range.end.as_usize() - physical_range.start.as_usize(),
                             )
                         };
 
@@ -274,15 +494,14 @@ pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
                                 );
 
                                 task_state.claimed_interrupts.insert(id, HART_ID.get());
-
-                                // FIXME: not sure if this is entirely correct..
-                                let sender = task_state.kernel_channel.clone();
-
                                 drop(task_state);
 
-                                sender.send(ChannelMessage {
+                                // FIXME: not sure if this is entirely correct..
+                                task.endpoint.send(EndpointMessage {
                                     data: Into::into(KernelMessage::InterruptOccurred(id)),
                                     caps: Vec::new(),
+                                    reply_endpoint: None,
+                                    shared_physical_address: None,
                                 });
 
                                 Ok(())
@@ -290,7 +509,11 @@ pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
                         }
 
                         let cptr = task_state.cspace.mint(Capability {
-                            resource: CapabilityResource::Mmio(phys.clone(), virt.clone(), interrupts),
+                            resource: CapabilityResource::Mmio(MmioRegion {
+                                physical_range: physical_range.clone(),
+                                virtual_range: virt.clone(),
+                                interrupts,
+                            }),
                             rights,
                         });
 
@@ -298,7 +521,7 @@ pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
                             cptr,
                             librust::capabilities::CapabilityDescription::MappedMmio {
                                 ptr: virt.start.as_mut_ptr(),
-                                len: phys.end.as_usize() - phys.start.as_usize(),
+                                len: physical_range.end.as_usize() - physical_range.start.as_usize(),
                                 n_interrupts,
                             },
                         )
@@ -315,78 +538,18 @@ pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
         }
     };
 
-    if caps_remaining != 0 {
-        channel.queue.lock().push_front((id, ChannelMessage { data: [0; 7], caps }));
+    if left != 0 {
+        channel.inner.queue.lock().push_front((
+            id,
+            EndpointMessage {
+                data: [0; 7],
+                caps,
+                reply_endpoint: None,
+                // TODO: should this copy the shared physical address? probably?
+                shared_physical_address: None,
+            },
+        ));
     }
 
-    regs.a1 = caps_written;
-    regs.a2 = caps_remaining;
-    regs.a3 = id.get();
-    regs.t0 = data[0];
-    regs.t1 = data[1];
-    regs.t2 = data[2];
-    regs.t3 = data[3];
-    regs.t4 = data[4];
-    regs.t5 = data[5];
-    regs.t6 = data[6];
-
-    log::debug!("[{}:{}:{:?}] Read channel message! ra={:#p}", task.name, task.tid, cptr, crate::asm::ra());
-    Ok(())
-}
-
-pub fn call(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
-    let task_state = task.mutable_state.lock();
-
-    let cptr = CapabilityPtr::new(frame.a1);
-    let caps =
-        RawUserSlice::<user::Read, librust::capabilities::Capability>::new(VirtualAddress::new(frame.a2), frame.a3);
-    let data = [frame.t0, frame.t1, frame.t2, frame.t3, frame.t4, frame.t5, frame.t6];
-
-    let channel = match task_state.cspace.resolve(cptr) {
-        Some(Capability { resource: CapabilityResource::Channel(channel), rights })
-            if *rights & CapabilityRights::WRITE =>
-        {
-            channel.clone()
-        }
-        _ => return Err(SyscallError::InvalidArgument(0)),
-    };
-
-    // Fixup caps here so we can error on any invalid caps/slice and not dealloc
-    // the message region
-    let caps = match caps.len() {
-        0 => Vec::new(),
-        _ => {
-            let cap_slice = match unsafe { caps.validate(&task_state.memory_manager) } {
-                Ok(cap_slice) => cap_slice,
-                Err(_) => return Err(SyscallError::InvalidArgument(3)),
-            };
-
-            let cap_slice = cap_slice.guarded();
-
-            // NOTE: A capacity of 2 is used to prevent users from passing us a
-            // (potentially very) large slice of invalid cptrs and causing us to
-            // pre-allocate a large amount of memory that will only potentially
-            // cause heap allocator pressure. Messages are unlikely to contain
-            // more than 1 or 2 caps, so default to 2 as a reasonable
-            // preallocation amount.
-            let mut cloned_caps = Vec::with_capacity(2);
-            for librust::capabilities::Capability { cptr, rights } in cap_slice.iter().copied() {
-                match task_state.cspace.resolve(cptr) {
-                    Some(cap) if cap.rights.is_superset(rights) && cap.rights & CapabilityRights::GRANT => {
-                        // Can't allow sending invalid memory permissions
-                        if let CapabilityResource::SharedMemory(..) = &cap.resource {
-                            if cap.rights & CapabilityRights::WRITE && !(cap.rights & CapabilityRights::READ) {
-                                return Err(SyscallError::InvalidArgument(2));
-                            }
-                        }
-
-                        cloned_caps.push(cap.clone())
-                    }
-                    _ => return Err(SyscallError::InvalidArgument(2)),
-                }
-            }
-
-            cloned_caps
-        }
-    };
+    (read, left)
 }

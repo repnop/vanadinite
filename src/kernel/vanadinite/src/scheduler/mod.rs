@@ -98,9 +98,11 @@ impl Scheduler {
     pub const fn new() -> Self {
         Self {
             inner: Lazy::new(|| {
-                (0..N_CPUS.load(Ordering::Relaxed)).map(|_| SpinMutex::new(SchedulerInner::new())).collect()
+                (0..N_CPUS.load(Ordering::Relaxed))
+                    .map(|_| SpinMutex::new(SchedulerInner::new(), SameHartDeadlockDetection::new()))
+                    .collect()
             }),
-            wait_queue: SpinMutex::new(BTreeMap::new()),
+            wait_queue: SpinMutex::new(BTreeMap::new(), SameHartDeadlockDetection::new()),
         }
     }
 

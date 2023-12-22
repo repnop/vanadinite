@@ -10,8 +10,9 @@ use crate::{
         manager::AddressRegionKind,
         paging::{PhysicalAddress, VirtualAddress},
         region::SharedPhysicalRegion,
+        PageRange,
     },
-    syscall::channel::ChannelEndpoint,
+    syscall::channel::{ChannelEndpoint, ReplyEndpoint},
 };
 use alloc::collections::BTreeMap;
 use core::ops::Range;
@@ -86,7 +87,29 @@ pub struct Capability {
 
 #[derive(Debug, Clone)]
 pub enum CapabilityResource {
+    Bundle(CapabilityBundle),
     Channel(ChannelEndpoint),
-    SharedMemory(SharedPhysicalRegion, Range<VirtualAddress>, AddressRegionKind),
-    Mmio(Range<PhysicalAddress>, Range<VirtualAddress>, alloc::vec::Vec<usize>),
+    Mmio(MmioRegion),
+    Reply(ReplyEndpoint),
+    SharedMemory(SharedMemory),
+}
+
+#[derive(Debug, Clone)]
+pub struct SharedMemory {
+    pub physical_region: SharedPhysicalRegion,
+    pub virtual_range: PageRange<VirtualAddress>,
+    pub kind: AddressRegionKind,
+}
+
+#[derive(Debug, Clone)]
+pub struct MmioRegion {
+    pub physical_range: PageRange<PhysicalAddress>,
+    pub virtual_range: PageRange<VirtualAddress>,
+    pub interrupts: alloc::vec::Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CapabilityBundle {
+    pub endpoint: ChannelEndpoint,
+    pub shared_memory: SharedMemory,
 }

@@ -13,6 +13,6 @@ Files: **/*.vidl
 Copyright: 2023 The vanadinite developers
 License: MPL-2.0
 
-Files: **/Cargo.toml **/config.toml **/*.png rust-toolchain rustfmt.toml README.md .gitignore .gitmodules .vscode/settings.json .vscode/snippets.code-snippets .vscode/license.code-snippets .vscode/ltex.hiddenFalsePositives.en-US.txt
+Files: **/Cargo.toml **/config.toml **/*.png rust-toolchain rustfmt.toml README.md .gitignore .gitmodules .vscode/settings.json .vscode/snippets.code-snippets .vscode/license.code-snippets book/**
 Copyright: 2023 The vanadinite developers
 License: CC0-1.0

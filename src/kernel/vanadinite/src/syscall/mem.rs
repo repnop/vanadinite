@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    capabilities::{Capability, CapabilityResource},
+    capabilities::{Capability, CapabilityResource, MmioRegion, SharedMemory},
     mem::{
         manager::{AddressRegion, AddressRegionKind, FillOption, RegionDescription},
         paging::{flags::Flags, PageSize, VirtualAddress},
@@ -75,11 +75,11 @@ pub fn allocate_shared_memory(task: &Task, frame: &mut GeneralRegisters) -> Resu
             };
 
             let cptr = task.cspace.mint(Capability {
-                resource: CapabilityResource::SharedMemory(
-                    region,
-                    allocated_at.clone(),
-                    AddressRegionKind::UserSharedMemory,
-                ),
+                resource: CapabilityResource::SharedMemory(SharedMemory {
+                    physical_region: region,
+                    virtual_range: allocated_at.clone(),
+                    kind: AddressRegionKind::UserSharedMemory,
+                }),
                 rights: rights | CapabilityRights::GRANT,
             });
 
@@ -199,7 +199,10 @@ pub fn query_mem_cap(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
     let cptr = CapabilityPtr::new(frame.a1);
 
     match task.mutable_state.lock().cspace.resolve(cptr) {
-        Some(Capability { resource: CapabilityResource::SharedMemory(_, vmem, _), rights }) => {
+        Some(Capability {
+            resource: CapabilityResource::SharedMemory(SharedMemory { virtual_range: vmem, .. }),
+            rights,
+        }) => {
             let memory_perms = match (*rights & CapabilityRights::READ, *rights & CapabilityRights::WRITE) {
                 (true, true) => MemoryPermissions::READ | MemoryPermissions::WRITE,
                 (true, false) => MemoryPermissions::READ,
@@ -231,7 +234,10 @@ pub fn query_mmio_cap(task: &Task, frame: &mut GeneralRegisters) -> Result<(), S
         };
 
     match task.cspace.resolve(cptr) {
-        Some(Capability { resource: CapabilityResource::Mmio(_, vmem, interrupts), .. }) => {
+        Some(Capability {
+            resource: CapabilityResource::Mmio(MmioRegion { interrupts, virtual_range: vmem, .. }),
+            ..
+        }) => {
             let n_interrupts = interrupts.len();
 
             let write_n = buffer.len().min(n_interrupts);

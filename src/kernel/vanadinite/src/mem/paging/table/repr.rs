@@ -402,7 +402,7 @@ impl PageSize {
     pub fn assert_addr_aligned(self, addr: usize) {
         let alignment_required = self.to_byte_size();
 
-        assert_eq!(addr % alignment_required, 0, "physical address alignment check failed");
+        assert_eq!(addr % alignment_required, 0, "address alignment check failed");
     }
 
     pub fn to_byte_size(self) -> usize {

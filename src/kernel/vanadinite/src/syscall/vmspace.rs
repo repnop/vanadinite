@@ -27,7 +27,7 @@ use librust::{
     capabilities::CapabilityRights,
     error::SyscallError,
     syscalls::{
-        channel::{KERNEL_CHANNEL, PARENT_CHANNEL},
+        channel::{OWN_ENDPOINT, PARENT_CHANNEL},
         mem::MemoryPermissions,
         vmspace::VmspaceObjectId,
     },
@@ -192,7 +192,15 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
         *trap_frame = TrapFrame { sepc: pc, registers: GeneralRegisters { sp, tp, a0, a1, a2, ..Default::default() } }
     };
 
-    let kernel_channel = ChannelEndpoint::new();
+    let endpoint = ChannelEndpoint::new();
+    let mut cspace = CapabilitySpace::new();
+    cspace
+        .mint_with_id(
+            OWN_ENDPOINT,
+            Capability { resource: CapabilityResource::Channel(endpoint.clone()), rights: CapabilityRights::READ },
+        )
+        .unwrap();
+
     let mut new_task = Task {
         tid: Tid::new(NonZeroUsize::new(usize::MAX).unwrap()),
         name: alloc::string::String::from(task_name).into_boxed_str(),
@@ -205,13 +213,14 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
             NoCheck,
         ),
         kernel_stack,
+        endpoint,
         mutable_state: SpinMutex::new(
             MutableState {
                 memory_manager: object.memory_manager,
                 vmspace_next_id: 0,
                 vmspace_objects: Default::default(),
-                cspace: CapabilitySpace::new(),
-                kernel_channel: kernel_channel.clone(),
+                cspace,
+                lock_regions: BTreeMap::new(),
                 claimed_interrupts: BTreeMap::new(),
                 subscribes_to_events: true,
                 state: TaskState::Ready,
@@ -220,15 +229,15 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
         ),
     };
 
-    let parent_channel = ChannelEndpoint::new();
+    let parent_endpoint = task.endpoint.clone();
 
     new_task
         .mutable_state
         .get_mut()
         .cspace
         .mint_with_id(
-            KERNEL_CHANNEL,
-            Capability { resource: CapabilityResource::Channel(kernel_channel), rights: CapabilityRights::READ },
+            OWN_ENDPOINT,
+            Capability { resource: CapabilityResource::Channel(endpoint), rights: CapabilityRights::READ },
         )
         .unwrap();
 

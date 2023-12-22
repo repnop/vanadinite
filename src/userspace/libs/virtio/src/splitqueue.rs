@@ -85,7 +85,7 @@ impl<T> core::hash::Hash for SplitqueueIndex<T> {
 
 impl<T> core::cmp::PartialOrd for SplitqueueIndex<T> {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.0.partial_cmp(&other.0)
+        Some(self.cmp(other))
     }
 }
 

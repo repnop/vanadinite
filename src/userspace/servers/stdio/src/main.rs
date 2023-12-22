@@ -41,7 +41,7 @@ fn main() {
         let cptr = match librust::syscalls::channel::read_kernel_message() {
             // hack to skip the notification from devicemgr since its
             // stale...
-            KernelMessage::NewChannelMessage(cptr) if cptr.value() != 1 => cptr,
+            KernelMessage::NewEndpointMessage(cptr) if cptr.value() != 1 => cptr,
             KernelMessage::InterruptOccurred(id) => {
                 let read = uart.read();
                 librust::syscalls::io::complete_interrupt(id).unwrap();

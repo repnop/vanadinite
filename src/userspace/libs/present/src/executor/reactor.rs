@@ -65,7 +65,7 @@ impl EventRegistry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum BlockType {
     NewIpcChannel,
-    IpcChannelMessage(CapabilityPtr),
+    IpcEndpointMessage(CapabilityPtr),
     Interrupt(usize),
     AsyncChannel(u64),
 }
@@ -81,12 +81,12 @@ impl Reactor {
                     waker.wake();
                 }
             }
-            KernelMessage::NewChannelMessage(cptr) => {
+            KernelMessage::NewEndpointMessage(cptr) => {
                 let saw = SEEN_IPC_CHANNELS.borrow().get(&cptr).is_some();
                 match saw {
                     true => {
-                        EVENT_REGISTRY.add_interested_event(BlockType::IpcChannelMessage(cptr));
-                        if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::IpcChannelMessage(cptr)) {
+                        EVENT_REGISTRY.add_interested_event(BlockType::IpcEndpointMessage(cptr));
+                        if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::IpcEndpointMessage(cptr)) {
                             waker.wake();
                         }
                     }
@@ -96,7 +96,7 @@ impl Reactor {
                         if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::NewIpcChannel) {
                             waker.wake();
                         }
-                        if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::IpcChannelMessage(cptr)) {
+                        if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::IpcEndpointMessage(cptr)) {
                             waker.wake();
                         }
                     }

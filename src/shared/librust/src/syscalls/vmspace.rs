@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{mem::MemoryPermissions, Syscall};
+use super::{channel::EndpointCapability, mem::MemoryPermissions, Syscall};
 use crate::{
     capabilities::CapabilityPtr,
     error::{RawSyscallError, SyscallError},
@@ -84,7 +84,11 @@ pub struct VmspaceSpawnEnv {
     pub tp: usize,
 }
 
-pub fn spawn_vmspace(id: VmspaceObjectId, name: &str, env: VmspaceSpawnEnv) -> Result<CapabilityPtr, SyscallError> {
+pub fn spawn_vmspace(
+    id: VmspaceObjectId,
+    name: &str,
+    env: VmspaceSpawnEnv,
+) -> Result<EndpointCapability, SyscallError> {
     let error: usize;
     let cptr: usize;
 
@@ -106,6 +110,6 @@ pub fn spawn_vmspace(id: VmspaceObjectId, name: &str, env: VmspaceSpawnEnv) -> R
 
     match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
-        None => Ok(CapabilityPtr::new(cptr)),
+        None => Ok(EndpointCapability::new(CapabilityPtr::new(cptr))),
     }
 }
