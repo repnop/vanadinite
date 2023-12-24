@@ -18,7 +18,6 @@ use crate::{
 };
 use address_map::{AddressMap, Userspace};
 pub use address_map::{AddressRegion, AddressRegionKind};
-use core::ops::Range;
 
 use super::{region::SharedPhysicalRegion, PageRange};
 

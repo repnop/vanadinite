@@ -17,15 +17,15 @@ use crate::{
     },
     platform::FDT,
     sync::{NoCheck, SpinMutex},
-    syscall::{channel::ChannelEndpoint, vmspace::VmspaceObject},
+    syscall::{endpoint::ChannelEndpoint, vmspace::VmspaceObject},
     trap::{GeneralRegisters, TrapFrame},
-    utils::{round_up_to_next, SameHartDeadlockDetection, Units},
+    utils::{round_up_to_next, Counter, SameHartDeadlockDetection, Units},
 };
 use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 use fdt::Fdt;
 use librust::{
     capabilities::CapabilityRights,
-    syscalls::{channel::OWN_ENDPOINT, vmspace::VmspaceObjectId},
+    syscalls::{endpoint::OWN_ENDPOINT, vmspace::VmspaceObjectId},
     task::Tid,
 };
 
@@ -66,7 +66,8 @@ pub struct Context {
 pub struct MutableState {
     pub memory_manager: UserspaceMemoryManager,
     pub vmspace_objects: BTreeMap<VmspaceObjectId, VmspaceObject>,
-    pub vmspace_next_id: usize,
+    pub vmspace_next_id: Counter,
+    pub reply_next_id: Counter,
     pub cspace: CapabilitySpace,
     pub claimed_interrupts: BTreeMap<usize, usize>,
     pub lock_regions: BTreeMap<PhysicalAddress, PageRange<VirtualAddress>>,
@@ -202,7 +203,8 @@ impl Task {
                 MutableState {
                     memory_manager,
                     vmspace_objects: BTreeMap::new(),
-                    vmspace_next_id: 0,
+                    vmspace_next_id: Counter::new(),
+                    reply_next_id: Counter::new(),
                     cspace,
                     claimed_interrupts: BTreeMap::new(),
                     lock_regions: BTreeMap::new(),
@@ -267,7 +269,8 @@ impl Task {
                 MutableState {
                     memory_manager,
                     vmspace_objects: BTreeMap::new(),
-                    vmspace_next_id: 0,
+                    vmspace_next_id: Counter::new(),
+                    reply_next_id: Counter::new(),
                     cspace,
                     claimed_interrupts: BTreeMap::new(),
                     lock_regions: BTreeMap::new(),

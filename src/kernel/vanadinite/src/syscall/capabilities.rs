@@ -15,7 +15,7 @@ use crate::{
 use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
     error::SyscallError,
-    syscalls::channel::EndpointIdentifier,
+    syscalls::endpoint::EndpointIdentifier,
 };
 
 /// Delete a capability from a task

@@ -12,10 +12,9 @@ use crate::{
         region::SharedPhysicalRegion,
         PageRange,
     },
-    syscall::channel::{ChannelEndpoint, ReplyEndpoint},
+    syscall::endpoint::{ChannelEndpoint, ReplyEndpoint},
 };
 use alloc::collections::BTreeMap;
-use core::ops::Range;
 use librust::capabilities::{CapabilityPtr, CapabilityRights};
 
 #[derive(Debug, Clone, Copy)]

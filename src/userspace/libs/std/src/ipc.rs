@@ -7,20 +7,20 @@
 
 use librust::{
     error::SyscallError,
-    syscalls::channel::{self, EndpointCapability, RecvResult},
+    syscalls::endpoint::{self, EndpointCapability, RecvResult},
 };
 
 pub use librust::capabilities::{
     Capability, CapabilityDescription, CapabilityPtr, CapabilityRights, CapabilityWithDescription,
 };
-pub use librust::syscalls::channel::{ChannelReadFlags, EndpointMessage};
+pub use librust::syscalls::endpoint::{ChannelReadFlags, EndpointMessage};
 
 pub fn recv(cap_buffer: &mut [CapabilityWithDescription], flags: ChannelReadFlags) -> Result<RecvResult, SyscallError> {
     loop {
-        match channel::recv(cap_buffer, flags)? {
-            channel::ReadMessage::Ipc(res) => return Ok(res),
-            channel::ReadMessage::Kernel(notif) => match notif {
-                channel::KernelMessage::InterruptOccurred(id) => {
+        match endpoint::recv(cap_buffer, flags)? {
+            endpoint::ReadMessage::Ipc(res) => return Ok(res),
+            endpoint::ReadMessage::Kernel(notif) => match notif {
+                endpoint::KernelMessage::InterruptOccurred(id) => {
                     match &mut *crate::task::INTERRUPT_CALLBACK.borrow_mut() {
                         Some(callback) => callback(id),
                         None => {}
@@ -56,7 +56,7 @@ impl IpcChannel {
     }
 
     pub fn send(&self, msg: EndpointMessage, caps: &[Capability]) -> Result<(), SyscallError> {
-        channel::send(self.cptr, msg, caps)
+        endpoint::send(self.cptr, msg, caps)
     }
 
     pub fn call(
@@ -65,6 +65,6 @@ impl IpcChannel {
         send_caps: &[Capability],
         recv_caps: &mut [CapabilityWithDescription],
     ) -> Result<RecvResult, SyscallError> {
-        channel::call(self.cptr, msg, send_caps, recv_caps)
+        endpoint::call(self.cptr, msg, send_caps, recv_caps)
     }
 }

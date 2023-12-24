@@ -7,7 +7,7 @@
 
 use librust::{
     capabilities::{Capability, CapabilityDescription, CapabilityRights, CapabilityWithDescription},
-    syscalls::channel::{ChannelReadFlags, PARENT_CHANNEL},
+    syscalls::endpoint::{ChannelReadFlags, PARENT_CHANNEL},
 };
 
 #[naked]

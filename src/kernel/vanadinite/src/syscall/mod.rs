@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod capabilities;
-pub mod channel;
+pub mod endpoint;
 pub mod io;
 pub mod mem;
 pub mod misc;
@@ -30,7 +30,7 @@ pub fn handle(frame: &mut TrapFrame) {
     let task = CURRENT_TASK.get();
     let task = &*task;
 
-    let mut regs = &mut frame.registers;
+    let regs = &mut frame.registers;
 
     let syscall = match Syscall::from_usize(regs.a0) {
         Some(syscall) => syscall,
@@ -61,8 +61,8 @@ pub fn handle(frame: &mut TrapFrame) {
         Syscall::SpawnVmspace => vmspace::spawn_vmspace(task, regs),
         Syscall::QueryMemoryCapability => mem::query_mem_cap(task, regs),
         Syscall::QueryMmioCapability => mem::query_mmio_cap(task, regs),
-        Syscall::ReadChannel => channel::recv(task, regs),
-        Syscall::WriteChannel => channel::send(task, regs),
+        Syscall::Recv => endpoint::recv(task, regs),
+        Syscall::Send => endpoint::send(task, regs),
         Syscall::MintCapability => todo!(),
         Syscall::RevokeCapability => todo!(),
         Syscall::EnableNotifications => Ok(task.mutable_state.lock().subscribes_to_events = true),

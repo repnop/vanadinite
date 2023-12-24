@@ -77,7 +77,7 @@ pub fn allocate_shared_memory(task: &Task, frame: &mut GeneralRegisters) -> Resu
             let cptr = task.cspace.mint(Capability {
                 resource: CapabilityResource::SharedMemory(SharedMemory {
                     physical_region: region,
-                    virtual_range: allocated_at.clone(),
+                    virtual_range: allocated_at,
                     kind: AddressRegionKind::UserSharedMemory,
                 }),
                 rights: rights | CapabilityRights::GRANT,

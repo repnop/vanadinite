@@ -16,14 +16,14 @@ use crate::{
     },
     platform::FDT,
     scheduler::TASKS,
-    syscall::channel::EndpointMessage,
+    syscall::endpoint::EndpointMessage,
     task::Task,
     trap::GeneralRegisters,
     HART_ID,
 };
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
-use librust::{capabilities::CapabilityRights, error::SyscallError, syscalls::channel::KernelMessage};
+use librust::{capabilities::CapabilityRights, error::SyscallError, syscalls::endpoint::KernelMessage};
 
 pub fn claim_device(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let mut task_state = task.mutable_state.lock();

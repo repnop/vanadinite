@@ -13,7 +13,7 @@ use core::{future::Future, pin::Pin};
 use librust::{
     capabilities::{Capability, CapabilityPtr, CapabilityWithDescription},
     error::SyscallError,
-    syscalls::channel::{self, ChannelReadFlags, EndpointMessage, RecvResult, KERNEL_CHANNEL},
+    syscalls::endpoint::{self, ChannelReadFlags, EndpointMessage, RecvResult, KERNEL_CHANNEL},
 };
 use std::task::{Context, Poll};
 
@@ -76,14 +76,14 @@ impl IpcChannel {
 
         if capabilities_remaining > 0 {
             caps.resize(capabilities_remaining, CapabilityWithDescription::default());
-            let _ = channel::recv(self.0, &mut caps[..], ChannelReadFlags::NONBLOCKING)?;
+            let _ = endpoint::recv(self.0, &mut caps[..], ChannelReadFlags::NONBLOCKING)?;
         }
 
         Ok((message, caps))
     }
 
     pub fn send(&self, msg: EndpointMessage, caps: &[Capability]) -> Result<(), SyscallError> {
-        channel::send(self.0, msg, caps)
+        endpoint::send(self.0, msg, caps)
     }
 }
 
@@ -112,14 +112,14 @@ impl Stream for IpcMessageStream {
     fn poll_next(self: Pin<&mut Self>, context: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        match channel::recv(this.channel.0, &mut [], ChannelReadFlags::NONBLOCKING) {
+        match endpoint::recv(this.channel.0, &mut [], ChannelReadFlags::NONBLOCKING) {
             Ok(rr) => {
                 let RecvResult { message, capabilities_remaining, .. } = rr;
                 let mut caps = Vec::new();
 
                 if capabilities_remaining > 0 {
                     caps.resize(capabilities_remaining, CapabilityWithDescription::default());
-                    let _ = channel::recv(this.channel.0, &mut caps[..], ChannelReadFlags::NONBLOCKING)?;
+                    let _ = endpoint::recv(this.channel.0, &mut caps[..], ChannelReadFlags::NONBLOCKING)?;
                 }
 
                 Poll::Ready(Some(Ok((message, caps))))
@@ -141,7 +141,7 @@ impl<'a> Future for IpcRead<'a> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        match channel::recv(this.0 .0, this.1, ChannelReadFlags::NONBLOCKING) {
+        match endpoint::recv(this.0 .0, this.1, ChannelReadFlags::NONBLOCKING) {
             Ok(rr) => Poll::Ready(Ok(rr)),
             Err(SyscallError::WouldBlock) => {
                 EVENT_REGISTRY.register(BlockType::IpcEndpointMessage(this.0 .0), cx.waker().clone());

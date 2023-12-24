@@ -5,7 +5,7 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{channel::EndpointCapability, mem::MemoryPermissions, Syscall};
+use super::{endpoint::EndpointCapability, mem::MemoryPermissions, Syscall};
 use crate::{
     capabilities::CapabilityPtr,
     error::{RawSyscallError, SyscallError},

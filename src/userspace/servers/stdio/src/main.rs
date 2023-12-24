@@ -11,7 +11,7 @@ use std::ipc::ChannelReadFlags;
 
 use librust::{
     capabilities::{CapabilityDescription, CapabilityWithDescription},
-    syscalls::channel::KernelMessage,
+    syscalls::endpoint::KernelMessage,
 };
 use ns16550::Uart16550;
 
@@ -38,7 +38,7 @@ fn main() {
     let mut input = Vec::new();
     librust::syscalls::task::enable_notifications();
     loop {
-        let cptr = match librust::syscalls::channel::read_kernel_message() {
+        let cptr = match librust::syscalls::endpoint::read_kernel_message() {
             // hack to skip the notification from devicemgr since its
             // stale...
             KernelMessage::NewEndpointMessage(cptr) if cptr.value() != 1 => cptr,

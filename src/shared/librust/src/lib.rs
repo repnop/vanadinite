@@ -32,3 +32,43 @@ pub mod mem;
 pub mod syscalls;
 pub mod task;
 pub mod units;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Either<T, U> {
+    Left(T),
+    Right(U),
+}
+
+impl<T, U> Either<T, U> {
+    #[track_caller]
+    pub fn unwrap_left(self) -> T {
+        match self {
+            Either::Left(t) => t,
+            Either::Right(_) => panic!("attempted to unwrap the opposing variant of an `Either`"),
+        }
+    }
+
+    #[track_caller]
+    pub fn unwrap_right(self) -> U {
+        match self {
+            Either::Right(u) => u,
+            Either::Left(_) => panic!("attempted to unwrap the opposing variant of an `Either`"),
+        }
+    }
+
+    #[track_caller]
+    pub fn left_or(self, default: T) -> T {
+        match self {
+            Either::Left(t) => t,
+            Either::Right(_) => default,
+        }
+    }
+
+    #[track_caller]
+    pub fn right_or(self, default: U) -> U {
+        match self {
+            Either::Right(u) => u,
+            Either::Left(_) => default,
+        }
+    }
+}

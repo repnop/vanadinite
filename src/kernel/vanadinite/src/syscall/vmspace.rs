@@ -17,17 +17,17 @@ use crate::{
     },
     scheduler::{return_to_usermode, SCHEDULER},
     sync::{NoCheck, SpinMutex},
-    syscall::channel::ChannelEndpoint,
+    syscall::endpoint::ChannelEndpoint,
     task::{Context, MutableState, Task, TaskState},
     trap::{GeneralRegisters, TrapFrame},
-    utils::{self, SameHartDeadlockDetection, Units},
+    utils::{self, Counter, SameHartDeadlockDetection, Units},
 };
 use alloc::{collections::BTreeMap, vec::Vec};
 use librust::{
     capabilities::CapabilityRights,
     error::SyscallError,
     syscalls::{
-        channel::{OWN_ENDPOINT, PARENT_CHANNEL},
+        endpoint::{OWN_ENDPOINT, PARENT_CHANNEL},
         mem::MemoryPermissions,
         vmspace::VmspaceObjectId,
     },
@@ -52,8 +52,7 @@ impl VmspaceObject {
 
 pub fn create_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let mut task = task.mutable_state.lock();
-    let id = task.vmspace_next_id;
-    task.vmspace_next_id += 1;
+    let id = task.vmspace_next_id.increment() as usize;
     task.vmspace_objects.insert(VmspaceObjectId::new(id), VmspaceObject::new());
 
     frame.a1 = id;
@@ -213,11 +212,12 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
             NoCheck,
         ),
         kernel_stack,
-        endpoint,
+        endpoint: endpoint.clone(),
         mutable_state: SpinMutex::new(
             MutableState {
                 memory_manager: object.memory_manager,
-                vmspace_next_id: 0,
+                vmspace_next_id: Counter::new(),
+                reply_next_id: Counter::new(),
                 vmspace_objects: Default::default(),
                 cspace,
                 lock_regions: BTreeMap::new(),
@@ -237,7 +237,7 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
         .cspace
         .mint_with_id(
             OWN_ENDPOINT,
-            Capability { resource: CapabilityResource::Channel(endpoint), rights: CapabilityRights::READ },
+            Capability { resource: CapabilityResource::Channel(endpoint.clone()), rights: CapabilityRights::READ },
         )
         .unwrap();
 
@@ -248,7 +248,7 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
         .mint_with_id(
             PARENT_CHANNEL,
             Capability {
-                resource: CapabilityResource::Channel(parent_channel.clone()),
+                resource: CapabilityResource::Channel(parent_endpoint.clone()),
                 rights: CapabilityRights::READ,
             },
         )
@@ -259,7 +259,7 @@ pub fn spawn_vmspace(task: &Task, frame: &mut GeneralRegisters) -> Result<(), Sy
     }
 
     let cptr = task_state.cspace.mint(Capability {
-        resource: CapabilityResource::Channel(parent_channel),
+        resource: CapabilityResource::Channel(endpoint.clone()),
         rights: CapabilityRights::GRANT | CapabilityRights::WRITE | CapabilityRights::READ,
     });
 

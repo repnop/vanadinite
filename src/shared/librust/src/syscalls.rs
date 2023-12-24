@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod capabilities;
-pub mod channel;
+pub mod endpoint;
 pub mod io;
 pub mod mem;
 pub mod task;
@@ -19,8 +19,8 @@ pub enum Syscall {
     DebugPrint = 1,
     AllocateVirtualMemory = 4,
     GetTid = 5,
-    ReadChannel = 7,
-    WriteChannel = 9,
+    Recv = 7,
+    Send = 9,
     AllocateDeviceAddressableMemory = 12,
     CreateVmspace = 13,
     AllocVmspaceObject = 14,
@@ -44,8 +44,8 @@ impl Syscall {
             1 => Some(Self::DebugPrint),
             4 => Some(Self::AllocateVirtualMemory),
             5 => Some(Self::GetTid),
-            7 => Some(Self::ReadChannel),
-            9 => Some(Self::WriteChannel),
+            7 => Some(Self::Recv),
+            9 => Some(Self::Send),
             12 => Some(Self::AllocateDeviceAddressableMemory),
             13 => Some(Self::CreateVmspace),
             14 => Some(Self::AllocVmspaceObject),

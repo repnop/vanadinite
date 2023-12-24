@@ -7,7 +7,7 @@
 
 use librust::{
     capabilities::CapabilityPtr,
-    syscalls::channel::{read_kernel_message, KernelMessage},
+    syscalls::endpoint::{KernelMessage, ReadMessage},
 };
 use std::{collections::BTreeMap, sync::SyncRefCell, task::Waker};
 
@@ -64,43 +64,24 @@ impl EventRegistry {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum BlockType {
-    NewIpcChannel,
     IpcEndpointMessage(CapabilityPtr),
     Interrupt(usize),
-    AsyncChannel(u64),
 }
 
 pub struct Reactor;
 
 impl Reactor {
     pub fn wait() {
-        match read_kernel_message() {
-            KernelMessage::InterruptOccurred(id) => {
-                EVENT_REGISTRY.add_interested_event(BlockType::Interrupt(id));
-                if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::Interrupt(id)) {
-                    waker.wake();
-                }
-            }
-            KernelMessage::NewEndpointMessage(cptr) => {
-                let saw = SEEN_IPC_CHANNELS.borrow().get(&cptr).is_some();
-                match saw {
-                    true => {
-                        EVENT_REGISTRY.add_interested_event(BlockType::IpcEndpointMessage(cptr));
-                        if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::IpcEndpointMessage(cptr)) {
-                            waker.wake();
-                        }
-                    }
-                    false => {
-                        SEEN_IPC_CHANNELS.borrow_mut().insert(cptr, ());
-                        NEW_IPC_CHANNELS.borrow_mut().push(cptr);
-                        if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::NewIpcChannel) {
-                            waker.wake();
-                        }
-                        if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::IpcEndpointMessage(cptr)) {
-                            waker.wake();
-                        }
+        loop {
+            let Ok(msg) = librust::syscalls::endpoint::recv() else { continue };
+            match msg {
+                ReadMessage::Kernel(KernelMessage::InterruptOccurred(id)) => {
+                    EVENT_REGISTRY.add_interested_event(BlockType::Interrupt(id));
+                    if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::Interrupt(id)) {
+                        waker.wake();
                     }
                 }
+                ReadMessage::Ipc(msg)
             }
         }
     }

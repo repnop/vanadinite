@@ -24,9 +24,13 @@ use librust::{
     capabilities::{CapabilityPtr, CapabilityRights},
     error::SyscallError,
     syscalls::{
-        channel::{ChannelReadFlags, EndpointAlreadyMinted, EndpointIdentifier, KernelMessage},
+        endpoint::{
+            ChannelReadFlags, EndpointAlreadyMinted, EndpointIdentifier, KernelMessage, ReplyId, RECV_NO_REPLY_INFO,
+            RECV_REPLY_ENDPOINT, RECV_REPLY_ID,
+        },
         mem::MemoryPermissions,
     },
+    Either,
 };
 
 #[derive(Debug)]
@@ -84,27 +88,28 @@ impl ChannelEndpoint {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReplyEndpoint(ChannelEndpoint);
+pub struct ReplyEndpoint(ChannelEndpoint, ReplyId);
 
 impl ReplyEndpoint {
-    pub fn new(endpoint: ChannelEndpoint) -> Self {
-        Self(endpoint)
+    pub fn new(endpoint: ChannelEndpoint, id: ReplyId) -> Self {
+        Self(endpoint, id)
     }
 
-    pub fn reply(self, message: EndpointMessage) {
+    pub fn reply(self, mut message: EndpointMessage) {
+        message.reply_endpoint = Some(Either::Right(self.1));
         self.0.send(message);
     }
 
-    pub fn into_inner(self) -> ChannelEndpoint {
-        self.0
+    pub fn into_inner(self) -> (ChannelEndpoint, ReplyId) {
+        (self.0, self.1)
     }
 }
 
 #[derive(Debug)]
 pub struct EndpointMessage {
     pub data: [usize; 7],
-    pub caps: Vec<Capability>,
-    pub reply_endpoint: Option<ReplyEndpoint>,
+    pub cap: Option<Capability>,
+    pub reply_endpoint: Option<Either<ReplyEndpoint, ReplyId>>,
     pub shared_physical_address: Option<PhysicalAddress>,
 }
 
@@ -113,10 +118,11 @@ pub fn send(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallErro
     // Borrowchecker is angry if its all deref'd through `task_state`, this
     // allows the borrows to be disjoint
     let MutableState { cspace, memory_manager, .. } = &mut *task_state;
+    let mut reply_endpoint = frame.a4 == 1;
 
     let cptr = CapabilityPtr::new(frame.a1);
-    let caps =
-        RawUserSlice::<user::Read, librust::capabilities::Capability>::new(VirtualAddress::new(frame.a2), frame.a3);
+    let cptr_to_send = CapabilityPtr::new(frame.a2);
+    let cptr_rights = CapabilityRights::new(frame.a3);
     let data = [frame.t0, frame.t1, frame.t2, frame.t3, frame.t4, frame.t5, frame.t6];
 
     let (channel, shared_physical_address) = match cspace.resolve(cptr) {
@@ -127,7 +133,10 @@ pub fn send(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallErro
         }
         Some(Capability { resource: CapabilityResource::Reply(_), .. }) => {
             match cspace.remove(cptr).unwrap().resource {
-                CapabilityResource::Reply(endpoint) => (endpoint.into_inner(), None),
+                CapabilityResource::Reply(endpoint) => {
+                    reply_endpoint = false;
+                    (endpoint.into_inner().0, None)
+                }
                 _ => unreachable!(),
             }
         }
@@ -147,50 +156,37 @@ pub fn send(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallErro
 
     // Fixup caps here so we can error on any invalid caps/slice and not dealloc
     // the message region
-    let caps = match caps.len() {
-        0 => Vec::new(),
-        _ => {
-            let cap_slice = match unsafe { caps.validate(&memory_manager) } {
-                Ok(cap_slice) => cap_slice,
-                Err(_) => return Err(SyscallError::InvalidArgument(3)),
-            };
-
-            let cap_slice = cap_slice.guarded();
-
-            // NOTE: A capacity of 2 is used to prevent users from passing us a
-            // (potentially very) large slice of invalid cptrs and causing us to
-            // pre-allocate a large amount of memory that will only potentially
-            // cause heap allocator pressure. Messages are unlikely to contain
-            // more than 1 or 2 caps, so default to 2 as a reasonable
-            // preallocation amount.
-            let mut cloned_caps = Vec::with_capacity(2);
-            for librust::capabilities::Capability { cptr, rights } in cap_slice.iter().copied() {
-                match cspace.resolve(cptr) {
-                    Some(cap) if cap.rights.is_superset(rights) && cap.rights & CapabilityRights::GRANT => {
-                        // Can't allow sending invalid memory permissions
-                        if let CapabilityResource::SharedMemory(..) = &cap.resource {
-                            if cap.rights & CapabilityRights::WRITE && !(cap.rights & CapabilityRights::READ) {
-                                return Err(SyscallError::InvalidArgument(2));
-                            }
-                        }
-
-                        match cap.rights & CapabilityRights::MOVE {
-                            // Remove the capability if its `MOVE`
-                            true => cloned_caps.push(cspace.remove(cptr).unwrap()),
-                            false => cloned_caps.push(cap.clone()),
-                        }
+    let cap = match cptr_rights == CapabilityRights::NONE {
+        false => Some(match cspace.resolve(cptr_to_send) {
+            Some(cap) if cap.rights.is_superset(cptr_rights) && cap.rights & CapabilityRights::GRANT => {
+                // Can't allow sending invalid memory permissions
+                if let CapabilityResource::SharedMemory(..) = &cap.resource {
+                    if cap.rights & CapabilityRights::WRITE && !(cap.rights & CapabilityRights::READ) {
+                        return Err(SyscallError::InvalidArgument(2));
                     }
-                    _ => return Err(SyscallError::InvalidArgument(2)),
+                }
+
+                match cap.rights & CapabilityRights::MOVE {
+                    // Remove the capability if its `MOVE`
+                    true => cspace.remove(cptr).unwrap(),
+                    false => cap.clone(),
                 }
             }
+            _ => return Err(SyscallError::InvalidArgument(2)),
+        }),
+        true => None,
+    };
 
-            cloned_caps
+    let reply_endpoint = match reply_endpoint {
+        true => {
+            Some(Either::Left(ReplyEndpoint(task.endpoint.clone(), ReplyId::new(task_state.reply_next_id.increment()))))
         }
+        false => None,
     };
 
     log::debug!("[{}:{}] Sending channel message", task.name, task.tid);
     drop(task_state);
-    channel.send(EndpointMessage { data, caps, reply_endpoint: None, shared_physical_address });
+    channel.send(EndpointMessage { data, cap, reply_endpoint, shared_physical_address });
 
     Ok(())
 }
@@ -202,7 +198,7 @@ pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
     );
 
     let flags = ChannelReadFlags::new(regs.a3);
-    let (id, EndpointMessage { data, caps, shared_physical_address, reply_endpoint }) =
+    let (id, EndpointMessage { data, cap, shared_physical_address, reply_endpoint }) =
         if flags & ChannelReadFlags::NONBLOCKING {
             match task.endpoint.try_recv() {
                 Some(msg) => msg,
@@ -232,23 +228,28 @@ pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
     };
 
     let cap_slice = cap_slice.guarded();
-    let (caps_written, caps_remaining) = process_recv_caps(task, &mut task_state, id, &task.endpoint, caps, cap_slice);
+    let (caps_written, caps_remaining) = process_recv_caps(task, &mut task_state, id, &task.endpoint, cap, cap_slice);
 
-    let reply_endpoint_cptr = match reply_endpoint {
-        Some(reply) => task_state
-            .cspace
-            .mint(Capability {
-                resource: CapabilityResource::Reply(reply),
-                rights: CapabilityRights::GRANT | CapabilityRights::MOVE | CapabilityRights::WRITE,
-            })
-            .value(),
-        None => usize::MAX,
+    let (reply_value, reply_value_type) = match reply_endpoint {
+        Some(Either::Left(reply)) => (
+            task_state
+                .cspace
+                .mint(Capability {
+                    resource: CapabilityResource::Reply(reply),
+                    rights: CapabilityRights::GRANT | CapabilityRights::MOVE | CapabilityRights::WRITE,
+                })
+                .value(),
+            RECV_REPLY_ENDPOINT,
+        ),
+        Some(Either::Right(id)) => (id.get() as usize, RECV_REPLY_ID),
+        None => (0, RECV_NO_REPLY_INFO),
     };
 
     regs.a1 = caps_written;
     regs.a2 = caps_remaining;
     regs.a3 = id.get();
-    regs.a4 = reply_endpoint_cptr;
+    regs.a4 = reply_value;
+    regs.a5 = reply_value_type;
     regs.t0 = data[0];
     regs.t1 = data[1];
     regs.t2 = data[2];
@@ -344,12 +345,15 @@ pub fn call(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
     let tmp_endpoint = ChannelEndpoint::new();
     channel.send(EndpointMessage {
         data,
-        caps,
-        reply_endpoint: Some(ReplyEndpoint::new(tmp_endpoint.clone())),
+        cap,
+        reply_endpoint: Some(Either::Left(ReplyEndpoint::new(
+            tmp_endpoint.clone(),
+            ReplyId::new(task_state.reply_next_id.increment()),
+        ))),
         shared_physical_address,
     });
 
-    let (id, EndpointMessage { data, caps, .. }) = tmp_endpoint.recv();
+    let (id, EndpointMessage { data, cap, .. }) = tmp_endpoint.recv();
     let (caps_written, caps_remaining) = process_recv_caps(task, &mut task_state, id, &channel, caps, write_cap_slice);
 
     regs.a1 = caps_written;
@@ -399,7 +403,7 @@ fn process_recv_caps(
                         let cptr = task_state.cspace.mint(Capability {
                             resource: CapabilityResource::Bundle(CapabilityBundle {
                                 endpoint,
-                                shared_memory: SharedMemory { physical_region, virtual_range: addr.clone(), kind },
+                                shared_memory: SharedMemory { physical_region, virtual_range: addr, kind },
                             }),
                             rights,
                         });
@@ -445,7 +449,7 @@ fn process_recv_caps(
                         let cptr = task_state.cspace.mint(Capability {
                             resource: CapabilityResource::SharedMemory(SharedMemory {
                                 physical_region,
-                                virtual_range: addr.clone(),
+                                virtual_range: addr,
                                 kind,
                             }),
                             rights,
@@ -499,7 +503,7 @@ fn process_recv_caps(
                                 // FIXME: not sure if this is entirely correct..
                                 task.endpoint.send(EndpointMessage {
                                     data: Into::into(KernelMessage::InterruptOccurred(id)),
-                                    caps: Vec::new(),
+                                    cap: None,
                                     reply_endpoint: None,
                                     shared_physical_address: None,
                                 });
@@ -510,8 +514,8 @@ fn process_recv_caps(
 
                         let cptr = task_state.cspace.mint(Capability {
                             resource: CapabilityResource::Mmio(MmioRegion {
-                                physical_range: physical_range.clone(),
-                                virtual_range: virt.clone(),
+                                physical_range,
+                                virtual_range: virt,
                                 interrupts,
                             }),
                             rights,
@@ -538,18 +542,5 @@ fn process_recv_caps(
         }
     };
 
-    if left != 0 {
-        channel.inner.queue.lock().push_front((
-            id,
-            EndpointMessage {
-                data: [0; 7],
-                caps,
-                reply_endpoint: None,
-                // TODO: should this copy the shared physical address? probably?
-                shared_physical_address: None,
-            },
-        ));
-    }
-
-    (read, left)
+    read
 }

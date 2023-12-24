@@ -18,7 +18,7 @@ macro_rules! vidl_include {
 pub use librust::{
     capabilities::{Capability, CapabilityDescription, CapabilityPtr, CapabilityRights, CapabilityWithDescription},
     mem::SharedMemoryAllocation,
-    syscalls::channel::{ChannelReadFlags, EndpointMessage},
+    syscalls::endpoint::{ChannelReadFlags, EndpointMessage},
     units::Bytes,
 };
 
@@ -37,7 +37,7 @@ pub mod present {
 #[doc(hidden)]
 pub mod internal {
     pub use librust::syscalls::{
-        channel::{read_kernel_message, ChannelReadFlags, KernelMessage},
+        endpoint::{read_kernel_message, ChannelReadFlags, KernelMessage},
         mem::MemoryPermissions,
     };
     pub use std::ipc::IpcChannel;

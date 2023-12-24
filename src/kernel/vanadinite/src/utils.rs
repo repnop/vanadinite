@@ -107,6 +107,20 @@ macro_rules! impl_units {
 
 impl_units!(u16, u32, u64, u128, i16, i32, i64, i128, usize, isize);
 
+pub struct Counter(u64);
+
+impl Counter {
+    pub fn new() -> Self {
+        Self(0)
+    }
+
+    pub fn increment(&mut self) -> u64 {
+        let ret = self.0;
+        self.0 = self.0.wrapping_add(1);
+        ret
+    }
+}
+
 #[derive(Debug)]
 pub struct SameHartDeadlockDetection {
     hart_id: AtomicUsize,

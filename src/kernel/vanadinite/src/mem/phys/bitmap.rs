@@ -47,7 +47,7 @@ impl BitmapAllocator {
             let page_ptr = (self.mem_start as usize + index * SINGLE_ENTRY_SIZE_BYTES) as *mut u8;
 
             return match page_ptr < self.mem_end {
-                true => Some(PhysicalPage::from_ptr(page_ptr as *mut u8)),
+                true => Some(PhysicalPage::from_ptr(page_ptr)),
                 false => None,
             };
         }
