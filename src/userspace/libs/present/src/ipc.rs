@@ -13,7 +13,7 @@ use core::{future::Future, pin::Pin};
 use librust::{
     capabilities::{Capability, CapabilityPtr, CapabilityWithDescription},
     error::SyscallError,
-    syscalls::endpoint::{self, ChannelReadFlags, EndpointMessage, RecvResult, KERNEL_CHANNEL},
+    syscalls::endpoint::{self, ChannelReadFlags, EndpointMessage, IpcMessage, KERNEL_CHANNEL},
 };
 use std::task::{Context, Poll};
 
@@ -66,13 +66,13 @@ impl IpcChannel {
         Self(cptr)
     }
 
-    pub async fn read(&self, cap_buffer: &mut [CapabilityWithDescription]) -> Result<RecvResult, SyscallError> {
+    pub async fn read(&self, cap_buffer: &mut [CapabilityWithDescription]) -> Result<IpcMessage, SyscallError> {
         IpcRead(self, cap_buffer).await
     }
 
     pub async fn read_with_all_caps(&self) -> Result<(EndpointMessage, Vec<CapabilityWithDescription>), SyscallError> {
         let mut caps = Vec::new();
-        let RecvResult { message, capabilities_remaining, .. } = self.read(&mut caps[..]).await?;
+        let IpcMessage { message, capabilities_remaining, .. } = self.read(&mut caps[..]).await?;
 
         if capabilities_remaining > 0 {
             caps.resize(capabilities_remaining, CapabilityWithDescription::default());
@@ -114,7 +114,7 @@ impl Stream for IpcMessageStream {
 
         match endpoint::recv(this.channel.0, &mut [], ChannelReadFlags::NONBLOCKING) {
             Ok(rr) => {
-                let RecvResult { message, capabilities_remaining, .. } = rr;
+                let IpcMessage { message, capabilities_remaining, .. } = rr;
                 let mut caps = Vec::new();
 
                 if capabilities_remaining > 0 {
@@ -136,7 +136,7 @@ impl Stream for IpcMessageStream {
 pub struct IpcRead<'a>(&'a IpcChannel, &'a mut [CapabilityWithDescription]);
 
 impl<'a> Future for IpcRead<'a> {
-    type Output = Result<RecvResult, SyscallError>;
+    type Output = Result<IpcMessage, SyscallError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();

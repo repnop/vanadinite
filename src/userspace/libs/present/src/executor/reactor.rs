@@ -7,7 +7,7 @@
 
 use librust::{
     capabilities::CapabilityPtr,
-    syscalls::endpoint::{KernelMessage, ReadMessage},
+    syscalls::endpoint::{KernelMessage, Message},
 };
 use std::{collections::BTreeMap, sync::SyncRefCell, task::Waker};
 
@@ -75,13 +75,13 @@ impl Reactor {
         loop {
             let Ok(msg) = librust::syscalls::endpoint::recv() else { continue };
             match msg {
-                ReadMessage::Kernel(KernelMessage::InterruptOccurred(id)) => {
+                Message::Kernel(KernelMessage::InterruptOccurred(id)) => {
                     EVENT_REGISTRY.add_interested_event(BlockType::Interrupt(id));
                     if let Some(waker) = EVENT_REGISTRY.unregister(BlockType::Interrupt(id)) {
                         waker.wake();
                     }
                 }
-                ReadMessage::Ipc(msg)
+                Message::Ipc(msg)
             }
         }
     }

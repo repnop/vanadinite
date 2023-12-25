@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    capabilities::{Capability, CapabilityPtr, CapabilityWithDescription},
+    capabilities::{Capability, CapabilityPtr, CapabilityRights, CapabilityWithDescription},
     error::{RawSyscallError, SyscallError},
     syscalls::Syscall,
     Either,
@@ -175,19 +175,20 @@ pub fn send_with_reply(
     }
 }
 
-/// The result of a successful read from an IPC channel
-pub struct RecvResult {
-    /// Endpoint identifier for the sender
+///
+pub struct IpcMessage {
+    /// Endpoint identifier of the sender
     pub identifier: EndpointIdentifier,
     /// Message data
     pub message: EndpointMessage,
+    pub capability: Option<Capability>,
     // FIXME: this shouldn't exist in `call` return values
     pub reply: Option<Either<ReplyCapability, ReplyId>>,
 }
 
-pub enum ReadMessage {
+pub enum Message {
     Kernel(KernelMessage),
-    Ipc(RecvResult),
+    Ipc(IpcMessage),
 }
 
 pub const RECV_NO_REPLY_INFO: usize = 0;
@@ -196,12 +197,11 @@ pub const RECV_REPLY_ID: usize = 2;
 
 /// Attempt to read a message and/or capabilities from an IPC channel
 /// represented by the given [`CapabilityPtr`]
-pub fn recv(
-    cap_buffer: &mut [CapabilityWithDescription],
-    flags: ChannelReadFlags,
-) -> Result<ReadMessage, SyscallError> {
+pub fn recv(flags: ChannelReadFlags) -> Result<Message, SyscallError> {
     let error: usize;
     let endpoint_id: usize;
+    let sent_cap: usize;
+    let sent_cap_rights: usize;
     let reply_value: usize;
     let reply_type: usize;
     let mut message = [0; 7];
@@ -210,9 +210,9 @@ pub fn recv(
         core::arch::asm!(
             "ecall",
             inlateout("a0") Syscall::Recv as usize => error,
-            lateout("a1") sent_cap,
-            inlateout("a2") sent_cap_rights,
-            inlateout("a3") flags.0 => endpoint_id,
+            inlateout("a1") flags.0 => endpoint_id,
+            lateout("a2") sent_cap,
+            lateout("a3") sent_cap_rights,
             lateout("a4") reply_value,
             lateout("a5") reply_type,
             lateout("t0") message[0],
@@ -228,10 +228,17 @@ pub fn recv(
     match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
         None => match endpoint_id {
-            usize::MAX => Ok(ReadMessage::Kernel(KernelMessage::construct(message))),
-            _ => Ok(ReadMessage::Ipc(RecvResult {
+            usize::MAX => Ok(Message::Kernel(KernelMessage::construct(message))),
+            _ => Ok(Message::Ipc(IpcMessage {
                 identifier: EndpointIdentifier(endpoint_id),
                 message: EndpointMessage(message),
+                capability: match CapabilityRights::new(sent_cap_rights) {
+                    CapabilityRights::NONE => None,
+                    _ => Some(Capability {
+                        cptr: CapabilityPtr::new(sent_cap),
+                        rights: CapabilityRights::new(sent_cap_rights),
+                    }),
+                },
                 reply: match reply_type {
                     RECV_NO_REPLY_INFO => None,
                     RECV_REPLY_ENDPOINT => Some(Either::Left(ReplyCapability(CapabilityPtr::new(reply_value)))),
@@ -244,25 +251,26 @@ pub fn recv(
 }
 
 pub fn call(
-    channel: EndpointCapability,
+    endpoint: EndpointCapability,
     mut message: EndpointMessage,
-    to_send: &[Capability],
-    to_recv: &mut [CapabilityWithDescription],
-) -> Result<RecvResult, SyscallError> {
+    to_send: Option<Capability>,
+) -> Result<IpcMessage, SyscallError> {
     let error: usize;
-    let capabilities_read: usize;
-    let capabilities_remaining: usize;
     let endpoint_id: usize;
+    let received_cap: usize;
+    let received_cap_rights: usize;
+
+    let (sending_cptr, sending_rights) =
+        to_send.map(|c| (c.cptr.value(), c.rights.value())).unwrap_or((usize::MAX, CapabilityRights::NONE.value()));
 
     unsafe {
         core::arch::asm!(
             "ecall",
+            FIX THIS
             inlateout("a0") Syscall::Recv as usize => error,
-            inlateout("a1") channel.get().value() => capabilities_read,
-            inlateout("a2") to_send.as_ptr() => capabilities_remaining,
-            inlateout("a3") to_send.len() => endpoint_id,
-            in("a4") to_recv.as_mut_ptr(),
-            in("a5") to_recv.len(),
+            inlateout("a1") endpoint.get().value() => received_cap,
+            inlateout("a2") sending_cptr => received_cap_rights,
+            inlateout("a3") sending_rights => endpoint_id,
             inlateout("t0") message.0[0] => message.0[0],
             inlateout("t1") message.0[1] => message.0[1],
             inlateout("t2") message.0[2] => message.0[2],
@@ -275,7 +283,7 @@ pub fn call(
 
     match RawSyscallError::optional(error) {
         Some(error) => Err(error.cook()),
-        None => Ok(RecvResult { identifier: EndpointIdentifier(endpoint_id), message, reply: None }),
+        None => Ok(IpcMessage { identifier: EndpointIdentifier(endpoint_id), message, reply: None }),
     }
 }
 

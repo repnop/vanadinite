@@ -192,12 +192,7 @@ pub fn send(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallErro
 }
 
 pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
-    let cap_buffer = RawUserSlice::<user::ReadWrite, librust::capabilities::CapabilityWithDescription>::new(
-        VirtualAddress::new(regs.a1),
-        regs.a2,
-    );
-
-    let flags = ChannelReadFlags::new(regs.a3);
+    let flags = ChannelReadFlags::new(regs.a2);
     let (id, EndpointMessage { data, cap, shared_physical_address, reply_endpoint }) =
         if flags & ChannelReadFlags::NONBLOCKING {
             match task.endpoint.try_recv() {
@@ -222,13 +217,13 @@ pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
         }
     }
 
-    let cap_slice = match unsafe { cap_buffer.validate(&task_state.memory_manager) } {
-        Ok(cap_slice) => cap_slice,
-        Err(_) => return Err(SyscallError::InvalidArgument(2)),
+    let (cptr, rights) = match cap {
+        Some(cap) => {
+            let rights = cap.rights;
+            (task_state.cspace.mint(cap), rights)
+        }
+        None => (CapabilityPtr::new(usize::MAX), CapabilityRights::NONE),
     };
-
-    let cap_slice = cap_slice.guarded();
-    let (caps_written, caps_remaining) = process_recv_caps(task, &mut task_state, id, &task.endpoint, cap, cap_slice);
 
     let (reply_value, reply_value_type) = match reply_endpoint {
         Some(Either::Left(reply)) => (
@@ -245,9 +240,9 @@ pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
         None => (0, RECV_NO_REPLY_INFO),
     };
 
-    regs.a1 = caps_written;
-    regs.a2 = caps_remaining;
-    regs.a3 = id.get();
+    regs.a1 = id.get();
+    regs.a2 = cptr.value();
+    regs.a3 = rights.value();
     regs.a4 = reply_value;
     regs.a5 = reply_value_type;
     regs.t0 = data[0];
