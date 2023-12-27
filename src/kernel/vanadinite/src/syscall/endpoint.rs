@@ -218,10 +218,7 @@ pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
     }
 
     let (cptr, rights) = match cap {
-        Some(cap) => {
-            let rights = cap.rights;
-            (task_state.cspace.mint(cap), rights)
-        }
+        Some(cap) => process_recv_cap(task, &mut *task_state, cap),
         None => (CapabilityPtr::new(usize::MAX), CapabilityRights::NONE),
     };
 
@@ -286,20 +283,6 @@ pub fn call(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
         }
         _ => return Err(SyscallError::InvalidArgument(0)),
     };
-
-    let read_cap_slice = match unsafe { read_caps.validate(&task_state.memory_manager) } {
-        Ok(cap_slice) => cap_slice,
-        Err(_) => return Err(SyscallError::InvalidArgument(3)),
-    };
-
-    let read_cap_slice = read_cap_slice.guarded();
-
-    let write_cap_slice = match unsafe { write_caps.validate(&task_state.memory_manager) } {
-        Ok(cap_slice) => cap_slice,
-        Err(_) => return Err(SyscallError::InvalidArgument(4)),
-    };
-
-    let write_cap_slice = write_cap_slice.guarded();
 
     // Fixup caps here so we can error on any invalid caps/slice and not dealloc
     // the message region
@@ -367,175 +350,164 @@ pub fn call(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
     Ok(())
 }
 
-fn process_recv_caps(
-    task: &Task,
-    task_state: &mut MutableState,
-    id: EndpointIdentifier,
-    channel: &ChannelEndpoint,
-    mut caps: Vec<Capability>,
-    mut cap_slice: user::ValidUserSliceGuard<user::ReadWrite, librust::capabilities::CapabilityWithDescription>,
-) -> (usize, usize) {
-    let (read, left) = match cap_slice.len() {
-        0 => (0, caps.len()),
-        len => {
-            let n_caps_to_write = len.min(caps.len());
-            for (target, cap) in cap_slice.iter_mut().zip(caps.drain(..n_caps_to_write)) {
-                let rights = cap.rights;
-                let (cptr, description) = match cap.resource {
-                    CapabilityResource::Reply(_) => todo!("idk if this should be a thing yet lol 🦀"),
-                    CapabilityResource::Bundle(CapabilityBundle {
-                        endpoint,
-                        shared_memory: SharedMemory { physical_region, kind, .. },
-                        ..
-                    }) => {
-                        let addr = task_state.memory_manager.apply_shared_region(
-                            None,
-                            Flags::VALID | Flags::USER | Flags::READ | Flags::WRITE,
-                            physical_region.clone(),
-                            kind,
-                        );
+fn process_recv_cap(task: &Task, task_state: &mut MutableState, cap: Capability) -> (CapabilityPtr, CapabilityRights) {
+    let rights = cap.rights;
+    let cptr = match cap.resource {
+        CapabilityResource::Reply(_) => todo!("idk if this should be a thing yet lol 🦀"),
+        CapabilityResource::Bundle(CapabilityBundle {
+            endpoint,
+            shared_memory: SharedMemory { physical_region, kind, .. },
+            ..
+        }) => {
+            let addr = task_state.memory_manager.apply_shared_region(
+                None,
+                Flags::VALID | Flags::USER | Flags::READ | Flags::WRITE,
+                physical_region.clone(),
+                kind,
+            );
 
-                        let cptr = task_state.cspace.mint(Capability {
-                            resource: CapabilityResource::Bundle(CapabilityBundle {
-                                endpoint,
-                                shared_memory: SharedMemory { physical_region, virtual_range: addr, kind },
-                            }),
-                            rights,
-                        });
+            let cptr = CapabilityPtr::new(
+                addr.start.as_usize()
+                    | match addr.page_size {
+                        // FIXME: make these constants somewhere
+                        crate::mem::paging::PageSize::Gigapage => 0b1111,
+                        crate::mem::paging::PageSize::Megapage => 0b1110,
+                        crate::mem::paging::PageSize::Kilopage => 0b1101,
+                    },
+            );
 
-                        (
-                            cptr,
-                            librust::capabilities::CapabilityDescription::Bundle {
-                                ptr: addr.start.as_mut_ptr(),
-                                len: addr.end.as_usize() - addr.start.as_usize(),
-                            },
-                        )
-                    }
-                    CapabilityResource::Channel(channel) => (
-                        task_state.cspace.mint(Capability { resource: CapabilityResource::Channel(channel), rights }),
-                        librust::capabilities::CapabilityDescription::Channel,
-                    ),
-                    CapabilityResource::SharedMemory(SharedMemory { physical_region, kind, .. }) => {
-                        let mut permissions = MemoryPermissions::new(0);
-                        let mut memflags = Flags::VALID | Flags::USER;
+            task_state
+                .cspace
+                .mint_with_id(
+                    cptr,
+                    Capability {
+                        resource: CapabilityResource::Bundle(CapabilityBundle {
+                            endpoint,
+                            shared_memory: SharedMemory { physical_region, virtual_range: addr, kind },
+                        }),
+                        rights,
+                    },
+                )
+                .expect("this virtual address shouldn't exist");
 
-                        if rights & CapabilityRights::READ {
-                            permissions |= MemoryPermissions::READ;
-                            memflags |= Flags::READ;
-                        }
+            (cptr, rights)
+        }
+        CapabilityResource::Channel(channel) => (
+            task_state.cspace.mint(Capability { resource: CapabilityResource::Channel(channel), rights }),
+            librust::capabilities::CapabilityDescription::Channel,
+        ),
+        CapabilityResource::SharedMemory(SharedMemory { physical_region, kind, .. }) => {
+            let mut permissions = MemoryPermissions::new(0);
+            let mut memflags = Flags::VALID | Flags::USER;
 
-                        if rights & CapabilityRights::WRITE {
-                            permissions |= MemoryPermissions::WRITE;
-                            memflags |= Flags::WRITE;
-                        }
-
-                        if rights & CapabilityRights::EXECUTE {
-                            permissions |= MemoryPermissions::EXECUTE;
-                            memflags |= Flags::EXECUTE;
-                        }
-
-                        let addr = task_state.memory_manager.apply_shared_region(
-                            None,
-                            memflags,
-                            physical_region.clone(),
-                            kind,
-                        );
-
-                        let cptr = task_state.cspace.mint(Capability {
-                            resource: CapabilityResource::SharedMemory(SharedMemory {
-                                physical_region,
-                                virtual_range: addr,
-                                kind,
-                            }),
-                            rights,
-                        });
-
-                        (
-                            cptr,
-                            librust::capabilities::CapabilityDescription::Memory {
-                                ptr: addr.start.as_mut_ptr(),
-                                len: addr.end.as_usize() - addr.start.as_usize(),
-                                permissions,
-                            },
-                        )
-                    }
-                    CapabilityResource::Mmio(MmioRegion { physical_range, interrupts, .. }) => {
-                        // FIXME: check if this device has already been mapped
-                        let virt = unsafe {
-                            task_state.memory_manager.map_mmio_device(
-                                physical_range.start,
-                                None,
-                                physical_range.end.as_usize() - physical_range.start.as_usize(),
-                            )
-                        };
-
-                        let plic = PLIC.lock();
-                        let plic = plic.as_ref().unwrap();
-                        let tid = task.tid;
-                        let n_interrupts = interrupts.len();
-                        for interrupt in interrupts.iter().copied() {
-                            // FIXME: This is copy/pasted from the `ClaimDevice` syscall, maybe
-                            // refactor them both out to a function or something?
-                            log::debug!("Reregistering interrupt {} to task {}", interrupt, task.name,);
-                            plic.enable_interrupt(crate::platform::current_plic_context(), interrupt);
-                            plic.set_context_threshold(crate::platform::current_plic_context(), 0);
-                            plic.set_interrupt_priority(interrupt, 7);
-                            crate::interrupts::isr::register_isr(interrupt, move |plic, _, id| {
-                                plic.disable_interrupt(crate::platform::current_plic_context(), id);
-                                let task = TASKS.get(tid).unwrap();
-                                let mut task_state = task.mutable_state.lock();
-
-                                log::debug!(
-                                    "Interrupt {} triggered (hart: {}), notifying task {}",
-                                    id,
-                                    HART_ID.get(),
-                                    task.name
-                                );
-
-                                task_state.claimed_interrupts.insert(id, HART_ID.get());
-                                drop(task_state);
-
-                                // FIXME: not sure if this is entirely correct..
-                                task.endpoint.send(EndpointMessage {
-                                    data: Into::into(KernelMessage::InterruptOccurred(id)),
-                                    cap: None,
-                                    reply_endpoint: None,
-                                    shared_physical_address: None,
-                                });
-
-                                Ok(())
-                            });
-                        }
-
-                        let cptr = task_state.cspace.mint(Capability {
-                            resource: CapabilityResource::Mmio(MmioRegion {
-                                physical_range,
-                                virtual_range: virt,
-                                interrupts,
-                            }),
-                            rights,
-                        });
-
-                        (
-                            cptr,
-                            librust::capabilities::CapabilityDescription::MappedMmio {
-                                ptr: virt.start.as_mut_ptr(),
-                                len: physical_range.end.as_usize() - physical_range.start.as_usize(),
-                                n_interrupts,
-                            },
-                        )
-                    }
-                };
-
-                *target = librust::capabilities::CapabilityWithDescription {
-                    capability: librust::capabilities::Capability { cptr, rights },
-                    description,
-                };
+            if rights & CapabilityRights::READ {
+                permissions |= MemoryPermissions::READ;
+                memflags |= Flags::READ;
             }
 
-            (n_caps_to_write, caps.len())
+            if rights & CapabilityRights::WRITE {
+                permissions |= MemoryPermissions::WRITE;
+                memflags |= Flags::WRITE;
+            }
+
+            if rights & CapabilityRights::EXECUTE {
+                permissions |= MemoryPermissions::EXECUTE;
+                memflags |= Flags::EXECUTE;
+            }
+
+            let addr = task_state.memory_manager.apply_shared_region(None, memflags, physical_region.clone(), kind);
+
+            let cptr = CapabilityPtr::new(
+                addr.start.as_usize()
+                    | match addr.page_size {
+                        // FIXME: make these constants somewhere
+                        crate::mem::paging::PageSize::Gigapage => 0b1011,
+                        crate::mem::paging::PageSize::Megapage => 0b1010,
+                        crate::mem::paging::PageSize::Kilopage => 0b1001,
+                    },
+            );
+            task_state
+                .cspace
+                .mint_with_id(
+                    cptr,
+                    Capability {
+                        resource: CapabilityResource::SharedMemory(SharedMemory {
+                            physical_region,
+                            virtual_range: addr,
+                            kind,
+                        }),
+                        rights,
+                    },
+                )
+                .expect("this virtual address should not be occupied");
+
+            (
+                cptr,
+                librust::capabilities::CapabilityDescription::Memory {
+                    ptr: addr.start.as_mut_ptr(),
+                    len: addr.end.as_usize() - addr.start.as_usize(),
+                    permissions,
+                },
+            )
+        }
+        CapabilityResource::Mmio(MmioRegion { physical_range, interrupts, .. }) => {
+            // FIXME: check if this device has already been mapped
+            let virt = unsafe {
+                task_state.memory_manager.map_mmio_device(
+                    physical_range.start,
+                    None,
+                    physical_range.end.as_usize() - physical_range.start.as_usize(),
+                )
+            };
+
+            let plic = PLIC.lock();
+            let plic = plic.as_ref().unwrap();
+            let tid = task.tid;
+            let n_interrupts = interrupts.len();
+            for interrupt in interrupts.iter().copied() {
+                // FIXME: This is copy/pasted from the `ClaimDevice` syscall, maybe
+                // refactor them both out to a function or something?
+                log::debug!("Reregistering interrupt {} to task {}", interrupt, task.name,);
+                plic.enable_interrupt(crate::platform::current_plic_context(), interrupt);
+                plic.set_context_threshold(crate::platform::current_plic_context(), 0);
+                plic.set_interrupt_priority(interrupt, 7);
+                crate::interrupts::isr::register_isr(interrupt, move |plic, _, id| {
+                    plic.disable_interrupt(crate::platform::current_plic_context(), id);
+                    let task = TASKS.get(tid).unwrap();
+                    let mut task_state = task.mutable_state.lock();
+
+                    log::debug!("Interrupt {} triggered (hart: {}), notifying task {}", id, HART_ID.get(), task.name);
+
+                    task_state.claimed_interrupts.insert(id, HART_ID.get());
+                    drop(task_state);
+
+                    // FIXME: not sure if this is entirely correct..
+                    task.endpoint.send(EndpointMessage {
+                        data: Into::into(KernelMessage::InterruptOccurred(id)),
+                        cap: None,
+                        reply_endpoint: None,
+                        shared_physical_address: None,
+                    });
+
+                    Ok(())
+                });
+            }
+
+            let cptr = task_state.cspace.mint(Capability {
+                resource: CapabilityResource::Mmio(MmioRegion { physical_range, virtual_range: virt, interrupts }),
+                rights,
+            });
+
+            (
+                cptr,
+                librust::capabilities::CapabilityDescription::MappedMmio {
+                    ptr: virt.start.as_mut_ptr(),
+                    len: physical_range.end.as_usize() - physical_range.start.as_usize(),
+                    n_interrupts,
+                },
+            )
         }
     };
 
-    read
+    (cptr, rights)
 }
