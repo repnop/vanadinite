@@ -22,7 +22,7 @@ impl EndpointCapability {
     }
 
     pub fn get(self) -> CapabilityPtr {
-        CapabilityPtr::new(self.0.value())
+        CapabilityPtr::from_raw(self.0.value())
     }
 }
 
@@ -36,7 +36,7 @@ impl ReplyCapability {
     }
 
     pub fn get(self) -> CapabilityPtr {
-        CapabilityPtr::new(self.0.value())
+        CapabilityPtr::from_raw(self.0.value())
     }
 }
 
@@ -134,7 +134,7 @@ pub fn send(cptr: EndpointCapability, message: EndpointMessage, caps: &[Capabili
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => Ok(()),
     }
@@ -169,7 +169,7 @@ pub fn send_with_reply(
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => Ok(ReplyId(reply_id)),
     }
@@ -225,7 +225,7 @@ pub fn recv(flags: ChannelReadFlags) -> Result<Message, SyscallError> {
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => match endpoint_id {
             usize::MAX => Ok(Message::Kernel(KernelMessage::construct(message))),
@@ -235,13 +235,13 @@ pub fn recv(flags: ChannelReadFlags) -> Result<Message, SyscallError> {
                 capability: match CapabilityRights::new(sent_cap_rights) {
                     CapabilityRights::NONE => None,
                     _ => Some(Capability {
-                        cptr: CapabilityPtr::new(sent_cap),
+                        cptr: CapabilityPtr::from_raw(sent_cap),
                         rights: CapabilityRights::new(sent_cap_rights),
                     }),
                 },
                 reply: match reply_type {
                     RECV_NO_REPLY_INFO => None,
-                    RECV_REPLY_ENDPOINT => Some(Either::Left(ReplyCapability(CapabilityPtr::new(reply_value)))),
+                    RECV_REPLY_ENDPOINT => Some(Either::Left(ReplyCapability(CapabilityPtr::from_raw(reply_value)))),
                     RECV_REPLY_ID => Some(Either::Right(ReplyId(reply_value as u64))),
                     _ => unreachable!("bad kernel reply_type"),
                 },
@@ -254,7 +254,7 @@ pub fn call(
     endpoint: EndpointCapability,
     mut message: EndpointMessage,
     to_send: Option<Capability>,
-) -> Result<IpcMessage, SyscallError> {
+) -> Result<(Message, Option<Capability>), SyscallError> {
     let error: usize;
     let endpoint_id: usize;
     let received_cap: usize;
@@ -266,11 +266,10 @@ pub fn call(
     unsafe {
         core::arch::asm!(
             "ecall",
-            FIX THIS
             inlateout("a0") Syscall::Recv as usize => error,
             inlateout("a1") endpoint.get().value() => received_cap,
             inlateout("a2") sending_cptr => received_cap_rights,
-            inlateout("a3") sending_rights => endpoint_id,
+            in("a3") sending_rights,
             inlateout("t0") message.0[0] => message.0[0],
             inlateout("t1") message.0[1] => message.0[1],
             inlateout("t2") message.0[2] => message.0[2],
@@ -281,16 +280,16 @@ pub fn call(
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => Ok(IpcMessage { identifier: EndpointIdentifier(endpoint_id), message, reply: None }),
     }
 }
 
 /// A [`EndpointCapability`] representing the process's own IPC endpoint
-pub const OWN_ENDPOINT: EndpointCapability = EndpointCapability::new(CapabilityPtr::new(0));
+pub const OWN_ENDPOINT: EndpointCapability = EndpointCapability::new(CapabilityPtr::from_raw(0));
 /// A [`EndpointCapability`] representing the parent process's IPC endpoint
-pub const PARENT_CHANNEL: EndpointCapability = EndpointCapability::new(CapabilityPtr::new(1));
+pub const PARENT_CHANNEL: EndpointCapability = EndpointCapability::new(CapabilityPtr::from_raw(1));
 
 /// See [`KernelMessage::InterruptOccurred`]
 pub const KMSG_INTERRUPT_OCCURRED: usize = 0;

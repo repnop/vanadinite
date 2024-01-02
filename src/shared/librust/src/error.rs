@@ -34,9 +34,7 @@ impl SyscallError {
             Self::InvalidArgument(n) => {
                 RawSyscallError::new(NonZeroUsize::new(((n as usize) << 8) | INVALID_ARGUMENT).unwrap())
             }
-            Self::UnknownSyscall => {
-                RawSyscallError::new(NonZeroUsize::new(UNKNOWN_SYSCALL).unwrap())
-            }
+            Self::UnknownSyscall => RawSyscallError::new(NonZeroUsize::new(UNKNOWN_SYSCALL).unwrap()),
             Self::WouldBlock => RawSyscallError::new(NonZeroUsize::new(WOULD_BLOCK).unwrap()),
         }
     }
@@ -53,7 +51,7 @@ impl From<SyscallError> for usize {
 pub struct RawSyscallError(NonZeroUsize);
 
 impl RawSyscallError {
-    pub const fn optional(value: usize) -> Option<Self> {
+    pub const fn from_raw(value: usize) -> Option<Self> {
         match value {
             0 => None,
             _ => Some(Self(unsafe { NonZeroUsize::new_unchecked(value) })),

@@ -21,7 +21,7 @@ use crate::{
 };
 use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
 use librust::{
-    capabilities::{CapabilityPtr, CapabilityRights},
+    capabilities::{CapabilityPtr, CapabilityRights, CapabilityId, CapabilityType, MemorySize},
     error::SyscallError,
     syscalls::{
         endpoint::{
@@ -120,8 +120,8 @@ pub fn send(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallErro
     let MutableState { cspace, memory_manager, .. } = &mut *task_state;
     let mut reply_endpoint = frame.a4 == 1;
 
-    let cptr = CapabilityPtr::new(frame.a1);
-    let cptr_to_send = CapabilityPtr::new(frame.a2);
+    let cptr = CapabilityPtr::from_raw(frame.a1);
+    let cptr_to_send = CapabilityPtr::from_raw(frame.a2);
     let cptr_rights = CapabilityRights::new(frame.a3);
     let data = [frame.t0, frame.t1, frame.t2, frame.t3, frame.t4, frame.t5, frame.t6];
 
@@ -219,7 +219,7 @@ pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
 
     let (cptr, rights) = match cap {
         Some(cap) => process_recv_cap(task, &mut *task_state, cap),
-        None => (CapabilityPtr::new(usize::MAX), CapabilityRights::NONE),
+        None => (CapabilityPtr::from_raw(usize::MAX), CapabilityRights::NONE),
     };
 
     let (reply_value, reply_value_type) = match reply_endpoint {
@@ -258,7 +258,7 @@ pub fn recv(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
 pub fn call(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let mut task_state = task.mutable_state.lock();
 
-    let cptr = CapabilityPtr::new(regs.a1);
+    let cptr = CapabilityPtr::from_raw(regs.a1);
     let read_caps =
         RawUserSlice::<user::Read, librust::capabilities::Capability>::new(VirtualAddress::new(regs.a2), regs.a3);
     let write_caps = RawUserSlice::<user::ReadWrite, librust::capabilities::CapabilityWithDescription>::new(
@@ -331,12 +331,11 @@ pub fn call(task: &Task, regs: &mut GeneralRegisters) -> Result<(), SyscallError
         shared_physical_address,
     });
 
-    let (id, EndpointMessage { data, cap, .. }) = tmp_endpoint.recv();
+    let (_, EndpointMessage { data, cap, .. }) = tmp_endpoint.recv();
     let (caps_written, caps_remaining) = process_recv_caps(task, &mut task_state, id, &channel, caps, write_cap_slice);
 
     regs.a1 = caps_written;
     regs.a2 = caps_remaining;
-    regs.a3 = id.get();
     regs.t0 = data[0];
     regs.t1 = data[1];
     regs.t2 = data[2];
@@ -356,7 +355,7 @@ fn process_recv_cap(task: &Task, task_state: &mut MutableState, cap: Capability)
         CapabilityResource::Reply(_) => todo!("idk if this should be a thing yet lol 🦀"),
         CapabilityResource::Bundle(CapabilityBundle {
             endpoint,
-            shared_memory: SharedMemory { physical_region, kind, .. },
+            shared_memory: SharedMemory { physical_region, kind, size .. },
             ..
         }) => {
             let addr = task_state.memory_manager.apply_shared_region(
@@ -366,15 +365,7 @@ fn process_recv_cap(task: &Task, task_state: &mut MutableState, cap: Capability)
                 kind,
             );
 
-            let cptr = CapabilityPtr::new(
-                addr.start.as_usize()
-                    | match addr.page_size {
-                        // FIXME: make these constants somewhere
-                        crate::mem::paging::PageSize::Gigapage => 0b1111,
-                        crate::mem::paging::PageSize::Megapage => 0b1110,
-                        crate::mem::paging::PageSize::Kilopage => 0b1101,
-                    },
-            );
+            let cptr = CapabilityPtr::from_raw_parts(CapabilityId::from_ptr(addr.start.as_mut_ptr()), CapabilityType::Bundle(size))
 
             task_state
                 .cspace
@@ -383,7 +374,7 @@ fn process_recv_cap(task: &Task, task_state: &mut MutableState, cap: Capability)
                     Capability {
                         resource: CapabilityResource::Bundle(CapabilityBundle {
                             endpoint,
-                            shared_memory: SharedMemory { physical_region, virtual_range: addr, kind },
+                            shared_memory: SharedMemory { physical_region, virtual_range: addr, kind, size },
                         }),
                         rights,
                     },
@@ -396,7 +387,7 @@ fn process_recv_cap(task: &Task, task_state: &mut MutableState, cap: Capability)
             task_state.cspace.mint(Capability { resource: CapabilityResource::Channel(channel), rights }),
             librust::capabilities::CapabilityDescription::Channel,
         ),
-        CapabilityResource::SharedMemory(SharedMemory { physical_region, kind, .. }) => {
+        CapabilityResource::SharedMemory(SharedMemory { physical_region, kind, size .. }) => {
             let mut permissions = MemoryPermissions::new(0);
             let mut memflags = Flags::VALID | Flags::USER;
 
@@ -417,15 +408,8 @@ fn process_recv_cap(task: &Task, task_state: &mut MutableState, cap: Capability)
 
             let addr = task_state.memory_manager.apply_shared_region(None, memflags, physical_region.clone(), kind);
 
-            let cptr = CapabilityPtr::new(
-                addr.start.as_usize()
-                    | match addr.page_size {
-                        // FIXME: make these constants somewhere
-                        crate::mem::paging::PageSize::Gigapage => 0b1011,
-                        crate::mem::paging::PageSize::Megapage => 0b1010,
-                        crate::mem::paging::PageSize::Kilopage => 0b1001,
-                    },
-            );
+            let cptr = CapabilityPtr::from_raw_parts(CapabilityId::from_ptr(addr.start.as_mut_ptr()), CapabilityType::Memory(size));
+
             task_state
                 .cspace
                 .mint_with_id(
@@ -435,20 +419,14 @@ fn process_recv_cap(task: &Task, task_state: &mut MutableState, cap: Capability)
                             physical_region,
                             virtual_range: addr,
                             kind,
+                            size,
                         }),
                         rights,
                     },
                 )
                 .expect("this virtual address should not be occupied");
 
-            (
-                cptr,
-                librust::capabilities::CapabilityDescription::Memory {
-                    ptr: addr.start.as_mut_ptr(),
-                    len: addr.end.as_usize() - addr.start.as_usize(),
-                    permissions,
-                },
-            )
+            cptr
         }
         CapabilityResource::Mmio(MmioRegion { physical_range, interrupts, .. }) => {
             // FIXME: check if this device has already been mapped
@@ -498,14 +476,9 @@ fn process_recv_cap(task: &Task, task_state: &mut MutableState, cap: Capability)
                 rights,
             });
 
-            (
-                cptr,
-                librust::capabilities::CapabilityDescription::MappedMmio {
-                    ptr: virt.start.as_mut_ptr(),
-                    len: physical_range.end.as_usize() - physical_range.start.as_usize(),
-                    n_interrupts,
-                },
-            )
+            
+                cptr
+            
         }
     };
 

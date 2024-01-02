@@ -29,9 +29,9 @@ pub fn claim_device(node: &str) -> Result<CapabilityPtr, SyscallError> {
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
-        None => Ok(CapabilityPtr::new(cptr)),
+        None => Ok(CapabilityPtr::from_raw(cptr)),
     }
 }
 
@@ -48,7 +48,7 @@ pub fn complete_interrupt(interrupt_id: usize) -> Result<(), SyscallError> {
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => Ok(()),
     }
@@ -107,7 +107,7 @@ pub fn query_mmio_cap(
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => Ok((MmioCapabilityInfo { address, len, n_interrupts }, read_interrupts)),
     }
@@ -127,7 +127,7 @@ pub fn debug_print(value: &[u8]) -> Result<(), SyscallError> {
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => Ok(()),
     }

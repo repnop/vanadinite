@@ -33,7 +33,7 @@ pub unsafe fn delete(cptr: CapabilityPtr) -> Result<(), SyscallError> {
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => Ok(()),
     }

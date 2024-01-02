@@ -12,12 +12,127 @@ use crate::syscalls::mem::MemoryPermissions;
 pub struct CapabilityPtr(usize);
 
 impl CapabilityPtr {
-    pub const fn new(n: usize) -> Self {
+    pub const fn from_raw(n: usize) -> Self {
         Self(n)
+    }
+
+    pub const fn from_raw_parts(id: CapabilityId, kind: CapabilityType) -> Self {
+        Self((id.0 << 4) | kind.to_usize())
     }
 
     pub const fn value(self) -> usize {
         self.0
+    }
+
+    pub const fn id(self) -> CapabilityId {
+        CapabilityId::from_raw(self.0 >> 4)
+    }
+
+    pub const fn kind(self) -> CapabilityType {
+        CapabilityType::from_raw(self.0 & 0b1111)
+    }
+
+    pub const fn into_raw_parts(self) -> (CapabilityId, CapabilityType) {
+        (CapabilityId::from_raw(self.0 >> 4), CapabilityType::from_raw(self.0 & 0b1111))
+    }
+
+    pub const fn get_memory_region(self) -> Option<*mut [u8]> {
+        match self.kind() {
+            CapabilityType::Bundle(size) | CapabilityType::Memory(size) => Some(unsafe {
+                core::ptr::from_raw_parts_mut(core::ptr::from_exposed_addr_mut(self.id().0 << 4), size.size().0)
+            }),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct CapabilityId(usize);
+
+impl CapabilityId {
+    pub const fn from_raw(id: usize) -> Self {
+        Self(id)
+    }
+
+    pub const fn get(self) -> usize {
+        self.0
+    }
+
+    pub const fn from_ptr<T: ?Sized>(ptr: *mut T) -> Self {
+        assert!(ptr.addr() & 0b1111 == 0);
+
+        Self(ptr.addr() >> 4)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CapabilityType {
+    Bundle(MemorySize),
+    Endpoint,
+    Memory(MemorySize),
+    Mmio,
+    ReplyEndpoint,
+}
+
+impl CapabilityType {
+    pub const fn to_usize(self) -> usize {
+        match self {
+            CapabilityType::Bundle(size) => 0b1100 | (size as usize),
+            CapabilityType::Endpoint => 0b0000,
+            CapabilityType::Memory(size) => 0b1000 | (size as usize),
+            CapabilityType::Mmio => 0b0001,
+            CapabilityType::ReplyEndpoint => 0b0010,
+        }
+    }
+
+    pub const fn from_raw(value: usize) -> Self {
+        match value {
+            0b0000 => Self::Endpoint,
+            0b0001 => Self::Mmio,
+            0b0010 => Self::ReplyEndpoint,
+            n => match (n & 0b1100) >> 2 {
+                0b10 => match n & 0b11 {
+                    const { MemorySize::Tiny as usize } => Self::Memory(MemorySize::Tiny),
+                    const { MemorySize::Small as usize } => Self::Memory(MemorySize::Small),
+                    const { MemorySize::Medium as usize } => Self::Memory(MemorySize::Medium),
+                    const { MemorySize::Large as usize } => Self::Memory(MemorySize::Large),
+                    _ => unreachable!(),
+                },
+                0b11 => match n & 0b11 {
+                    const { MemorySize::Tiny as usize } => Self::Bundle(MemorySize::Tiny),
+                    const { MemorySize::Small as usize } => Self::Bundle(MemorySize::Small),
+                    const { MemorySize::Medium as usize } => Self::Bundle(MemorySize::Medium),
+                    const { MemorySize::Large as usize } => Self::Bundle(MemorySize::Large),
+                    _ => unreachable!(),
+                },
+                _ => panic!("invalid `CapabilityPtr` value"),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(usize)]
+pub enum MemorySize {
+    /// 4 KiB
+    Tiny = 0b00,
+    /// 64 KiB
+    Small = 0b01,
+    /// 512 KiB
+    Medium = 0b10,
+    /// 2 MiB
+    Large = 0b11,
+}
+
+impl MemorySize {
+    pub const fn size(self) -> crate::units::Bytes {
+        crate::units::Bytes(match self {
+            MemorySize::Large => 4 * 1024,
+            MemorySize::Medium => 64 * 1024,
+            MemorySize::Small => 512 * 1024,
+            MemorySize::Tiny => 2 * 1024 * 1024,
+        })
     }
 }
 

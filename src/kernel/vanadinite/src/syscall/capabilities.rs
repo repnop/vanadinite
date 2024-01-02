@@ -21,7 +21,7 @@ use librust::{
 /// Delete a capability from a task
 pub fn delete(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let mut task = task.mutable_state.lock();
-    let cptr = CapabilityPtr::new(frame.a0);
+    let cptr = CapabilityPtr::from_raw(frame.a0);
 
     let Some(capability) = task.cspace.remove(cptr) else {
         return Err(SyscallError::InvalidArgument(0));
@@ -60,7 +60,7 @@ pub fn delete(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallEr
 
 pub fn mint(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let mut task = task.mutable_state.lock();
-    let cptr = CapabilityPtr::new(frame.a0);
+    let cptr = CapabilityPtr::from_raw(frame.a0);
 
     let Some(capability) = task.cspace.resolve(cptr) else {
         return Err(SyscallError::InvalidArgument(0));
@@ -90,8 +90,8 @@ pub fn mint(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallErro
 pub fn bundle(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallError> {
     let mut task = task.mutable_state.lock();
     let endpoint_badge = EndpointIdentifier::new(frame.a0);
-    let endpoint_cptr = CapabilityPtr::new(frame.a1);
-    let shm_cptr = CapabilityPtr::new(frame.a2);
+    let endpoint_cptr = CapabilityPtr::from_raw(frame.a1);
+    let shm_cptr = CapabilityPtr::from_raw(frame.a2);
     let bundle_rights = CapabilityRights::new(frame.a3);
 
     let Some(Capability { resource: CapabilityResource::Channel(endpoint_cap), rights: endpoint_rights }) =

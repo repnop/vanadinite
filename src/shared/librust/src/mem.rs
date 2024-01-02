@@ -39,7 +39,7 @@ impl SharedMemoryAllocation {
 
     pub fn private_rw(size: Bytes) -> Result<Self, SyscallError> {
         Self::new(size, MemoryPermissions::READ | MemoryPermissions::WRITE).map(|mut s| {
-            s.cptr = CapabilityPtr::new(usize::MAX);
+            s.cptr = CapabilityPtr::from_raw(usize::MAX);
             s
         })
     }

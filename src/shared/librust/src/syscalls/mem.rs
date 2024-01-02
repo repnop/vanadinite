@@ -31,7 +31,7 @@ pub fn query_memory_capability(cptr: CapabilityPtr) -> Result<(*mut u8, usize, M
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => Ok((virt, size, MemoryPermissions::new(perms))),
     }
@@ -100,7 +100,7 @@ pub fn allocate_virtual_memory(size: Bytes, perms: MemoryPermissions) -> Result<
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => Ok(core::ptr::slice_from_raw_parts_mut(virt, real_size)),
     }
@@ -125,7 +125,7 @@ pub unsafe fn deallocate_virtual_memory(at: *mut u8) -> Result<(), SyscallError>
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => Ok(()),
     }
@@ -151,9 +151,9 @@ pub fn allocate_shared_memory(
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
-        None => Ok((CapabilityPtr::new(cptr), core::ptr::slice_from_raw_parts_mut(virt, real_size))),
+        None => Ok((CapabilityPtr::from_raw(cptr), core::ptr::slice_from_raw_parts_mut(virt, real_size))),
     }
 }
 
@@ -215,7 +215,7 @@ pub fn allocate_device_addressable_memory(
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => Ok((PhysicalAddress::new(phys), unsafe { NonNull::new_unchecked(virt) })),
     }

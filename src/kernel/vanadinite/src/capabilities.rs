@@ -15,7 +15,7 @@ use crate::{
     syscall::endpoint::{ChannelEndpoint, ReplyEndpoint},
 };
 use alloc::collections::BTreeMap;
-use librust::capabilities::{CapabilityPtr, CapabilityRights};
+use librust::capabilities::{CapabilityPtr, CapabilityRights, MemorySize};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Occupied;
@@ -44,7 +44,7 @@ impl CapabilitySpace {
     }
 
     pub fn mint_with(&mut self, f: impl FnOnce(CapabilityPtr) -> Capability) -> CapabilityPtr {
-        let cptr = CapabilityPtr::new(self.inner.keys().max().map(|c| c.value() + 1).unwrap_or(0));
+        let cptr = CapabilityPtr::from_raw(self.inner.keys().max().map(|c| c.value() + 1).unwrap_or(0));
         self.inner.insert(cptr, f(cptr));
         cptr
     }
@@ -53,7 +53,7 @@ impl CapabilitySpace {
     pub fn mint(&mut self, capability: Capability) -> CapabilityPtr {
         // FIXME: Uncomment & improve
         // let time = crate::csr::time::read() as usize;
-        let cptr = CapabilityPtr::new(self.inner.keys().max().map(|c| c.value() + 1).unwrap_or(0));
+        let cptr = CapabilityPtr::from_raw(self.inner.keys().max().map(|c| c.value() + 1).unwrap_or(0));
 
         // This should go away when there's a better RNG method or whathaveyou
         assert!(self.inner.insert(cptr, capability).is_none());
@@ -98,6 +98,7 @@ pub struct SharedMemory {
     pub physical_region: SharedPhysicalRegion,
     pub virtual_range: PageRange<VirtualAddress>,
     pub kind: AddressRegionKind,
+    pub size: MemorySize,
 }
 
 #[derive(Debug, Clone)]

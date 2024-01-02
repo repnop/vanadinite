@@ -10,6 +10,7 @@
     allocator_api,
     const_option,
     const_trait_impl,
+    exposed_provenance,
     generic_const_exprs,
     inline_const_pat,
     layout_for_ptr,

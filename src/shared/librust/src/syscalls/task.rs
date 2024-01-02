@@ -29,7 +29,7 @@ pub fn current_tid() -> Tid {
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(_) => unreachable!(),
         None => Tid::new(NonZeroUsize::new(tid).unwrap()),
     }

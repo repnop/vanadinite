@@ -44,7 +44,7 @@ pub fn create_vmspace() -> Result<VmspaceObjectId, SyscallError> {
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => Ok(VmspaceObjectId::new(id)),
     }
@@ -69,7 +69,7 @@ pub fn alloc_vmspace_object(
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
         None => Ok((ours, theirs)),
     }
@@ -108,8 +108,8 @@ pub fn spawn_vmspace(
         );
     }
 
-    match RawSyscallError::optional(error) {
+    match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
-        None => Ok(EndpointCapability::new(CapabilityPtr::new(cptr))),
+        None => Ok(EndpointCapability::new(CapabilityPtr::from_raw(cptr))),
     }
 }
