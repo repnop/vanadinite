@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    capabilities::{Capability, CapabilityPtr, CapabilityRights, CapabilityWithDescription},
+    capabilities::{Capability, CapabilityId, CapabilityPtr, CapabilityRights},
     error::{RawSyscallError, SyscallError},
     syscalls::Syscall,
     Either,
@@ -17,12 +17,24 @@ use crate::{
 pub struct EndpointCapability(CapabilityPtr);
 
 impl EndpointCapability {
-    pub fn new(cptr: CapabilityPtr) -> Self {
+    pub const fn new(cptr: CapabilityPtr) -> Self {
         Self(cptr)
     }
 
-    pub fn get(self) -> CapabilityPtr {
+    pub const fn get(self) -> CapabilityPtr {
         CapabilityPtr::from_raw(self.0.value())
+    }
+
+    pub fn send(self, message: EndpointMessage, capability_to_send: Option<Capability>) -> Result<(), SyscallError> {
+        send(self, message, capability_to_send)
+    }
+
+    pub fn send_with_reply(
+        self,
+        message: EndpointMessage,
+        capability_to_send: Option<Capability>,
+    ) -> Result<ReplyId, SyscallError> {
+        send_with_reply(self, message, capability_to_send)
     }
 }
 
@@ -112,16 +124,27 @@ impl core::ops::BitAnd for ChannelReadFlags {
 
 /// Attempt to send a message and/or capabilitires on the IPC channel
 /// represented by the given [`EndpointCapability`]
-pub fn send(cptr: EndpointCapability, message: EndpointMessage, caps: &[Capability]) -> Result<(), SyscallError> {
+pub fn send(
+    endpoint: EndpointCapability,
+    message: EndpointMessage,
+    capability_to_send: Option<Capability>,
+) -> Result<(), SyscallError> {
     let error: usize;
+    let (cptr, rights) = capability_to_send.map(|c| (c.cptr, c.rights)).unwrap_or((
+        CapabilityPtr::from_raw_parts(
+            CapabilityId::from_raw(usize::MAX << 4),
+            crate::capabilities::CapabilityType::Endpoint,
+        ),
+        CapabilityRights::NONE,
+    ));
 
     unsafe {
         core::arch::asm!(
             "ecall",
             inlateout("a0") Syscall::Send as usize => error,
-            in("a1") cptr.get().value(),
-            in("a2") caps.as_ptr(),
-            in("a3") caps.len(),
+            in("a1") endpoint.get().value(),
+            in("a2") cptr.value(),
+            in("a3") rights.value(),
             // Reply endpoint: No
             in("a4") 0,
             in("t0") message.0[0],
@@ -143,20 +166,27 @@ pub fn send(cptr: EndpointCapability, message: EndpointMessage, caps: &[Capabili
 /// Attempt to send a message and/or capabilitires on the IPC channel
 /// represented by the given [`EndpointCapability`]
 pub fn send_with_reply(
-    cptr: EndpointCapability,
+    endpoint: EndpointCapability,
     message: EndpointMessage,
-    caps: &[Capability],
+    capability_to_send: Option<Capability>,
 ) -> Result<ReplyId, SyscallError> {
     let error: usize;
     let reply_id: u64;
+    let (cptr, rights) = capability_to_send.map(|c| (c.cptr, c.rights)).unwrap_or((
+        CapabilityPtr::from_raw_parts(
+            CapabilityId::from_raw(usize::MAX << 4),
+            crate::capabilities::CapabilityType::Endpoint,
+        ),
+        CapabilityRights::NONE,
+    ));
 
     unsafe {
         core::arch::asm!(
             "ecall",
             inlateout("a0") Syscall::Send as usize => error,
-            inlateout("a1") cptr.get().value() => reply_id,
-            in("a2") caps.as_ptr(),
-            in("a3") caps.len(),
+            inlateout("a1") endpoint.get().value() => reply_id,
+            in("a2") cptr.value(),
+            in("a3") rights.value(),
             // Reply endpoint: Yes
             in("a4") 1,
             in("t0") message.0[0],
@@ -182,7 +212,6 @@ pub struct IpcMessage {
     /// Message data
     pub message: EndpointMessage,
     pub capability: Option<Capability>,
-    // FIXME: this shouldn't exist in `call` return values
     pub reply: Option<Either<ReplyCapability, ReplyId>>,
 }
 
@@ -254,9 +283,8 @@ pub fn call(
     endpoint: EndpointCapability,
     mut message: EndpointMessage,
     to_send: Option<Capability>,
-) -> Result<(Message, Option<Capability>), SyscallError> {
+) -> Result<(EndpointMessage, Option<Capability>), SyscallError> {
     let error: usize;
-    let endpoint_id: usize;
     let received_cap: usize;
     let received_cap_rights: usize;
 
@@ -282,7 +310,13 @@ pub fn call(
 
     match RawSyscallError::from_raw(error) {
         Some(error) => Err(error.cook()),
-        None => Ok(IpcMessage { identifier: EndpointIdentifier(endpoint_id), message, reply: None }),
+        None => Ok((
+            message,
+            match CapabilityRights::new(received_cap_rights) {
+                CapabilityRights::NONE => None,
+                rights => Some(Capability::new(CapabilityPtr::from_raw(received_cap), rights)),
+            },
+        )),
     }
 }
 

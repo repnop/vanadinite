@@ -36,11 +36,11 @@ impl CapabilityPtr {
         (CapabilityId::from_raw(self.0 >> 4), CapabilityType::from_raw(self.0 & 0b1111))
     }
 
-    pub const fn get_memory_region(self) -> Option<*mut [u8]> {
+    pub fn get_memory_region(self) -> Option<*mut [u8]> {
         match self.kind() {
-            CapabilityType::Bundle(size) | CapabilityType::Memory(size) => Some(unsafe {
-                core::ptr::from_raw_parts_mut(core::ptr::from_exposed_addr_mut(self.id().0 << 4), size.size().0)
-            }),
+            CapabilityType::Bundle(size) | CapabilityType::Memory(size) => {
+                Some(core::ptr::from_raw_parts_mut(core::ptr::from_exposed_addr_mut(self.id().0 << 4), size.size().0))
+            }
             _ => None,
         }
     }
@@ -59,7 +59,7 @@ impl CapabilityId {
         self.0
     }
 
-    pub const fn from_ptr<T: ?Sized>(ptr: *mut T) -> Self {
+    pub fn from_ptr<T: ?Sized>(ptr: *mut T) -> Self {
         assert!(ptr.addr() & 0b1111 == 0);
 
         Self(ptr.addr() >> 4)

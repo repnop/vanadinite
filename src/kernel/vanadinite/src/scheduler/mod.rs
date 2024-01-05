@@ -352,8 +352,8 @@ unsafe extern "C" fn context_switch(
         sd s10, 80(a0)
         sd s11, 88(a0)
         
-        sd zero, 0(a2)
         fence
+        sd zero, 0(a2)
 
         ld ra, 0(a1)
         ld sp, 8(a1)

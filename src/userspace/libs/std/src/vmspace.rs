@@ -62,7 +62,7 @@ impl Vmspace {
             librust::syscalls::endpoint::send(
                 task_cptr,
                 EndpointMessage::default(),
-                &[Capability { cptr, rights: CapabilityRights::READ }],
+                Some(Capability { cptr, rights: CapabilityRights::READ }),
             )?;
         } else {
             let mut all_caps = vec![Capability { cptr, rights: CapabilityRights::READ }];

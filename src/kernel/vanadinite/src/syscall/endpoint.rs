@@ -125,17 +125,21 @@ pub fn send(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallErro
     let cptr_rights = CapabilityRights::new(frame.a3);
     let data = [frame.t0, frame.t1, frame.t2, frame.t3, frame.t4, frame.t5, frame.t6];
 
-    let (channel, shared_physical_address) = match cspace.resolve(cptr) {
+    let (medium, shared_physical_address) = match cspace.resolve(cptr) {
         Some(Capability { resource: CapabilityResource::Channel(channel), rights })
             if *rights & CapabilityRights::WRITE =>
         {
-            (channel.clone(), None)
+            (Either::Left(channel.clone()), None)
         }
         Some(Capability { resource: CapabilityResource::Reply(_), .. }) => {
             match cspace.remove(cptr).unwrap().resource {
                 CapabilityResource::Reply(endpoint) => {
-                    reply_endpoint = false;
-                    (endpoint.into_inner().0, None)
+                    if reply_endpoint {
+                        frame.a1 = usize::MAX;
+                        reply_endpoint = false;
+                    }
+
+                    (Either::Right(endpoint), None)
                 }
                 _ => unreachable!(),
             }
@@ -149,7 +153,7 @@ pub fn send(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallErro
                 memory_manager.modify_page_flags(addr, |_| Flags::USER | Flags::VALID);
             }
 
-            (endpoint.clone(), shared_memory.physical_region.physical_addresses().next())
+            (Either::Left(endpoint.clone()), shared_memory.physical_region.physical_addresses().next())
         }
         _ => return Err(SyscallError::InvalidArgument(0)),
     };
@@ -179,14 +183,21 @@ pub fn send(task: &Task, frame: &mut GeneralRegisters) -> Result<(), SyscallErro
 
     let reply_endpoint = match reply_endpoint {
         true => {
-            Some(Either::Left(ReplyEndpoint(task.endpoint.clone(), ReplyId::new(task_state.reply_next_id.increment()))))
+            let id = task_state.reply_next_id.increment();
+            frame.a1 = id;
+            Some(Either::Left(ReplyEndpoint(task.endpoint.clone(), ReplyId::new(id))))
         }
         false => None,
     };
 
     log::debug!("[{}:{}] Sending channel message", task.name, task.tid);
     drop(task_state);
-    channel.send(EndpointMessage { data, cap, reply_endpoint, shared_physical_address });
+
+    let msg = EndpointMessage { data, cap, reply_endpoint, shared_physical_address };
+    match medium {
+        Either::Left(channel) => channel.send(msg),
+        Either::Right(reply) => reply.reply(msg),
+    }
 
     Ok(())
 }

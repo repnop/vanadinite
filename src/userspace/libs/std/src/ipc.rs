@@ -7,7 +7,7 @@
 
 use librust::{
     error::SyscallError,
-    syscalls::endpoint::{self, EndpointCapability, IpcMessage},
+    syscalls::endpoint::{self, IpcMessage},
 };
 
 pub use librust::capabilities::{
@@ -15,9 +15,9 @@ pub use librust::capabilities::{
 };
 pub use librust::syscalls::endpoint::{ChannelReadFlags, EndpointMessage};
 
-pub fn recv(cap_buffer: &mut [CapabilityWithDescription], flags: ChannelReadFlags) -> Result<IpcMessage, SyscallError> {
+pub fn recv(flags: ChannelReadFlags) -> Result<IpcMessage, SyscallError> {
     loop {
-        match endpoint::recv(cap_buffer, flags)? {
+        match endpoint::recv(flags)? {
             endpoint::Message::Ipc(res) => return Ok(res),
             endpoint::Message::Kernel(notif) => match notif {
                 endpoint::KernelMessage::InterruptOccurred(id) => {
@@ -28,43 +28,5 @@ pub fn recv(cap_buffer: &mut [CapabilityWithDescription], flags: ChannelReadFlag
                 }
             },
         }
-    }
-}
-
-pub fn recv_with_all_caps(
-    flags: ChannelReadFlags,
-) -> Result<(EndpointMessage, Vec<CapabilityWithDescription>), SyscallError> {
-    let mut caps = Vec::new();
-    let IpcMessage { message, capabilities_remaining, .. } = recv(&mut caps[..], flags)?;
-
-    if capabilities_remaining > 0 {
-        caps.resize(capabilities_remaining, CapabilityWithDescription::default());
-        recv(&mut caps[..], flags)?;
-    }
-
-    Ok((message, caps))
-}
-
-#[derive(Debug)]
-pub struct IpcChannel {
-    cptr: EndpointCapability,
-}
-
-impl IpcChannel {
-    pub fn new(cptr: EndpointCapability) -> Self {
-        Self { cptr }
-    }
-
-    pub fn send(&self, msg: EndpointMessage, caps: &[Capability]) -> Result<(), SyscallError> {
-        endpoint::send(self.cptr, msg, caps)
-    }
-
-    pub fn call(
-        &self,
-        msg: EndpointMessage,
-        send_caps: &[Capability],
-        recv_caps: &mut [CapabilityWithDescription],
-    ) -> Result<IpcMessage, SyscallError> {
-        endpoint::call(self.cptr, msg, send_caps, recv_caps)
     }
 }
