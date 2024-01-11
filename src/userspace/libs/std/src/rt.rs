@@ -76,7 +76,10 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8, _: u8) ->
     map.insert(
         "parent".into(),
         CapabilityWithDescription {
-            capability: Capability { cptr: PARENT_CHANNEL, rights: CapabilityRights::READ | CapabilityRights::WRITE },
+            capability: Capability {
+                cptr: PARENT_CHANNEL.get(),
+                rights: CapabilityRights::READ | CapabilityRights::WRITE,
+            },
             description: CapabilityDescription::Channel,
         },
     );

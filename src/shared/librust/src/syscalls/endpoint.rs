@@ -6,7 +6,7 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    capabilities::{Capability, CapabilityId, CapabilityPtr, CapabilityRights},
+    capabilities::{Capability, CapabilityId, CapabilityPtr, CapabilityRights, CapabilityType},
     error::{RawSyscallError, SyscallError},
     syscalls::Syscall,
     Either,
@@ -321,9 +321,11 @@ pub fn call(
 }
 
 /// A [`EndpointCapability`] representing the process's own IPC endpoint
-pub const OWN_ENDPOINT: EndpointCapability = EndpointCapability::new(CapabilityPtr::from_raw(0));
+pub const OWN_ENDPOINT: EndpointCapability =
+    EndpointCapability::new(CapabilityPtr::from_raw_parts(CapabilityId::from_raw(0), CapabilityType::Endpoint));
 /// A [`EndpointCapability`] representing the parent process's IPC endpoint
-pub const PARENT_CHANNEL: EndpointCapability = EndpointCapability::new(CapabilityPtr::from_raw(1));
+pub const PARENT_CHANNEL: EndpointCapability =
+    EndpointCapability::new(CapabilityPtr::from_raw_parts(CapabilityId::from_raw(1), CapabilityType::Endpoint));
 
 /// See [`KernelMessage::InterruptOccurred`]
 pub const KMSG_INTERRUPT_OCCURRED: usize = 0;

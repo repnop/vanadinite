@@ -10,9 +10,7 @@ use librust::{
     syscalls::endpoint::{self, IpcMessage},
 };
 
-pub use librust::capabilities::{
-    Capability, CapabilityDescription, CapabilityPtr, CapabilityRights, CapabilityWithDescription,
-};
+pub use librust::capabilities::{Capability, CapabilityPtr, CapabilityRights};
 pub use librust::syscalls::endpoint::{ChannelReadFlags, EndpointMessage};
 
 pub fn recv(flags: ChannelReadFlags) -> Result<IpcMessage, SyscallError> {
