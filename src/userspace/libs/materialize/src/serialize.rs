@@ -21,6 +21,7 @@ pub enum SerializeError {
     AllocationError,
     NotEnoughSpace,
     MisalignedPosition,
+    TooManyCapabilities,
 }
 
 impl From<core::alloc::AllocError> for SerializeError {

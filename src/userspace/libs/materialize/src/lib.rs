@@ -31,7 +31,7 @@ pub mod serialize;
 pub mod writer;
 
 pub use deserialize::{Deserialize, DeserializeError, Deserializer};
-pub use librust::capabilities::CapabilityWithDescription;
+use librust::capabilities::CapabilityPtr;
 pub use materialize_derive::*;
 pub use serialize::{Serialize, SerializeError, Serializer};
 
@@ -121,7 +121,7 @@ impl Serializable for librust::capabilities::Capability {
     type Primitive<'a> = primitives::Capability;
 }
 
-impl Serializable for CapabilityWithDescription {
+impl Serializable for CapabilityPtr {
     type Primitive<'a> = primitives::Capability;
 }
 

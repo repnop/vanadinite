@@ -157,8 +157,10 @@ pub struct CapabilitySerializer<'a> {
 
 impl<'a> CapabilitySerializer<'a> {
     pub fn serialize_capability(mut self, cap: librust::capabilities::Capability) -> Result<(), SerializeError> {
-        let index = self.serializer.capabilities.len();
-        self.serializer.capabilities.push(cap);
+        if self.serializer.capability.is_some() {
+            return Err(SerializeError::TooManyCapabilities);
+        }
+        self.serializer.capability = Some(cap);
         *self.serializer.integer(&mut self.token)? = index;
 
         Ok(())
