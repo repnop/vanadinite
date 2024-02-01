@@ -45,7 +45,7 @@ impl<'a> Deserializer<'a> {
 pub trait Deserialize<'de>: Serializable + Sized {
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        capabilities: Option<CapabilityPtr>,
+        capability: Option<Capability>,
     ) -> Result<Self, DeserializeError>;
 }
 
@@ -193,7 +193,7 @@ impl<'de, const LENGTH: usize, D: Deserialize<'de>> Deserialize<'de> for [D; LEN
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        capabilities: Option<CapabilityPtr>,
+        capability: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         primitive.map(|p| Ok(D::deserialize(p, capabilities).unwrap()))
     }
@@ -203,7 +203,7 @@ impl<'de, T: Deserialize<'de> + 'de> Deserialize<'de> for alloc::vec::Vec<T> {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        capabilities: Option<CapabilityPtr>,
+        capability: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         primitive.into_iter().try_fold(alloc::vec::Vec::new(), |mut v, p| {
             v.push(T::deserialize(p?, capabilities)?);
@@ -216,7 +216,7 @@ impl<'de, T: Deserialize<'de> + 'de, E: Deserialize<'de> + 'de> Deserialize<'de>
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        capabilities: Option<CapabilityPtr>,
+        capability: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         match primitive.discriminant()? {
             0 => Ok(Ok(T::deserialize(
@@ -236,7 +236,7 @@ impl<'de, T: Deserialize<'de> + 'de> Deserialize<'de> for Option<T> {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        capabilities: Option<CapabilityPtr>,
+        capability: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         match primitive.discriminant()? {
             0 => Ok(Some(T::deserialize(
@@ -253,7 +253,7 @@ impl<'de> Deserialize<'de> for librust::capabilities::Capability {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        capabilities: Option<CapabilityPtr>,
+        capability: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         capabilities.get(primitive.index).map(|cd| cd.capability).ok_or(DeserializeError::NotEnoughCapabilities)
     }
@@ -263,7 +263,7 @@ impl<'de> Deserialize<'de> for CapabilityPtr {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        capabilities: Option<CapabilityPtr>,
+        capability: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         capabilities.get(primitive.index).copied().ok_or(DeserializeError::NotEnoughCapabilities)
     }
@@ -278,7 +278,7 @@ macro_rules! tuple_deserialize {
         impl<'de, $($t: Deserialize<'de> + 'de,)+> Deserialize<'de> for ($($t,)+) {
             #[inline]
             #[allow(non_snake_case)]
-            fn deserialize(_primitive: <Self as Serializable>::Primitive<'de>, capabilities: Option<CapabilityPtr>,) -> Result<Self, DeserializeError> {
+            fn deserialize(_primitive: <Self as Serializable>::Primitive<'de>, capability: Option<Capability>,) -> Result<Self, DeserializeError> {
                 $(let ($t, _primitive) = _primitive.advance().and_then(|(p, s)| Ok((<$t as Deserialize<'de>>::deserialize(p, capabilities)?, s)))?;)+
                 Ok(($($t,)+))
             }
