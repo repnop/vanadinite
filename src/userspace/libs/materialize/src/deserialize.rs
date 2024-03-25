@@ -9,7 +9,7 @@ use crate::{
     primitives::{AlignedReadBuffer, Fields, Primitive, Struct},
     Serializable,
 };
-use librust::capabilities::CapabilityPtr;
+use librust::capabilities::{Capability, CapabilityPtr};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DeserializeError {
@@ -25,12 +25,12 @@ pub enum DeserializeError {
 
 pub struct Deserializer<'a> {
     buffer: &'a [u8],
-    capability: Option<CapabilityPtr>,
+    capability: Option<Capability>,
 }
 
 impl<'a> Deserializer<'a> {
-    pub fn new(buffer: &'a [u8], capabilities: Option<CapabilityPtr>) -> Self {
-        Self { buffer, capability: capabilities }
+    pub fn new(buffer: &'a [u8], capability: Option<Capability>) -> Self {
+        Self { buffer, capability }
     }
 
     #[track_caller]
@@ -53,7 +53,7 @@ impl<'de> Deserialize<'de> for () {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
@@ -63,7 +63,7 @@ impl<'de> Deserialize<'de> for u8 {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
@@ -73,7 +73,7 @@ impl<'de> Deserialize<'de> for i8 {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
@@ -83,7 +83,7 @@ impl<'de> Deserialize<'de> for u16 {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
@@ -93,7 +93,7 @@ impl<'de> Deserialize<'de> for i16 {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
@@ -103,7 +103,7 @@ impl<'de> Deserialize<'de> for u32 {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
@@ -113,7 +113,7 @@ impl<'de> Deserialize<'de> for i32 {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
@@ -123,7 +123,7 @@ impl<'de> Deserialize<'de> for u64 {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
@@ -133,7 +133,7 @@ impl<'de> Deserialize<'de> for i64 {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
@@ -143,7 +143,7 @@ impl<'de> Deserialize<'de> for usize {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
@@ -153,7 +153,7 @@ impl<'de> Deserialize<'de> for isize {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
@@ -163,7 +163,7 @@ impl<'de> Deserialize<'de> for &'de str {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
@@ -173,7 +173,7 @@ impl<'de> Deserialize<'de> for alloc::string::String {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(Self::from(primitive))
     }
@@ -183,7 +183,7 @@ impl<'de, F: for<'a> Fields<'a>> Deserialize<'de> for Struct<'de, F> {
     #[inline]
     fn deserialize(
         primitive: <Self as Serializable>::Primitive<'de>,
-        _: Option<CapabilityPtr>,
+        _: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         Ok(primitive)
     }
@@ -195,7 +195,7 @@ impl<'de, const LENGTH: usize, D: Deserialize<'de>> Deserialize<'de> for [D; LEN
         primitive: <Self as Serializable>::Primitive<'de>,
         capability: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
-        primitive.map(|p| Ok(D::deserialize(p, capabilities).unwrap()))
+        primitive.map(|p| Ok(D::deserialize(p, capability).unwrap()))
     }
 }
 
@@ -206,7 +206,7 @@ impl<'de, T: Deserialize<'de> + 'de> Deserialize<'de> for alloc::vec::Vec<T> {
         capability: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         primitive.into_iter().try_fold(alloc::vec::Vec::new(), |mut v, p| {
-            v.push(T::deserialize(p?, capabilities)?);
+            v.push(T::deserialize(p?, capability)?);
             Ok(v)
         })
     }
@@ -219,13 +219,12 @@ impl<'de, T: Deserialize<'de> + 'de, E: Deserialize<'de> + 'de> Deserialize<'de>
         capability: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
         match primitive.discriminant()? {
-            0 => Ok(Ok(T::deserialize(
-                primitive.associated_data::<<T as Serializable>::Primitive<'de>>()?,
-                capabilities,
-            )?)),
+            0 => {
+                Ok(Ok(T::deserialize(primitive.associated_data::<<T as Serializable>::Primitive<'de>>()?, capability)?))
+            }
             1 => Ok(Err(E::deserialize(
                 primitive.associated_data::<<E as Serializable>::Primitive<'de>>()?,
-                capabilities,
+                capability,
             )?)),
             _ => Err(DeserializeError::UnknownDiscriminantValue),
         }
@@ -241,7 +240,7 @@ impl<'de, T: Deserialize<'de> + 'de> Deserialize<'de> for Option<T> {
         match primitive.discriminant()? {
             0 => Ok(Some(T::deserialize(
                 primitive.associated_data::<<T as Serializable>::Primitive<'de>>()?,
-                capabilities,
+                capability,
             )?)),
             1 => Ok(None),
             _ => Err(DeserializeError::UnknownDiscriminantValue),
@@ -255,7 +254,7 @@ impl<'de> Deserialize<'de> for librust::capabilities::Capability {
         primitive: <Self as Serializable>::Primitive<'de>,
         capability: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
-        capabilities.get(primitive.index).map(|cd| cd.capability).ok_or(DeserializeError::NotEnoughCapabilities)
+        capability.ok_or(DeserializeError::NotEnoughCapabilities)
     }
 }
 
@@ -265,7 +264,7 @@ impl<'de> Deserialize<'de> for CapabilityPtr {
         primitive: <Self as Serializable>::Primitive<'de>,
         capability: Option<Capability>,
     ) -> Result<Self, DeserializeError> {
-        capabilities.get(primitive.index).copied().ok_or(DeserializeError::NotEnoughCapabilities)
+        capability.map(|c| c.cptr).ok_or(DeserializeError::NotEnoughCapabilities)
     }
 }
 
@@ -279,7 +278,7 @@ macro_rules! tuple_deserialize {
             #[inline]
             #[allow(non_snake_case)]
             fn deserialize(_primitive: <Self as Serializable>::Primitive<'de>, capability: Option<Capability>,) -> Result<Self, DeserializeError> {
-                $(let ($t, _primitive) = _primitive.advance().and_then(|(p, s)| Ok((<$t as Deserialize<'de>>::deserialize(p, capabilities)?, s)))?;)+
+                $(let ($t, _primitive) = _primitive.advance().and_then(|(p, s)| Ok((<$t as Deserialize<'de>>::deserialize(p, capability)?, s)))?;)+
                 Ok(($($t,)+))
             }
         }

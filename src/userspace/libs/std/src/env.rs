@@ -5,9 +5,8 @@
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{collections::BTreeMap, string::String};
-
-use crate::sync::SyncRefCell;
+use crate::{collections::BTreeMap, sync::SyncRefCell};
+use librust::capabilities::Capability;
 
 #[no_mangle]
 static mut ARGS: [usize; 2] = [0; 2];
@@ -29,12 +28,12 @@ pub fn a2() -> usize {
     unsafe { A2 }
 }
 
-pub(crate) static CAP_MAP: SyncRefCell<BTreeMap<String, CapabilityWithDescription>> = SyncRefCell::new(BTreeMap::new());
+pub(crate) static CAP_MAP: SyncRefCell<BTreeMap<String, Capability>> = SyncRefCell::new(BTreeMap::new());
 
-pub fn lookup_capability(service: &str) -> Option<CapabilityWithDescription> {
+pub fn lookup_capability(service: &str) -> Option<Capability> {
     CAP_MAP.borrow().get(service).copied()
 }
 
-pub fn register_capability(service: &str, cptr: CapabilityWithDescription) {
+pub fn register_capability(service: &str, cptr: Capability) {
     CAP_MAP.borrow_mut().insert(service.into(), cptr);
 }

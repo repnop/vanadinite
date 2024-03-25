@@ -161,7 +161,7 @@ impl<'a> CapabilitySerializer<'a> {
             return Err(SerializeError::TooManyCapabilities);
         }
         self.serializer.capability = Some(cap);
-        *self.serializer.integer(&mut self.token)? = index;
+        *self.serializer.integer(&mut self.token)? = crate::primitives::Capability::ID;
 
         Ok(())
     }

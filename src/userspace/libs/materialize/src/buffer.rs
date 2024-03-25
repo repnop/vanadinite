@@ -179,6 +179,12 @@ impl AlignedHeapBuffer {
     }
 }
 
+impl Default for AlignedHeapBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Buffer for AlignedHeapBuffer {
     type Error = core::alloc::AllocError;
 

@@ -71,20 +71,20 @@ impl ReservationToken {
 
 pub struct Serializer {
     buffer: AlignedHeapBuffer,
-    capabilities: alloc::vec::Vec<Capability>,
+    capability: Option<Capability>,
 }
 
 impl Serializer {
     pub fn new() -> Self {
-        Self { buffer: AlignedHeapBuffer::new(), capabilities: alloc::vec::Vec::new() }
+        Self { buffer: AlignedHeapBuffer::new(), capability: None }
     }
 
     pub fn into_buffer(self) -> AlignedHeapBuffer {
         self.buffer
     }
 
-    pub fn into_parts(self) -> (AlignedHeapBuffer, alloc::vec::Vec<Capability>) {
-        (self.buffer, self.capabilities)
+    pub fn into_parts(self) -> (AlignedHeapBuffer, Option<Capability>) {
+        (self.buffer, self.capability)
     }
 
     pub fn serialize<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), SerializeError> {
@@ -355,7 +355,7 @@ macro_rules! tuple_serialize {
                 &self,
                 _serializer: <Self::Primitive<'a> as PrimitiveSerializer<'a>>::Serializer,
             ) -> Result<(), SerializeError> {
-                $(let _serializer = _serializer.serialize_field(&&self.${index()})?; ${ignore(t)})+
+                $(let _serializer = _serializer.serialize_field(&&self.${index()})?; ${ignore($t)})+
 
                 Ok(())
             }

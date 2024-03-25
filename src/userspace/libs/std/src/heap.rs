@@ -16,7 +16,7 @@ use librust::{
     units::Bytes,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct TaskLocal(core::marker::PhantomData<*mut ()>);
 
 impl TaskLocal {
@@ -72,8 +72,11 @@ impl TaskLocalAllocator {
 
         // FIXME: this just straight up leaks, so uh, fix that sometime
         let Some(slab) = self.slabs.iter().find(|s| s.0 >= size) else {
-            match mem::allocate_virtual_memory(Bytes(layout.size()), MemoryPermissions::READ | MemoryPermissions::WRITE) {
-                Result::Ok(new_mem) => return Ok(NonNull::slice_from_raw_parts(NonNull::new(new_mem.cast()).unwrap(), layout.size())),
+            match mem::allocate_virtual_memory(Bytes(layout.size()), MemoryPermissions::READ | MemoryPermissions::WRITE)
+            {
+                Result::Ok(new_mem) => {
+                    return Ok(NonNull::slice_from_raw_parts(NonNull::new(new_mem.cast()).unwrap(), layout.size()))
+                }
                 Result::Err(_) => return Err(AllocError),
             }
         };

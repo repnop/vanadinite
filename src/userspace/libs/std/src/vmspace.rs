@@ -51,23 +51,26 @@ impl Vmspace {
     pub fn spawn(self, env: VmspaceSpawnEnv) -> Result<EndpointCapability, SyscallError> {
         let task_cptr = vmspace::spawn_vmspace(self.id, &self.name, env)?;
 
-        // FIXME: this is an inlined version of `temp_send_json`, replace this!
-        let serialized = json::to_bytes(&self.names);
-        let (cptr, ptr) = librust::syscalls::mem::allocate_shared_memory(
-            librust::units::Bytes(serialized.len()),
-            MemoryPermissions::READ | MemoryPermissions::WRITE,
-        )?;
-        unsafe { (*ptr)[..serialized.len()].copy_from_slice(&serialized) };
         if self.caps_to_send.is_empty() {
+            librust::syscalls::endpoint::send(task_cptr, EndpointMessage::default(), None)?;
+        } else {
+            // FIXME: this is an inlined version of `temp_send_json`, replace this!
+            let serialized = json::to_bytes(&self.names);
+            let (cptr, ptr) = librust::syscalls::mem::allocate_shared_memory(
+                librust::units::Bytes(serialized.len()),
+                MemoryPermissions::READ | MemoryPermissions::WRITE,
+            )?;
+            unsafe { (*ptr)[..serialized.len()].copy_from_slice(&serialized) };
+
             librust::syscalls::endpoint::send(
                 task_cptr,
-                EndpointMessage::default(),
+                EndpointMessage([self.caps_to_send.len(), 0, 0, 0, 0, 0, 0]),
                 Some(Capability { cptr, rights: CapabilityRights::READ }),
             )?;
-        } else {
-            let mut all_caps = vec![Capability { cptr, rights: CapabilityRights::READ }];
-            all_caps.extend_from_slice(&self.caps_to_send);
-            librust::syscalls::endpoint::send(task_cptr, EndpointMessage::default(), &all_caps)?;
+
+            for cap in self.caps_to_send {
+                librust::syscalls::endpoint::send(task_cptr, EndpointMessage::default(), Some(cap))?;
+            }
         }
 
         Ok(task_cptr)

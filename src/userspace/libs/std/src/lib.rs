@@ -18,7 +18,7 @@
     unsize
 )]
 #![no_std]
-#![allow(incomplete_features)]
+#![allow(incomplete_features, internal_features)]
 
 pub mod env;
 pub mod heap;

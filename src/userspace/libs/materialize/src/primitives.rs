@@ -331,20 +331,24 @@ impl<'a, DISCRIMINANT: Primitive<'a>> Primitive<'a> for Enum<'a, DISCRIMINANT> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
-pub struct Capability {
-    pub index: usize,
-}
+pub struct Capability;
 
 impl sealed::Sealed for Capability {}
 impl<'a> Primitive<'a> for Capability {
     const ID: u64 = 0xe6803b0bbf7d6641;
 
     fn extract(buffer: &mut AlignedReadBuffer<'a>) -> Result<Self, DeserializeError> {
-        Ok(Self { index: buffer.read()? })
+        let id = buffer.read::<u64>()?;
+
+        if id != Self::ID {
+            return Err(DeserializeError::MismatchedId { wanted: Self::ID, found: id });
+        }
+
+        Ok(Self)
     }
 
     fn layout() -> Layout {
-        Layout::new::<usize>()
+        Layout::new::<u64>()
     }
 }
 

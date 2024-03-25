@@ -6,8 +6,8 @@
 // obtain one at https://mozilla.org/MPL/2.0/.
 
 use librust::{
-    capabilities::{Capability, CapabilityDescription, CapabilityRights, CapabilityWithDescription},
-    syscalls::endpoint::{ChannelReadFlags, PARENT_CHANNEL},
+    capabilities::{Capability, CapabilityRights},
+    syscalls::endpoint::{ChannelReadFlags, IpcMessage, PARENT_CHANNEL},
 };
 
 #[naked]
@@ -58,32 +58,39 @@ fn lang_start<T>(main: fn() -> T, argc: isize, argv: *const *const u8, _: u8) ->
     let mut map = crate::env::CAP_MAP.borrow_mut();
 
     // FIXME: This is an inlined version of temp_read_json, replace this!
-    if let Ok((_, mut caps)) = crate::ipc::recv_with_all_caps(ChannelReadFlags::NONE) {
-        let names: Vec<String> = match caps.remove(0) {
-            CapabilityWithDescription {
-                capability: _,
-                description: CapabilityDescription::Memory { ptr, len, permissions: _ },
-            } => json::deserialize(unsafe { core::slice::from_raw_parts(ptr, len) })
-                .expect("failed to deserialize JSON in channel message"),
+    let Ok(IpcMessage { identifier, message, capability, .. }) = crate::ipc::recv(ChannelReadFlags::NONE) else {
+        panic!("unable to read initial spawn message");
+    };
+
+    if let Some(capability) = capability {
+        let mut names = match capability.cptr.get_memory_region() {
+            Some(region) if capability.rights & CapabilityRights::READ => {
+                json::deserialize::<Vec<String>>(unsafe { &*region })
+                    .expect("failed to deserialize JSON in channel message")
+                    .into_iter()
+            }
             _ => panic!("no or invalid mem cap"),
         };
 
-        for (name, cap) in names.into_iter().zip(caps) {
-            map.insert(name, cap);
-        }
-    }
+        for _ in 0..message.0[0] {
+            if let Ok(IpcMessage { identifier: nid, capability, .. }) = crate::ipc::recv(ChannelReadFlags::NONE) {
+                assert_eq!(identifier, nid, "heck");
 
-    map.insert(
-        "parent".into(),
-        CapabilityWithDescription {
-            capability: Capability {
-                cptr: PARENT_CHANNEL.get(),
-                rights: CapabilityRights::READ | CapabilityRights::WRITE,
-            },
-            description: CapabilityDescription::Channel,
-        },
-    );
-    drop(map);
+                match names.next().zip(capability) {
+                    Some((name, cap)) => {
+                        map.insert(name, cap);
+                    }
+                    None => break,
+                }
+            }
+        }
+
+        map.insert(
+            "parent".into(),
+            Capability { cptr: PARENT_CHANNEL.get(), rights: CapabilityRights::READ | CapabilityRights::WRITE },
+        );
+        drop(map);
+    }
 
     main();
     0
