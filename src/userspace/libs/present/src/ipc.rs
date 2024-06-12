@@ -11,78 +11,28 @@ use crate::{
 };
 use core::{future::Future, pin::Pin};
 use librust::{
-    capabilities::{Capability, CapabilityPtr, CapabilityWithDescription},
+    capabilities::{Capability, CapabilityPtr},
     error::SyscallError,
-    syscalls::endpoint::{self, ChannelReadFlags, EndpointMessage, IpcMessage, KERNEL_CHANNEL},
+    syscalls::endpoint::{self, ChannelReadFlags, EndpointCapability, EndpointMessage, IpcMessage},
 };
 use std::task::{Context, Poll};
 
 // TODO: fix all this garbage
 
-pub struct NewChannelListener(());
-
-impl NewChannelListener {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        Self(())
-    }
-}
-
-impl Future for NewChannelListener {
-    type Output = CapabilityPtr;
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut channels = NEW_IPC_CHANNELS.borrow_mut();
-        match channels.is_empty() {
-            false => Poll::Ready(channels.remove(0)),
-            true => {
-                EVENT_REGISTRY.register(BlockType::NewIpcChannel, cx.waker().clone());
-                Poll::Pending
-            }
-        }
-    }
-}
-
-impl Stream for NewChannelListener {
-    type Item = CapabilityPtr;
-
-    fn poll_next(self: Pin<&mut Self>, context: &mut Context) -> Poll<Option<Self::Item>> {
-        let mut channels = NEW_IPC_CHANNELS.borrow_mut();
-        match channels.is_empty() {
-            false => Poll::Ready(Some(channels.remove(0))),
-            true => {
-                EVENT_REGISTRY.register(BlockType::NewIpcChannel, context.waker().clone());
-                Poll::Pending
-            }
-        }
-    }
-}
-
-pub struct IpcChannel(CapabilityPtr);
+pub struct IpcChannel(EndpointCapability);
 
 impl IpcChannel {
     #[track_caller]
-    pub fn new(cptr: CapabilityPtr) -> Self {
+    pub fn new(cptr: EndpointCapability) -> Self {
         EVENT_REGISTRY.register_interest(BlockType::IpcEndpointMessage(cptr));
         Self(cptr)
     }
 
-    pub async fn read(&self, cap_buffer: &mut [CapabilityWithDescription]) -> Result<IpcMessage, SyscallError> {
+    pub async fn read(&self) -> Result<IpcMessage, SyscallError> {
         IpcRead(self, cap_buffer).await
     }
 
-    pub async fn read_with_all_caps(&self) -> Result<(EndpointMessage, Vec<CapabilityWithDescription>), SyscallError> {
-        let mut caps = Vec::new();
-        let IpcMessage { message, capabilities_remaining, .. } = self.read(&mut caps[..]).await?;
-
-        if capabilities_remaining > 0 {
-            caps.resize(capabilities_remaining, CapabilityWithDescription::default());
-            let _ = endpoint::recv(self.0, &mut caps[..], ChannelReadFlags::NONBLOCKING)?;
-        }
-
-        Ok((message, caps))
-    }
-
-    pub fn send(&self, msg: EndpointMessage, caps: &[Capability]) -> Result<(), SyscallError> {
+    pub fn send(&self, msg: EndpointMessage, caps: Option<Capability>) -> Result<(), SyscallError> {
         endpoint::send(self.0, msg, caps)
     }
 }
@@ -112,7 +62,7 @@ impl Stream for IpcMessageStream {
     fn poll_next(self: Pin<&mut Self>, context: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        match endpoint::recv(this.channel.0, &mut [], ChannelReadFlags::NONBLOCKING) {
+        match endpoint::recv(this.channel.0, ChannelReadFlags::NONBLOCKING) {
             Ok(rr) => {
                 let IpcMessage { message, capabilities_remaining, .. } = rr;
                 let mut caps = Vec::new();

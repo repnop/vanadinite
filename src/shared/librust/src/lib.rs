@@ -17,7 +17,6 @@
     never_type,
     ptr_metadata,
     slice_ptr_get,
-    slice_ptr_len,
     strict_provenance,
     try_trait_v2
 )]
