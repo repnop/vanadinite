@@ -1,2 +1,3 @@
 [workspace]
-members = ["collections", "librust", "sync", "volatile"]
+members = ["collections", "dynmem", "librust", "sync", "volatile"]
+resolver = "2"

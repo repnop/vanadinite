@@ -1,0 +1,16 @@
+version = 1
+SPDX-PackageName = "vanadinite"
+SPDX-PackageSupplier = "Wesley Norris <repnop@repnop.dev>"
+SPDX-PackageDownloadLocation = "https://github.com/repnop/vanadinite"
+
+[[annotations]]
+path = "**/**.vidl"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The vanadinite developers"
+SPDX-License-Identifier = "MPL-2.0"
+
+[[annotations]]
+path = ["**/Cargo.toml", "**/config.toml", "**/**.png", "rust-toolchain.toml", "rustfmt.toml", "README.md", ".gitignore", ".gitmodules", ".vscode/settings.json", ".vscode/snippets.code-snippets", ".vscode/license.code-snippets", "book/**", ".envrc", "flake.nix", "flake.lock"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The vanadinite developers"
+SPDX-License-Identifier = "CC0-1.0"

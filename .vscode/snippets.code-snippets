@@ -1,3 +1,4 @@
+// REUSE-IgnoreStart
 {
 	"license": {
 		"prefix": "license",
@@ -12,3 +13,4 @@
 		]
 	}
 }
+// REUSE-IgnoreEnd
